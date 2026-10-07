@@ -60,4 +60,4 @@ jobs:
           projectBaseDir: quizArenaFront
           args: >
             -Dsonar.projectKey=quizarenagt_front
-            -Dsonar.organization=QuizArenaGt
+            -Dsonar.organization=quizarenagt
