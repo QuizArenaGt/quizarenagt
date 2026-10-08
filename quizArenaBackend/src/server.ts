@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { prisma } from './database/prisma'
+import { error } from 'node:console';
 
 dotenv.config();
 
@@ -30,4 +31,7 @@ async function start() {
   
 }
 
-start();
+start().catch((error) => {
+  console.error('Erro durante inicialização', error);
+  process.exit(1)
+});
