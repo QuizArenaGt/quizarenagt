@@ -1,35 +1,81 @@
+
 import {
     BrowserRouter,
     Routes,
-    Route
+    Route,
+    useNavigate
 } from 'react-router-dom';
 
 import LoginForm from './features/auth/components/LoginForm/LoginForm';
-//import HomePage from './pages/HomePage';
+import RegisterForm from './features/auth/components/RegisterForm/RegisterForm';
+import RecoverPasswordForm from './features/auth/components/RecoverPasswordForm/RecoverPasswordForm';
+import DashboardForm from './features/Dashboard/components/DashboardForm';
 
-export default function App() {
+function AppRoutes() {
+    const navigate = useNavigate();
+
+    const handleLoginSuccess = (): void => {
+        navigate('/dashboard');
+    };
+
+    const handleRegisterSuccess = (): void => {
+        navigate('/login');
+    };
+
+    const handleRecoverPasswordSuccess = (): void => {
+        navigate('/login');
+    };
 
     return (
+        <Routes>
+            <Route
+                path="/dashboard"
+                element={<DashboardForm />}
+            />
+
+            <Route
+                path="/recover-password"
+                element={
+                    <RecoverPasswordForm
+                        onSuccess={handleRecoverPasswordSuccess}
+                    />
+                }
+            />
+
+            <Route
+                path="/register"
+                element={
+                    <RegisterForm
+                        onSuccess={handleRegisterSuccess}
+                    />
+                }
+            />
+
+            <Route
+                path="/login"
+                element={
+                    <LoginForm
+                        onSuccess={handleLoginSuccess}
+                    />
+                }
+            />
+
+            <Route
+                path="/"
+                element={
+                    <LoginForm
+                        onSuccess={handleLoginSuccess}
+                    />
+                }
+            />
+        </Routes>
+    );
+}
+
+export default function App() {
+    return (
         <BrowserRouter>
-
-            <Routes>
-
-                <Route
-                    path="/login"
-                    element={<LoginForm onSuccess={function (): void {
-                      throw new Error('Function not implemented.');
-                    } } />}
-                />
-
-                <Route
-                    path="/"
-                    element={<LoginForm onSuccess={function (): void {
-                      throw new Error('Function not implemented.');
-                    } } />}
-                />
-
-            </Routes>
-
+            <AppRoutes />
         </BrowserRouter>
     );
 }

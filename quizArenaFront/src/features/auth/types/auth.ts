@@ -8,3 +8,23 @@ export interface LoginResponse {
     userId: number;
     name: string;
 }
+
+export interface RecoverPasswordRequest {
+    email: string;
+}
+
+export interface RecoverPasswordResponse {
+    message: string;
+}
+
+export interface RegisterRequest {
+    name: string;
+    email: string;
+    password: string;
+    confirmPassword: string;
+}
+
+export interface RegisterResponse {
+    userId: number;
+    name: string;
+}
