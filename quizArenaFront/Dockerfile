@@ -2,7 +2,7 @@ FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --ignore-scripts
-# NOSONAR
+# sonarignore:S6470
 COPY . .
 USER node
 EXPOSE 5173
