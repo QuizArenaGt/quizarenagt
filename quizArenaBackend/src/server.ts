@@ -1,8 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { prisma } from './database/prisma'
-import { error } from 'node:console';
+import { prisma } from './database/prisma.js'
 
 dotenv.config();
 

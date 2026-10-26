@@ -20,7 +20,7 @@ services:
   backend:
     build:
       context: ./quizArenaBackend
-    image: quizArena_backend
+    image: quizarena_backend
     container_name: quizArena_backend
     restart: unless-stopped
     ports:
@@ -32,6 +32,7 @@ services:
       DATABASE_USER: ${POSTGRES_USER}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_NAME: ${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy

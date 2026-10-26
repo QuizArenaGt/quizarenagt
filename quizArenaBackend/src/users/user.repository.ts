@@ -1,5 +1,5 @@
 import { Prisma, type User } from "@prisma/client";
-import { prisma } from "../database/prisma";
+import { prisma } from "../database/prisma.js";
 
 export class UserRepository{
     async findById(id: string): Promise<User | null> {
