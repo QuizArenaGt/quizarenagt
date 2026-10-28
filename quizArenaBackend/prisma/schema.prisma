@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum Role {
+  USER
   ADMIN
   HOST
 }
@@ -17,7 +18,7 @@ model User {
   name      String
   email     String   @unique
   password  String
-  role      Role     @default(HOST)
+  role      Role     @default(USER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
