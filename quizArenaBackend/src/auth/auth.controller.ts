@@ -1,48 +1,29 @@
 
 import type { Request, Response } from "express";
 import { UserService } from "../users/user.service.js";
-
-const userService = new UserService();
+import { EmailAlreadyExistsError } from "../users/user.errors.js";
+import { validateRegisterUser } from "./register.dto.js";
 
 export class AuthController {
+    constructor(
+        private readonly userService = new UserService(),
+    ) {}
+
     async register(req: Request, res: Response): Promise<void> {
-        try {
-            const { name, email, password } = req.body;
+        const validation = validateRegisterUser(req.body);
 
-            const errors: Record<string, string> = {};
-
-            if (typeof name !== "string" || !name.trim()) {
-                errors.name = "O nome é obrigatório.";
-            }
-
-            if (
-                typeof email !== "string" ||
-                !email.trim()
-            ) {
-                errors.email = "O e-mail é obrigatório.";
-            } else if (
-                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-            ) {
-                errors.email = "Informe um e-mail válido.";
-            }
-
-            if (typeof password !== "string" || !password) {
-                errors.password = "A senha é obrigatória.";
-            }
-
-            if (Object.keys(errors).length > 0) {
-                res.status(400).json({
-                    message: "Dados inválidos.",
-                    errors,
-                });
-                return;
-            }
-
-            const user = await userService.register({
-                name: name.trim(),
-                email: email.trim(),
-                password,
+        if (!validation.success) {
+            res.status(400).json({
+                message: "Dados inválidos.",
+                errors: validation.errors,
             });
+            return;
+        }
+
+        try {
+            const user = await this.userService.register(
+                validation.data,
+            );
 
             res.status(201).json({
                 id: user.id,
@@ -51,18 +32,16 @@ export class AuthController {
                 role: user.role,
                 createdAt: user.createdAt,
             });
-        } catch (error) {
-            if (
-                error instanceof Error &&
-                error.message === "E-mail já cadastrado."
-            ) {
+        } catch (error: unknown) {
+            if (error instanceof EmailAlreadyExistsError) {
                 res.status(409).json({
                     message: error.message,
                 });
                 return;
             }
 
-            console.error("Erro ao cadastrar usuário:", error);
+            // Não retornar detalhes internos, senha ou hash ao cliente.
+            console.error("Erro interno ao cadastrar usuário.");
 
             res.status(500).json({
                 message: "Erro interno ao cadastrar usuário.",
