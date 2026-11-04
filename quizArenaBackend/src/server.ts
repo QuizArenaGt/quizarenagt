@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { prisma } from './database/prisma.js'
+import { prisma } from './database/prisma.js';
+import { authRoutes } from './auth/auth.routes.js';
+
 
 dotenv.config();
 
@@ -10,6 +12,7 @@ const PORT = process.env.PORT;
 
 app.use(cors());
 app.use(express.json());
+app.use("/auth", authRoutes);
 
 async function start() {
   try{
