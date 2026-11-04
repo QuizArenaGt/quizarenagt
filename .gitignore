@@ -1,4 +1,4 @@
 /frontend/node_modules
 /quizArenaBackend/node_modules
-/quizArenaBackend/dist
 .env
+/quizArenaBackend/dist
