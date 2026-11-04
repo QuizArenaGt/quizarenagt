@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -5,6 +6,7 @@ import { prisma } from './database/prisma.js';
 import { authRoutes } from './auth/auth.routes.js';
 
 
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 dotenv.config();
 
 const app = express();
