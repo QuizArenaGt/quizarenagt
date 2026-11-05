@@ -2,3 +2,5 @@
 /quizArenaBackend/node_modules
 .env
 /quizArenaBackend/dist
+/quizArenaBackend/.env.test
+/quizArenaBackend/coverage
