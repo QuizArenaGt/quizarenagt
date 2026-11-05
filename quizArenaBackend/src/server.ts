@@ -1,41 +1,43 @@
-import path from 'node:path';
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { prisma } from './database/prisma.js';
-import { authRoutes } from './auth/auth.routes.js';
+import path from "node:path";
+import dotenv from "dotenv";
 
+const rootEnvPath = path.resolve(process.cwd(), "../.env");
 
-dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
+dotenv.config({ path: rootEnvPath });
 dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT;
+async function start(): Promise<void> {
+    const [{ app }, { prisma }] = await Promise.all([
+        import("./app.js"),
+        import("./database/prisma.js"),
+    ]);
 
-app.use(cors());
-app.use(express.json());
-app.use("/auth", authRoutes);
+    const port = Number(process.env.PORT ?? 3000);
 
-async function start() {
-  try{
-    await prisma.$queryRaw`SELECT 1`;
-    console.log('Conexão com o PostgreSQL estabelecida com sucesso!');
+    try {
+        await prisma.$connect();
+        await prisma.$queryRaw`SELECT 1`;
 
-    app.get('/', (req, res) => {
-      res.status(200).json({ status: 'ok', message: 'Backend rodando com sucesso!' });
-    });
+        console.log("Conexão com o PostgreSQL estabelecida com sucesso!");
 
-    app.listen(PORT, () => {
-      console.log(`🚀 Servidor rodando em: http://localhost:${PORT}`);
-    });
-  } catch(error) {
-    console.error('Falha ao conectar no banco de dados: ', error);
-    process.exit(1);
-  }
-  
+        const server = app.listen(port, () => {
+            console.log(`Servidor rodando em: http://localhost:${port}`);
+        });
+
+        const shutdown = async () => {
+            server.close(async () => {
+                await prisma.$disconnect();
+                process.exit(0);
+            });
+        };
+
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
+    } catch (error: unknown) {
+        console.error("Falha ao iniciar o servidor:", error);
+        await prisma.$disconnect();
+        process.exit(1);
+    }
 }
 
-start().catch((error) => {
-  console.error('Erro durante inicialização', error);
-  process.exit(1)
-});
+start();
