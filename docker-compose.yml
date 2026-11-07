@@ -43,7 +43,7 @@ services:
   frontend:
     build:
       context: ./quizArenaFront
-    image: quizArena_frontend
+    image: quizarena_frontend
     container_name: quizArena_frontend
     restart: unless-stopped
     ports:

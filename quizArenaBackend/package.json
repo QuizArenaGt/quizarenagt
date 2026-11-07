@@ -8,12 +8,12 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "contract:emit": "prisma contract emit",
-    "db:test:migrate": "dotenv -e .env.test -- prisma migrate deploy",
-    "db:test:status": "dotenv -e .env.test -- prisma migrate status",
-    "test": "dotenv -e .env.test -- vitest run",
-    "test:watch": "dotenv -e .env.test -- vitest",
-    "test:coverage": "dotenv -e .env.test -- vitest run --coverage",
-    "test:integration": "dotenv -e .env.test -- vitest run tests/integration"
+    "db:test:migrate": "dotenv run -f .env.test -- prisma migrate deploy",
+    "db:test:status": "dotenv run -f .env.test -- prisma migrate status",
+    "test": "dotenv run -f .env.test -- vitest run",
+    "test:watch": "dotenv run -f .env.test -- vitest",
+    "test:coverage": "dotenv run -f .env.test -- vitest run --coverage",
+    "test:integration": "dotenv run -f .env.test -- vitest run tests/integration"
   },
   "keywords": [],
   "author": "",
@@ -24,11 +24,13 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.6",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.4",
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^5.1.0",
