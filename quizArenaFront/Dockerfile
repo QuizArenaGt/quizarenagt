@@ -4,6 +4,7 @@ COPY package*.json ./
 RUN npm ci --ignore-scripts
 # sonarignore:S6470
 COPY . .
+RUN chown -R node:node /app
 USER node
 EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
