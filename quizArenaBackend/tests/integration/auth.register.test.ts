@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
-import { compare } from "bcryptjs";
+import { compare, hash } from "bcryptjs";
 
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
@@ -133,5 +133,132 @@ describe("POST /auth/register - Integração", () => {
         });
 
         expect(users).toHaveLength(1);
+    });
+
+    it("deve retornar 400 quando os dados de login forem inválidos", async () => {
+        const response = await request(app)
+            .post("/auth/login")
+            .send({
+                email: "email-invalido",
+                password: "",
+            });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toHaveProperty("message", "Dados inválidos.");
+        expect(response.body).toHaveProperty("errors");
+    });
+
+    it("deve retornar 200 ao acessar /auth/me com token válido", async () => {
+        const password = "12345678";
+
+        const user = await prisma.user.create({
+            data: {
+                name: "João Silva",
+                email: "joao@email.com",
+                password: await hash(password, 12),
+            },
+        });
+
+        const loginResponse = await request(app)
+            .post("/auth/login")
+            .send({
+                email: user.email,
+                password,
+            });
+
+        const token = loginResponse.body.token;
+
+        const response = await request(app)
+            .get("/auth/me")
+            .set("Authorization", `Bearer ${token}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+            id: user.id,
+            role: user.role,
+        });
+    });
+
+    it("deve retornar 401 ao acessar /auth/me sem token", async () => {
+        const response = await request(app).get("/auth/me");
+
+        expect(response.status).toBe(401);
+        expect(response.body).toHaveProperty("message");
+    });
+
+    it("deve retornar 401 ao acessar /auth/me com token inválido", async () => {
+        const response = await request(app)
+            .get("/auth/me")
+            .set("Authorization", "Bearer token-invalido");
+
+        expect(response.status).toBe(401);
+        expect(response.body).toHaveProperty("message");
+    });
+
+    it("deve autenticar usuário com credenciais válidas e retornar JWT", async () => {
+        const password = "12345678";
+
+        await prisma.user.create({
+            data: {
+                name: "João Silva",
+                email: "joao@email.com",
+                password: await hash(password, 12),
+            },
+        });
+
+        const response = await request(app)
+            .post("/auth/login")
+            .send({
+                email: "joao@email.com",
+                password,
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.token).toBeDefined();
+
+        expect(response.body.user).toMatchObject({
+            id: expect.any(String),
+            name: "João Silva",
+            email: "joao@email.com",
+            role: "USER",
+        });
+
+        expect(response.body.user).not.toHaveProperty("password");
+    });
+
+    it("deve retornar 401 quando a senha estiver incorreta", async () => {
+        await prisma.user.create({
+            data: {
+                name: "João Silva",
+                email: "joao@email.com",
+                password: await hash("12345678", 12),
+            },
+        });
+
+        const response = await request(app)
+            .post("/auth/login")
+            .send({
+                email: "joao@email.com",
+                password: "senha-errada",
+            });
+
+        expect(response.status).toBe(401);
+        expect(response.body).toEqual({
+            message: "E-mail ou senha incorretos.",
+        });
+    });
+
+    it("deve retornar 401 quando o e-mail não estiver cadastrado", async () => {
+        const response = await request(app)
+            .post("/auth/login")
+            .send({
+                email: "inexistente@email.com",
+                password: "12345678",
+            });
+
+        expect(response.status).toBe(401);
+        expect(response.body).toEqual({
+            message: "E-mail ou senha incorretos.",
+        });
     });
 });
