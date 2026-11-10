@@ -1,20 +1,14 @@
-import type { LoginRequest, LoginResponse } from "../types/auth";
+import type {
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    RegisterResponse
+} from "../types/auth";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
 export async function login(request: LoginRequest): Promise<LoginResponse> {
-    console.log("Enviando requisição de login:", request);
-    /*    
-        Aqui eu simulo a chamada HTTP com um atraso de 1 segundo
-        TODO: Tirar isso daqui e remover o comentário pra chamar de fato.
-    */
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    return {
-        token: "fake-jwt-token",
-        userId: 1,
-        name: "Igor"
-    }
-    /*
-    const response = await fetch("http://localhost:3000/api/auth/login", {
+    const response = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -22,9 +16,31 @@ export async function login(request: LoginRequest): Promise<LoginResponse> {
         body: JSON.stringify(request),
     });
 
+    const data = await response.json();
+
     if (!response.ok) {
-        throw new Error("Erro ao fazer login");
+        throw new Error(data.message ?? "Erro ao fazer login.");
     }
-        return response.json();
-    */
+
+    return data as LoginResponse;
+}
+
+export async function register(
+    request: RegisterRequest
+): Promise<RegisterResponse> {
+    const response = await fetch(`${API_URL}/auth/register`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.message ?? "Erro ao cadastrar usuário.");
+    }
+
+    return data as RegisterResponse;
 }
