@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './LoginForm.css';
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { login } from '../../services/authService';
 import type { LoginRequest } from '../../types/auth';
@@ -12,8 +12,6 @@ interface LoginFormProps {
 }
 
 export default function LoginForm({ onSuccess }: LoginFormProps) {
-    const location = useLocation();
-    const registered = location.state?.registered === true;
     const [email, setEmail] = useState<string>('');
     const [password, setPassword] = useState<string>('');
     const [error, setError] = useState<string | null>(null);

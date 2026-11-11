@@ -1,6 +1,10 @@
 
-/* RESET DE ESTILOS GERAIS */
-* {
+/* RESET DE ESTILOS GERAIS
+ * Restrito às telas que usam .arena-background (login, cadastro e
+ * recuperação de senha). Antes era aplicado a toda a aplicação com "*".
+ * O :where() mantém especificidade zero, igual ao seletor "*" original,
+ * para que nenhuma regra existente perca prioridade. */
+:where(.arena-background, .arena-background *) {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -20,8 +24,11 @@
     --border-gray: #CCCCCC;
 }
 
-html,
-body {
+/* Ocupa a tela inteira e bloqueia a rolagem somente quando a tela de
+ * autenticação é a página atual (filha direta de #root). Antes valia para
+ * toda a aplicação e impedia a rolagem da landing page. */
+html:has(#root > .arena-background),
+html:has(#root > .arena-background) body {
     width: 100%;
     height: 100%;
     overflow: hidden;

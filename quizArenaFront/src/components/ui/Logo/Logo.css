@@ -1,0 +1,47 @@
+.ui-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.ui-logo svg {
+  flex-shrink: 0;
+}
+
+.ui-logo__wordmark {
+  display: inline-flex;
+  align-items: flex-start;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-black);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--color-text);
+}
+
+.ui-logo__highlight {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ui-logo__tag {
+  margin-left: var(--space-1);
+  padding: 2px 5px;
+  border-radius: 5px;
+  font-size: 0.5em;
+  line-height: 1.2;
+  background: var(--color-accent);
+  color: var(--color-text);
+}
+
+.ui-logo--dark .ui-logo__wordmark {
+  color: var(--color-white);
+}
+
+.ui-logo--dark .ui-logo__highlight {
+  background: var(--gradient-brand-light);
+  -webkit-background-clip: text;
+  background-clip: text;
+}

@@ -1,0 +1,22 @@
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* O amarelo nunca é usado como cor de texto sobre fundo claro, para
+   manter o contraste: fundo amarelo-claro com texto marrom. */
+.ui-badge--planned {
+  background: var(--color-highlight-soft);
+  color: var(--color-highlight-strong);
+}
+
+.ui-badge--available {
+  background: var(--color-success-soft);
+  color: var(--color-success-strong);
+}
