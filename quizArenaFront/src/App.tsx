@@ -7,9 +7,11 @@ import {
     useNavigate
 } from "react-router-dom";
 
+import HomePage from "./pages/HomePage";
 import LoginForm from "./features/auth/components/LoginForm/LoginForm";
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
-import HomePage from "./pages/HomePage";
+import DashboardForm from './features/Dashboard/components/DashboardForm';
+import RecoverPasswordForm from './features/auth/components/RecoverPasswordForm/RecoverPasswordForm';
 
 function LoginPage() {
     const navigate = useNavigate();
@@ -31,34 +33,71 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return children;
 }
 
+function AppRoutes() {
+    const navigate = useNavigate();
+
+    const handleLoginSuccess = (): void => {
+        navigate('/dashboard');
+    };
+
+    const handleRegisterSuccess = (): void => {
+        navigate('/login');
+    };
+
+    const handleRecoverPasswordSuccess = (): void => {
+        navigate('/login');
+    };
+        
+    return (
+        <Routes>
+            <Route
+                path="/dashboard"
+                element={<DashboardForm />}
+            />
+
+            <Route
+                path="/recover-password"
+                element={
+                    <RecoverPasswordForm
+                        onSuccess={handleRecoverPasswordSuccess}
+                    />
+                }
+            />
+
+            <Route
+                path="/register"
+                element={
+                    <RegisterForm
+                        onSuccess={handleRegisterSuccess}
+                    />
+                }
+            />
+
+            <Route
+                path="/login"
+                element={
+                    <LoginForm
+                        onSuccess={handleLoginSuccess}
+                    />
+                }
+            />
+
+            <Route
+                path="/"
+                element={
+                    <LoginForm
+                        onSuccess={handleLoginSuccess}
+                    />
+                }
+            />
+        </Routes>
+    );
+}
+
 export default function App() {
     return (
         <BrowserRouter>
-            <Routes>
-                <Route
-                    path="/login"
-                    element={<LoginPage />}
-                />
-
-                <Route
-                    path="/register"
-                    element={<RegisterForm />}
-                />
-
-                <Route
-                    path="/"
-                    element={
-                        <ProtectedRoute>
-                            <HomePage />
-                        </ProtectedRoute>
-                    }
-                />
-
-                <Route
-                    path="*"
-                    element={<Navigate to="/" replace />}
-                />
-            </Routes>
+            <AppRoutes />
         </BrowserRouter>
     );
 }
