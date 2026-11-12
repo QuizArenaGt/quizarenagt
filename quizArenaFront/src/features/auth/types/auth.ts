@@ -28,3 +28,11 @@ export interface RegisterResponse {
     role: "USER" | "ADMIN" | "HOST";
     createdAt: string;
 }
+
+export interface RecoverPasswordRequest {
+    email: string;
+}
+
+export interface RecoverPasswordResponse {
+    message: string;
+}

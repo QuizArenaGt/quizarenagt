@@ -6,7 +6,12 @@ import "../LoginForm/LoginForm.css";
 import { register } from "../../services/authService";
 import type { RegisterRequest } from "../../types/auth";
 
-export default function RegisterForm() {
+interface RegisterFormProps {
+    onSuccess: () => void;
+}
+
+export default function RegisterForm({ onSuccess
+}: RegisterFormProps) {
     const navigate = useNavigate();
 
     const [name, setName] = useState("");
@@ -50,6 +55,8 @@ export default function RegisterForm() {
                     state: { registered: true },
                 });
             }, 1500);
+
+            onSuccess();
         } catch (error) {
             setError(
                 error instanceof Error

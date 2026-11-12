@@ -1,6 +1,7 @@
 import type {
     LoginRequest,
     LoginResponse,
+    RecoverPasswordResponse,
     RegisterRequest,
     RegisterResponse
 } from "../types/auth";
@@ -43,4 +44,24 @@ export async function register(
     }
 
     return data as RegisterResponse;
+}
+
+export async function recoverPassword(request: { email: string }): Promise<{ message: string }> {
+    console.log("Enviando requisição de recuperação de senha:", request);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    const response = await fetch("http://localhost:3000/api/auth/recover-password", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error("Erro ao enviar instruções de recuperação de senha");
+    }
+    return data as RecoverPasswordResponse;
 }

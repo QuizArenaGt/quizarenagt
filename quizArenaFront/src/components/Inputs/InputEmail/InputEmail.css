@@ -1,0 +1,58 @@
+
+/* CONTAINER DO CAMPO */
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* RÓTULO DO CAMPO */
+.labelInput {
+    text-align: left;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--primary-blue);
+}
+
+/* CONTAINER DO INPUT E DO ÍCONE */
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+/* ÍCONE DO CAMPO */
+.input-icon {
+    position: absolute;
+    left: 14px;
+    width: 20px;
+    height: 20px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+}
+
+/* TAMANHO DO SVG */
+.input-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* CAMPO DE E-MAIL */
+.input-wrapper input {
+    width: 100%;
+    padding: 14px 16px 14px 44px;
+    border-radius: 12px;
+    border: 1px solid var(--border-gray);
+    font-size: 0.95rem;
+    color: var(--text-dark);
+    background-color: #FFFFFF;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* EFEITO AO FOCAR NO CAMPO */
+.input-wrapper input:focus {
+    border-color: var(--action-orange);
+    box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.15);
+}
