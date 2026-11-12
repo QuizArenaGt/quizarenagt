@@ -8,12 +8,12 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "contract:emit": "prisma contract emit",
-    "db:test:migrate": "dotenv run -f .env.test -- prisma migrate deploy",
-    "db:test:status": "dotenv run -f .env.test -- prisma migrate status",
-    "test": "dotenv run -f .env.test -- vitest run",
-    "test:watch": "dotenv run -f .env.test -- vitest",
-    "test:coverage": "dotenv run -f .env.test -- vitest run --coverage",
-    "test:integration": "dotenv run -f .env.test -- vitest run tests/integration"
+    "db:test:migrate": "dotenv -e .env.test -- prisma migrate deploy",
+    "db:test:status": "dotenv -e .env.test -- prisma migrate status",
+    "test": "dotenv -e .env.test -- vitest run",
+    "test:watch": "dotenv -e .env.test -- vitest",
+    "test:coverage": "dotenv -e .env.test -- vitest run --coverage",
+    "test:integration": "dotenv -e .env.test -- vitest run tests/integration"
   },
   "keywords": [],
   "author": "",

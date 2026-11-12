@@ -15,6 +15,7 @@ type CreateQuestionOptionData = {
 type CreateQuestionData = {
     statement: string;
     type: QuestionType;
+    roomId: string;
     options: CreateQuestionOptionData[];
 };
 
@@ -48,6 +49,7 @@ export class QuestionRepository {
             data: {
                 statement: data.statement,
                 type: data.type,
+                roomId: data.roomId,
                 options: {
                     create: data.options,
                 },

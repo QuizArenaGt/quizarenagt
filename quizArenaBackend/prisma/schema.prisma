@@ -14,13 +14,16 @@ enum Role {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(USER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String       @id @default(uuid())
+  name               String
+  email              String       @unique
+  password           String
+  role               Role         @default(USER)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  roomParticipations RoomPlayer[]
+
+  hostedRooms Room[]
 
   @@map("users")
 }
@@ -37,8 +40,10 @@ model Question {
   isActive  Boolean      @default(true)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+  roomId    String
+  room      Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
-  options QuestionOption[]
+  options       QuestionOption[]
 
   @@map("questions")
 }
@@ -51,4 +56,49 @@ model QuestionOption {
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@map("question_options")
+}
+
+enum GameMode {
+  CLASSIC
+}
+
+enum RoomStatus {
+  WAITING
+  IN_PROGRESS
+  FINISHED
+  CANCELLED
+}
+
+model Room {
+  id           String       @id @default(uuid())
+  code         String       @unique
+  hostId       String
+  maxPlayers   Int
+  questionTime Int
+  gameMode     GameMode     @default(CLASSIC)
+  status       RoomStatus   @default(WAITING)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  players      RoomPlayer[]
+  questions    Question[]
+
+  host          User           @relation(fields: [hostId], references: [id], onDelete: Restrict)
+
+  @@map("rooms")
+}
+
+model RoomPlayer {
+  id       String   @id @default(uuid())
+  roomId   String
+  userId   String?
+  nickname String
+  score    Int      @default(0)
+  joinedAt DateTime @default(now())
+
+  room Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([roomId, nickname])
+  @@unique([roomId, userId])
+  @@map("room_players")
 }
