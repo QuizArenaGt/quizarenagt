@@ -26,6 +26,7 @@ const questionModel = prisma.question as unknown as {
 const questionFixture = {
     id: "question-test-uuid",
     statement: "Qual é a capital do Brasil?",
+    roomId: "room-test-uuid",
     type: "MULTIPLE_CHOICE" as const,
     isActive: true,
     createdAt: new Date("2026-11-08T12:00:00.000Z"),
@@ -55,6 +56,7 @@ const questionWithOptionsFixture = {
 const createQuestionData = {
     statement: "Qual é a capital do Brasil?",
     type: "MULTIPLE_CHOICE" as const,
+    roomId: "room-test-uuid",
     options: [
         { text: "Brasília", isCorrect: true },
         { text: "São Paulo", isCorrect: false },
@@ -131,6 +133,7 @@ describe("QuestionRepository", () => {
                 data: {
                     statement: createQuestionData.statement,
                     type: createQuestionData.type,
+                    roomId: createQuestionData.roomId,
                     options: {
                         create: createQuestionData.options,
                     },
