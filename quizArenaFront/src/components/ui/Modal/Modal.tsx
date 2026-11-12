@@ -9,6 +9,8 @@ interface ModalProps {
     description?: string;
     /** Conteúdo exibido acima do título (ex.: logotipo). */
     header?: ReactNode;
+    /** "md" para diálogos simples; "lg" para formulários maiores. */
+    size?: 'md' | 'lg';
     children: ReactNode;
 }
 
@@ -22,7 +24,7 @@ interface ModalProps {
  * O conteúdo só é montado enquanto o modal está aberto, para que
  * formulários internos voltem ao estado inicial a cada abertura.
  */
-export default function Modal({ isOpen, onClose, title, description, header, children }: ModalProps) {
+export default function Modal({ isOpen, onClose, title, description, header, size = 'md', children }: ModalProps) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     const titleId = useId();
     const descriptionId = useId();
@@ -69,7 +71,7 @@ export default function Modal({ isOpen, onClose, title, description, header, chi
     return (
         <dialog
             ref={dialogRef}
-            className="ui-modal"
+            className={`ui-modal ui-modal--${size}`}
             aria-labelledby={titleId}
             aria-describedby={description ? descriptionId : undefined}
             onCancel={handleCancel}

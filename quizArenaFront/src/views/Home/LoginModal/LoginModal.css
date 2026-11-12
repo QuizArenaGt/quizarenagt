@@ -1,91 +1,30 @@
 /*
- * Adaptação visual do LoginForm existente quando exibido dentro do modal.
+ * Adaptação do LoginForm existente quando exibido dentro do modal.
  *
- * Estratégia: em vez de alterar LoginForm.css, redefinimos neste elemento
- * as variáveis CSS que o login já utiliza (--action-orange, --light-blue
- * etc.). Os filhos herdam os novos valores e o login passa a seguir a
- * identidade nova SOMENTE dentro do modal. Na rota /login nada muda.
+ * O LoginForm já usa a nova identidade visual (ver LoginForm.css). Aqui
+ * apenas desfazemos o layout de tela cheia: o painel da marca e o título
+ * são escondidos, pois o próprio modal mostra o logotipo e o título.
  */
-.login-modal {
-  --action-orange: var(--color-primary);
-  --action-orange-hover: var(--color-secondary);
-  --light-blue: var(--color-primary);
-  --primary-blue: var(--color-text);
-  --text-muted: var(--color-text-muted);
-  --text-dark: var(--color-text);
-  --border-gray: var(--color-border);
-}
-
-/* O reset do login define a fonte Poppins; no modal usamos a fonte da marca. */
-.login-modal * {
-  font-family: inherit;
-}
-
-/* Remove o fundo de tela cheia: o modal já fornece o fundo. */
 .login-modal .arena-background {
-  display: block;
-  height: auto;
+  min-height: 0;
   background: none;
-}
-
-.login-modal .arena-background::before {
-  display: none;
 }
 
 .login-modal .login-container {
-  max-width: none;
-  padding: 0;
+  display: block;
+  min-height: 0;
 }
 
-/* O cabeçalho antigo (escudo + "QUIZ ARENA") é substituído pelo
-   logotipo novo, exibido no topo do modal. */
-.login-modal .brand-header {
+.login-modal .auth-brand,
+.login-modal .auth-form-header {
   display: none;
 }
 
-.login-modal .login-card {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
-}
-
-.login-modal .btn-submit {
-  background: var(--gradient-brand);
-  box-shadow: var(--shadow-md);
-  font-size: var(--text-base);
-}
-
-.login-modal .btn-submit:hover {
-  box-shadow: var(--shadow-md);
-  filter: brightness(1.08);
-}
-
-.login-modal .btn-submit:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.login-modal .input-wrapper input:focus {
-  box-shadow: var(--focus-ring);
-}
-
-/* A classe .login-error não tem estilo no LoginForm.css; no modal ela
-   ganha destaque visual para que o erro do backend não passe despercebido. */
-.login-modal .login-error {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid #fecaca;
-  border-radius: var(--radius-md);
-  background: #fef2f2;
-  font-size: var(--text-sm);
-  color: #b91c1c;
+.login-modal .login-container > .login-card,
+.login-modal .login-container > .login-footer {
+  width: 100%;
 }
 
 .login-modal .login-footer {
   margin-top: var(--space-5);
-}
-
-.login-modal .footer-link.highlighted:hover {
-  color: var(--color-secondary);
 }

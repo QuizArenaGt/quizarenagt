@@ -4,6 +4,7 @@ import './RecoverPasswordForm.css';
 import { recoverPassword } from '../../services/authService';
 import type { RecoverPasswordRequest } from '../../types/auth';
 import InputEmail from '../../../../components/Inputs/InputEmail/InputEmail';
+import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
 
 interface RecoverPasswordFormProps {
   onSuccess: () => void;
@@ -41,15 +42,8 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
     return (
         <div className="arena-background">
             <main className="login-container">
-                <header className="brand-header">
-                    <div className="shield-logo">
-                        <div className="shield-half left"></div>
-                        <div className="shield-half right"></div>
-                        <div className="brain-star-core">✨</div>
-                    </div>
-                    <h1 className="brand-title">QUIZ ARENA</h1>
-                    <p className="brand-subtitle">O DESAFIO DO CONHECIMENTO</p>
-                </header>
+                {/* Sem título aqui: o formulário já tem o seu ("Recuperar Senha") */}
+                <AuthBrandPanel />
 
                 <form className="login-card" onSubmit={handleSubmit}>
                     <h2>Recuperar Senha</h2>

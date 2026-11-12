@@ -7,8 +7,7 @@
  * possa ser ajustada em um único lugar.
  *
  * Os nomes usam o prefixo de categoria (--color-, --space-, --radius-...)
- * para não colidir com as variáveis já existentes nas telas de
- * autenticação (--primary-blue, --action-orange etc.).
+ * para deixar claro a que grupo cada valor pertence.
  */
 :root {
   /* Cores da marca */

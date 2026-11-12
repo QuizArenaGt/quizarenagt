@@ -61,6 +61,16 @@
   border-color: var(--color-primary);
 }
 
+/* Ações destrutivas (ex.: excluir) */
+.ui-button--danger {
+  background: #dc2626;
+  color: var(--color-white);
+}
+
+.ui-button--danger:not(:disabled):hover {
+  background: #b91c1c;
+}
+
 .ui-button--ghost {
   background: transparent;
   color: var(--color-text);

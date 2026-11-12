@@ -13,6 +13,8 @@ interface LogoProps {
     variant?: 'light' | 'dark';
     /** Exibe o nome "QuizArenaGT" ao lado do símbolo. */
     showWordmark?: boolean;
+    /** Coloca o símbolo sobre um fundo branco, para fundos roxos (gradiente da marca). */
+    withBadge?: boolean;
     size?: number;
     className?: string;
 }
@@ -20,6 +22,7 @@ interface LogoProps {
 export default function Logo({
     variant = 'light',
     showWordmark = true,
+    withBadge = false,
     size = 40,
     className = '',
 }: LogoProps) {
@@ -28,7 +31,7 @@ export default function Logo({
     const gradientId = `logo-gradient-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
     return (
-        <span className={`ui-logo ui-logo--${variant} ${className}`.trim()}>
+        <span className={`ui-logo ui-logo--${variant}${withBadge ? ' ui-logo--badge' : ''} ${className}`.trim()}>
             <svg
                 width={size}
                 height={size}

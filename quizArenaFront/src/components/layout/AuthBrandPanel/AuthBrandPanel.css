@@ -1,0 +1,159 @@
+/* Painel da marca nas telas de autenticação.
+   O posicionamento no grid é definido em LoginForm.css (grid-area). */
+.auth-brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-12);
+  overflow: hidden;
+  background: var(--gradient-brand);
+  color: var(--color-white);
+}
+
+/* Brilho suave de fundo, apenas decorativo */
+.auth-brand::before {
+  content: '';
+  position: absolute;
+  top: -20%;
+  right: -30%;
+  width: 70%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--color-accent);
+  opacity: 0.25;
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+.auth-brand > * {
+  position: relative;
+}
+
+.auth-brand__logo {
+  align-self: flex-start;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+.auth-brand__logo:focus-visible,
+.auth-brand__back:focus-visible {
+  outline: 2px solid var(--color-white);
+  outline-offset: 4px;
+}
+
+.auth-brand__content {
+  max-width: 420px;
+}
+
+.auth-brand__headline {
+  font-size: clamp(var(--text-3xl), 3.5vw, var(--text-5xl));
+  font-weight: var(--weight-black);
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+}
+
+.auth-brand__headline span {
+  color: var(--color-highlight);
+}
+
+.auth-brand__text {
+  margin-top: var(--space-4);
+  font-size: var(--text-lg);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.auth-brand__options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 160px));
+  gap: var(--space-3);
+  margin-top: var(--space-10);
+  list-style: none;
+}
+
+.auth-brand__options li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 var(--space-3);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.auth-brand__options span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-black);
+}
+
+.auth-brand__options .auth-brand__option--correct {
+  border-color: var(--color-accent);
+  background: rgba(56, 189, 248, 0.25);
+}
+
+.auth-brand__option--correct span {
+  background: var(--color-accent);
+  color: var(--color-text);
+}
+
+.auth-brand__back {
+  align-self: flex-start;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+}
+
+.auth-brand__back:hover {
+  color: var(--color-white);
+  text-decoration: underline;
+}
+
+/* Título acima do formulário */
+.auth-form-header__title {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-black);
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
+  color: var(--color-text);
+}
+
+.auth-form-header__text {
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+/* MOBILE: o painel vira uma faixa compacta no topo */
+@media (max-width: 899px) {
+  .auth-brand {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-6);
+  }
+
+  .auth-brand__content {
+    display: none;
+  }
+
+  .auth-brand::before {
+    display: none;
+  }
+
+  .auth-brand__back {
+    align-self: center;
+    white-space: nowrap;
+  }
+
+  .auth-form-header__title {
+    font-size: var(--text-2xl);
+  }
+}

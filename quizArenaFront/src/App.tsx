@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 
 import HomeView from "./views/Home/HomeView";
+import PlayView from "./views/Play/PlayView";
 import LoginForm from "./features/auth/components/LoginForm/LoginForm";
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
 import DashboardForm from './features/Dashboard/components/DashboardForm';
@@ -59,6 +60,13 @@ function AppRoutes() {
                         onSuccess={handleLoginSuccess}
                     />
                 }
+            />
+
+            {/* Área do aluno: entrar em uma sala pelo código e jogar.
+                Sem login; por enquanto apenas a sala de demonstração. */}
+            <Route
+                path="/jogar"
+                element={<PlayView />}
             />
 
             {/* Landing page pública. O login continua disponível em /login

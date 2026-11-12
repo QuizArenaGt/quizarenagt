@@ -9,6 +9,14 @@
   flex-shrink: 0;
 }
 
+/* O símbolo é roxo: sobre fundos em gradiente da marca ele ganha um fundo
+   branco para manter o contraste. */
+.ui-logo--badge svg {
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--color-white);
+}
+
 .ui-logo__wordmark {
   display: inline-flex;
   align-items: flex-start;

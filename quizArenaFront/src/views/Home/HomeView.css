@@ -6,6 +6,9 @@
   display: flex;
   flex-direction: column;
   min-height: 100svh;
+  /* Evita rolagem horizontal causada pelos elementos flutuantes da
+     ilustração em telas muito estreitas */
+  overflow-x: clip;
   background: var(--gradient-page);
 }
 
@@ -425,6 +428,20 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-4);
+}
+
+.home-join__tag {
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.18);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.home-join__hint strong {
+  color: var(--color-primary);
 }
 
 /* Classe explícita para não herdar a regra global de h2 do

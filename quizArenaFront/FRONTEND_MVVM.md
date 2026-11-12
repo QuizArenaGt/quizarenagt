@@ -2,7 +2,7 @@
 
 Este documento explica como o frontend (`quizArenaFront/`) está organizado segundo o padrão **Model–View–ViewModel (MVVM)**, como o padrão foi adaptado ao React e como criar novas páginas seguindo a mesma estrutura.
 
-> **Situação atual:** o MVVM foi aplicado às funcionalidades novas (landing page, Header e Footer). Os módulos que já existiam (login, cadastro, recuperação de senha e Dashboard) **não foram refatorados**. A seção 8 explica como adaptá-los no futuro.
+> **Situação atual:** o MVVM foi aplicado às funcionalidades novas: landing page, Header, Footer, banco de perguntas com alternativas e área do aluno (`/jogar`, com ranking e pódio). Login, cadastro e recuperação de senha receberam **apenas a nova identidade visual**. No Dashboard, só a parte de perguntas passou para o MVVM; a de salas continua como estava. A seção 8 explica como adaptar o restante no futuro.
 
 ---
 
@@ -18,28 +18,58 @@ quizArenaFront/src/
 │   ├── tokens.css           #   cores, espaçamentos, tipografia, bordas, sombras
 │   └── global.css           #   reset e regras globais
 │
-├── models/                  # MODEL — tipos e dados do domínio
-│   ├── landing.ts           #   tipos (NavItem, PlatformFeature...)
-│   └── landingContent.ts    #   conteúdo da landing page
+├── models/                  # MODEL — tipos, dados e regras do domínio
+│   ├── landing.ts           #   tipos da landing (NavItem, PlatformFeature...)
+│   ├── landingContent.ts    #   conteúdo da landing page
+│   ├── question.ts          #   pergunta/alternativas (espelha o backend) + validação
+│   ├── room.ts              #   sala do professor + geração do código de 6 dígitos
+│   ├── roomReport.ts        #   relatório da sala e estatísticas gerais (funções puras)
+│   ├── profile.ts           #   perfil, licença, validações e máscara de telefone
+│   └── game.ts              #   partida, respostas, pontuação e ranking
+│
+├── services/                # SERVICE — acesso a dados (temporários, sem API ainda)
+│   ├── questionStorageService.ts  # banco de perguntas no localStorage
+│   ├── roomStorageService.ts      # salas do professor no localStorage
+│   ├── roomResultsService.ts      # resultados das partidas por sala
+│   ├── profileService.ts          # perfil (localStorage) e licença de demonstração
+│   ├── gameRoomService.ts         # entrada do aluno (123456 ou código de sala)
+│   └── mock/                      # perguntas de exemplo e jogadores simulados
 │
 ├── viewmodels/              # VIEWMODEL — estado e ações das telas
 │   ├── useLandingViewModel.ts
-│   └── useHeaderViewModel.ts
+│   ├── useHeaderViewModel.ts
+│   ├── useQuestionBankViewModel.ts   # lista de perguntas do painel
+│   ├── useQuestionFormViewModel.ts   # formulário criar/editar pergunta
+│   ├── useRoomsViewModel.ts          # salas: criar, editar, excluir, código, relatório
+│   ├── useOverviewViewModel.ts       # estatísticas da Visão Geral
+│   ├── useProfileViewModel.ts        # perfil do usuário e licença
+│   └── usePlayViewModel.ts           # partida do aluno (máquina de estados)
 │
 ├── views/                   # VIEW — páginas
-│   └── Home/
-│       ├── HomeView.tsx     #   página "/" (compõe as seções)
-│       ├── HomeView.css
-│       ├── sections/        #   seções da landing page
-│       └── LoginModal/      #   modal que envolve o LoginForm existente
+│   ├── Home/
+│   │   ├── HomeView.tsx     #   página "/" (compõe as seções)
+│   │   ├── sections/        #   seções da landing page
+│   │   └── LoginModal/      #   modal que envolve o LoginForm existente
+│   ├── Dashboard/
+│   │   ├── QuestionFormModal/  # modal de pergunta com alternativas
+│   │   ├── RoomCodeModal/      # código da sala em destaque, para projetar
+│   │   ├── RoomReportModal/    # resultados da sala finalizada
+│   │   ├── OverviewStats/      # estatísticas dos quizzes (Visão Geral)
+│   │   ├── ProfileModal/       # edição do perfil + licença
+│   │   └── components/RateBar  # barra de % de acerto
+│   └── Play/
+│       ├── PlayView.tsx     #   página "/jogar" (área do aluno)
+│       ├── steps/           #   código, apelido, espera, pergunta, resultado, final
+│       └── components/      #   RankingList e Podium
 │
 ├── components/              # VIEW — componentes reutilizáveis
-│   ├── layout/              #   Header, Footer
-│   ├── ui/                  #   Button, Logo, Modal, Badge, Icon, FeatureCard, SectionHeading
+│   ├── layout/              #   Header, Footer, AuthBrandPanel
+│   ├── ui/                  #   Button, Logo, Modal, ConfirmDialog, Badge, Icon, FeatureCard, SectionHeading
 │   └── Inputs/              #   (já existia) InputEmail, InputPassword
 │
 ├── hooks/                   # Hooks utilitários sem regra de tela
-│   └── useActiveSection.ts
+│   ├── useActiveSection.ts
+│   └── useFocusOnMount.ts
 │
 ├── features/                # (já existia) módulos por funcionalidade
 │   ├── auth/                #   login, cadastro, recuperação de senha
@@ -114,6 +144,7 @@ Regras do projeto:
 | `LoginModal` | `src/views/Home/LoginModal/LoginModal.tsx` | Envolve o `LoginForm` existente em um modal. |
 | `Header` | `src/components/layout/Header/Header.tsx` | Cabeçalho reutilizável. |
 | `Footer` | `src/components/layout/Footer/Footer.tsx` | Rodapé reutilizável. |
+| `AuthBrandPanel` | `src/components/layout/AuthBrandPanel/AuthBrandPanel.tsx` | Painel da marca e título das telas de login, cadastro e recuperação de senha. |
 | Componentes `ui/` | `src/components/ui/*` | Peças visuais genéricas (Button, Logo, Modal...). |
 
 Exemplo real: a `HomeView` não guarda estado nem decide nada; apenas liga o ViewModel às subviews.
@@ -152,6 +183,12 @@ export default function HomeView() {
 |---|---|---|
 | `useLandingViewModel` | `src/viewmodels/useLandingViewModel.ts` | conteúdo da página, `activeSectionId`, `isLoginOpen`, `openLogin`, `closeLogin`, `handleLoginSuccess` |
 | `useHeaderViewModel` | `src/viewmodels/useHeaderViewModel.ts` | `isMenuOpen`, `isScrolled`, `toggleMenu`, `closeMenu` (e fechamento com Esc ou ao voltar para desktop) |
+| `useQuestionBankViewModel` | `src/viewmodels/useQuestionBankViewModel.ts` | `questions`, `activeCount`, `openCreate`, `openEdit`, `saveQuestion`, `toggleStatus`; salva cada alteração pelo `questionStorageService` |
+| `useQuestionFormViewModel` | `src/viewmodels/useQuestionFormViewModel.ts` | rascunho da pergunta, `addChoice`/`removeChoice` (de 2 a 4), `setCorrectChoice`, `setTrueFalseAnswer`, `submit` (valida com `validateDraft` do Model) |
+| `useRoomsViewModel` | `src/viewmodels/useRoomsViewModel.ts` | `rooms`; formulário de criação/edição (nome, tema, tempo, `selectedQuestionIds`, filtro com vários temas); `submitRoom` (gera o código com `generateRoomCode` do Model); `updateStatus`; exclusão com confirmação; `displayedRoom`/`showCode`; `openReport` (relatório com `buildRoomReport`) |
+| `useOverviewViewModel` | `src/viewmodels/useOverviewViewModel.ts` | `stats` (quizzes realizados, participações, acerto médio, desempenho por sala, questões mais difíceis/fáceis) calculadas por `buildOverviewStats` |
+| `useProfileViewModel` | `src/viewmodels/useProfileViewModel.ts` | usuário logado (também usado no cabeçalho), `license`, rascunho do formulário, `errors` (de `validateProfile`), `submit` |
+| `usePlayViewModel` | `src/viewmodels/usePlayViewModel.ts` | fase da partida (`join → nickname → lobby → question ⇄ feedback → finished`), cronômetro, respostas, pontuação e `ranking` |
 
 Exemplo real: o ViewModel da landing decide o que acontece após o login, mas **não faz a autenticação**. Ela continua dentro do `LoginForm` existente.
 
@@ -311,7 +348,11 @@ Estes módulos foram **preservados como estavam**. Abaixo, a sugestão de adapta
 | `LoginForm` | Estado, validação, chamada ao `authService` e gravação no `localStorage` ficam no componente. | Extrair `useLoginViewModel` (email, senha, erro, carregamento, `submit`). O componente passa a só renderizar. |
 | `RegisterForm` | Validações (8 caracteres, confirmação de senha) e navegação dentro do componente. | Extrair `useRegisterViewModel`. Mover as regras de senha para um Model (`models/auth`). |
 | `RecoverPasswordForm` | Chama `/api/auth/recover-password`, rota que **não existe** no backend. Usa URL fixa e um atraso artificial de 1 s. | Ajustar o Service quando o endpoint existir. Extrair `useRecoverPasswordViewModel`. |
-| `DashboardForm` | Dados de exemplo fixos (salas, perguntas e "42 jogadores online"), sem integração com o backend. | Separar Models (`Room`, `Question`), criar Services quando houver endpoints e um `useDashboardViewModel`. |
+| `DashboardForm` | As abas de perguntas e de salas já usam ViewModels (`useQuestionBankViewModel` e `useRoomsViewModel`), salvando no navegador. A sala tem código gerado automaticamente e perguntas escolhidas pelo professor. O "42 jogadores online" continua fixo. | Quando o backend expor `/questions` e `/rooms`, trocar o `questionStorageService` e o `roomStorageService` por chamadas HTTP com as mesmas assinaturas. O código da sala deverá ser gerado pelo servidor, para garantir que seja único entre todos os professores. |
+| Área do aluno (`/jogar`) | Aceita a sala `123456` e os códigos das salas criadas no painel, mas só no **mesmo navegador**. Os outros jogadores são simulados, e o próprio aluno inicia a partida. | Quando houver salas no backend, implementar `joinRoom` com a API e receber o ranking e o início da partida em tempo real (ex.: WebSocket). O `usePlayViewModel` e as Views não precisam mudar de estrutura. |
+| Perfil do usuário | Nome e e-mail editados ficam só no navegador e são sobrescritos no próximo login. O telefone é guardado à parte. Licença e plano são dados fixos de demonstração. | Criar `PATCH /users/me` e o campo telefone no backend; definir planos e licenças reais. Depois, trocar o `profileService`. |
+| Resultados e relatórios | Registrados no navegador quando o aluno conclui a partida. Incluem jogadores simulados, fixos por sala. | Com partidas em tempo real, o servidor registra as respostas e o `roomResultsService` passa a buscá-las da API. |
+| Campo `theme` da pergunta | Existe apenas no frontend; o modelo `Question` do backend não tem tema. | Combinar com a equipe de backend se o campo será criado. |
 | `pages/HomePage.tsx` | Não está ligado a nenhuma rota. | Avaliar com a equipe se deve ser removido ou reaproveitado. |
 | Sessão do usuário | Leitura de `localStorage` repetida em vários componentes. A rota `/dashboard` não é protegida. | Criar um `authSessionService` (ler, gravar e limpar a sessão) e uma rota protegida. |
 | Header autenticado | O `Header` aceita a prop `actions` para receber o menu do usuário. | Criar `UserMenu` (nome, perfil e botão sair) alimentado por um ViewModel de sessão e passá-lo em `actions`. |
@@ -320,7 +361,9 @@ Estes módulos foram **preservados como estavam**. Abaixo, a sugestão de adapta
 
 ## 9. Decisões de integração com o código existente
 
-- **O login no modal reutiliza o `LoginForm` original.** O `LoginModal` apenas o envolve, e a aparência é ajustada redefinindo as variáveis CSS que o login já usa (`--action-orange`, `--light-blue`...) dentro de `.login-modal`. Na rota `/login`, nada muda.
-- **`LoginForm.css` teve só o escopo das regras globais ajustado.** As regras de `*` e de `html, body`, inclusive o `overflow: hidden` que travava a rolagem de qualquer página, passaram a valer apenas quando uma tela de autenticação é a página atual. Nenhuma regra visual do login foi alterada.
+- **O login no modal reutiliza o `LoginForm` original.** O `LoginModal` apenas o envolve e, via CSS, esconde o painel lateral da marca, já que o modal mostra o próprio logotipo e título.
+- **Telas de autenticação com a nova identidade.** O `LoginForm.css`, compartilhado por login, cadastro e recuperação de senha, foi reescrito no layout de tela dividida, mantendo todos os nomes de classe originais. No JSX dessas telas, a única mudança foi trocar o bloco do logo antigo (escudo + "QUIZ ARENA") pelo `AuthBrandPanel`. Estados, validações, chamadas ao `authService` e navegação não mudaram. O `overflow: hidden` global, que travava a rolagem e cortava o formulário de cadastro em telas baixas, foi removido.
+- **Dashboard no tema claro.** O `DashboardForm.css` foi reescrito com os tokens da identidade, mantendo os nomes de classe e ganhando um layout para celular (o menu lateral vira uma barra no topo). No JSX, só mudaram o logo da barra lateral (agora `<Logo />`) e um estilo inline, que virou a classe `room-finished-label`.
+- **Campos compartilhados** (`InputEmail.css` e `InputPassword.css`) passaram a usar os tokens em vez das variáveis antigas (`--action-orange`, `--primary-blue`...).
 - **Prefixos de classe:** `ui-`, `site-` e `home-`. Evitam colisão com classes globais existentes, como `.login-footer`, `.footer-link`, `.input-wrapper` e a regra `h2` do `RecoverPasswordForm.css`.
 - **Sem dependências novas:** ícones em SVG próprio, modal com o `<dialog>` nativo e a fonte do sistema.

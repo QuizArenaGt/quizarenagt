@@ -5,6 +5,7 @@ import "../LoginForm/LoginForm.css";
 
 import { register } from "../../services/authService";
 import type { RegisterRequest } from "../../types/auth";
+import AuthBrandPanel from "../../../../components/layout/AuthBrandPanel/AuthBrandPanel";
 
 interface RegisterFormProps {
     onSuccess: () => void;
@@ -71,16 +72,10 @@ export default function RegisterForm({ onSuccess
     return (
         <div className="arena-background">
             <main className="login-container">
-                <header className="brand-header">
-                    <div className="shield-logo">
-                        <div className="shield-half left"></div>
-                        <div className="shield-half right"></div>
-                        <div className="brain-star-core">✨</div>
-                    </div>
-
-                    <h1 className="brand-title">QUIZ ARENA</h1>
-                    <p className="brand-subtitle">O DESAFIO DO CONHECIMENTO</p>
-                </header>
+                <AuthBrandPanel
+                    title="Crie sua conta"
+                    description="Leva menos de um minuto para começar."
+                />
 
                 <form className="login-card" onSubmit={handleSubmit}>
                     <div className="input-group">
