@@ -3,35 +3,15 @@ import {
     BrowserRouter,
     Routes,
     Route,
-    Navigate,
     useNavigate
 } from "react-router-dom";
 
-import HomePage from "./pages/HomePage";
+import HomeView from "./views/Home/HomeView";
+import PlayView from "./views/Play/PlayView";
 import LoginForm from "./features/auth/components/LoginForm/LoginForm";
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
 import DashboardForm from './features/Dashboard/components/DashboardForm';
 import RecoverPasswordForm from './features/auth/components/RecoverPasswordForm/RecoverPasswordForm';
-
-function LoginPage() {
-    const navigate = useNavigate();
-
-    function handleLoginSuccess() {
-        navigate("/");
-    }
-
-    return <LoginForm onSuccess={handleLoginSuccess} />;
-}
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-        return <Navigate to="/login" replace />;
-    }
-
-    return children;
-}
 
 function AppRoutes() {
     const navigate = useNavigate();
@@ -47,7 +27,7 @@ function AppRoutes() {
     const handleRecoverPasswordSuccess = (): void => {
         navigate('/login');
     };
-        
+
     return (
         <Routes>
             <Route
@@ -82,13 +62,18 @@ function AppRoutes() {
                 }
             />
 
+            {/* Área do aluno: entrar em uma sala pelo código e jogar.
+                Sem login; por enquanto apenas a sala de demonstração. */}
+            <Route
+                path="/jogar"
+                element={<PlayView />}
+            />
+
+            {/* Landing page pública. O login continua disponível em /login
+                e também é aberto em um modal a partir desta página. */}
             <Route
                 path="/"
-                element={
-                    <LoginForm
-                        onSuccess={handleLoginSuccess}
-                    />
-                }
+                element={<HomeView />}
             />
         </Routes>
     );

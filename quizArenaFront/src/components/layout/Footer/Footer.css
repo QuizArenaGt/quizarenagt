@@ -1,0 +1,74 @@
+/* Prefixo "site-footer" para não colidir com .login-footer e .footer-link,
+   classes globais do LoginForm.css. */
+.site-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+  background: var(--color-dark-surface);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.site-footer__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: var(--space-10);
+  padding-bottom: var(--space-12);
+}
+
+.site-footer__description {
+  max-width: 380px;
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+/* Classe explícita para não herdar a regra global de h2 do
+   RecoverPasswordForm.css. */
+.site-footer__heading {
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-white);
+}
+
+.site-footer__links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+}
+
+.site-footer__link {
+  font-size: var(--text-sm);
+  color: rgba(255, 255, 255, 0.72);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.site-footer__link:hover {
+  color: var(--color-white);
+}
+
+.site-footer__link:focus-visible {
+  outline-color: var(--color-accent);
+}
+
+.site-footer__bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-block: var(--space-6);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 767px) {
+  .site-footer__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .site-footer__about {
+    grid-column: 1 / -1;
+  }
+}

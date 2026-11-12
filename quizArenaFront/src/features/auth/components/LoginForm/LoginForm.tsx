@@ -1,19 +1,18 @@
 import React, { useState } from 'react';
 import './LoginForm.css';
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { login } from '../../services/authService';
 import type { LoginRequest } from '../../types/auth';
 import InputEmail from '../../../../components/Inputs/InputEmail/InputEmail';
 import InputPassword from '../../../../components/Inputs/InputPassword/InputPassword';
+import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
 
 interface LoginFormProps {
     onSuccess: () => void;
 }
 
 export default function LoginForm({ onSuccess }: LoginFormProps) {
-    const location = useLocation();
-    const registered = location.state?.registered === true;
     const [email, setEmail] = useState<string>('');
     const [password, setPassword] = useState<string>('');
     const [error, setError] = useState<string | null>(null);
@@ -50,15 +49,10 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
     return (
         <div className="arena-background">
             <main className="login-container">
-                <header className="brand-header">
-                    <div className="shield-logo">
-                        <div className="shield-half left"></div>
-                        <div className="shield-half right"></div>
-                        <div className="brain-star-core">✨</div>
-                    </div>
-                    <h1 className="brand-title">QUIZ ARENA</h1>
-                    <p className="brand-subtitle">O DESAFIO DO CONHECIMENTO</p>
-                </header>
+                <AuthBrandPanel
+                    title="Bem-vindo de volta!"
+                    description="Entre com seu e-mail e senha para continuar."
+                />
 
                 <form className="login-card" onSubmit={handleSubmit}>
                     <InputEmail 
