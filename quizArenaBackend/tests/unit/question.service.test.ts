@@ -17,10 +17,12 @@ const validData: CreateQuestionDto = {
         { text: "Rio de Janeiro", isCorrect: false },
         { text: "Salvador", isCorrect: false },
     ],
+    roomId: "room-test-uuid",
 };
 
 const questionFixture: Question & { options: QuestionOption[] } = {
     id: "question-test-uuid",
+    roomId: "room-test-uuid",
     statement: validData.statement,
     type: validData.type,
     isActive: true,
@@ -55,6 +57,7 @@ describe("QuestionService", () => {
 
         expect(repository.create).toHaveBeenCalledTimes(1);
         expect(repository.create).toHaveBeenCalledWith({
+            roomId: validData.roomId,
             statement: validData.statement,
             type: QuestionType.MULTIPLE_CHOICE,
             options: validData.options,

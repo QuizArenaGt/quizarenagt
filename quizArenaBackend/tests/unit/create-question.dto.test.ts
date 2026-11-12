@@ -9,18 +9,22 @@ const validOptions = [
     { text: "Salvador", isCorrect: false },
 ];
 
+const validRoomId = "room-test-uuid";
+
 describe("validateCreateQuestion", () => {
     it("deve aceitar dados válidos de criação de pergunta", () => {
         const result = validateCreateQuestion({
             statement: "Qual é a capital do Brasil?",
             type: QuestionType.MULTIPLE_CHOICE,
             options: validOptions,
+            roomId: validRoomId,
         });
 
         expect(result.success).toBe(true);
 
         if (result.success) {
             expect(result.data).toEqual({
+                roomId: validRoomId,
                 statement: "Qual é a capital do Brasil?",
                 type: QuestionType.MULTIPLE_CHOICE,
                 options: validOptions,
@@ -32,6 +36,7 @@ describe("validateCreateQuestion", () => {
         const result = validateCreateQuestion({
             statement: "  Qual é a capital do Brasil?  ",
             options: validOptions,
+            roomId: validRoomId,
         });
 
         expect(result.success).toBe(true);
@@ -39,6 +44,7 @@ describe("validateCreateQuestion", () => {
         if (result.success) {
             expect(result.data.statement).toBe("Qual é a capital do Brasil?");
             expect(result.data.type).toBe(QuestionType.MULTIPLE_CHOICE);
+            expect(result.data.roomId).toBe(validRoomId);
         }
     });
 
@@ -193,5 +199,30 @@ describe("validateCreateQuestion", () => {
         });
 
         expect(resultNonObjectOption.success).toBe(false);
+    });
+
+    it("deve rejeitar roomId ausente ou vazio", () => {
+        const resultEmpty = validateCreateQuestion({
+            roomId: "   ",
+            statement: "Qual é a capital do Brasil?",
+            options: validOptions,
+        });
+
+        expect(resultEmpty.success).toBe(false);
+
+        if (!resultEmpty.success) {
+            expect(resultEmpty.errors).toHaveProperty("roomId");
+        }
+
+        const resultMissing = validateCreateQuestion({
+            statement: "Qual é a capital do Brasil?",
+            options: validOptions,
+        });
+
+        expect(resultMissing.success).toBe(false);
+
+        if (!resultMissing.success) {
+            expect(resultMissing.errors).toHaveProperty("roomId");
+        }
     });
 });
