@@ -1,7 +1,11 @@
+
 import type { Request, Response } from "express";
 import { QuestionService } from "./question.service.js";
-import { validateCreateQuestion } from "./create-question.dto.js";
-import { InvalidQuestionDataError } from "./question.errors.js";
+import {
+    InvalidQuestionDataError,
+    QuestionRoomAccessDeniedError,
+    QuestionRoomNotFoundError,
+} from "./question.errors.js";
 
 export class QuestionController {
     constructor(
@@ -9,20 +13,18 @@ export class QuestionController {
     ) {}
 
     async create(req: Request, res: Response): Promise<void> {
-        const validation = validateCreateQuestion(req.body);
-
-        if (!validation.success) {
-            res.status(400).json({
-                message: "Dados inválidos.",
-                errors: validation.errors,
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
             });
             return;
         }
 
         try {
-            const question = await this.questionService.createQuestion(
-                validation.data,
-            );
+            const question = await this.questionService.createQuestion({
+                ...req.body,
+                hostId: req.user.id,
+            });
 
             res.status(201).json(question);
         } catch (error: unknown) {
@@ -30,6 +32,20 @@ export class QuestionController {
                 res.status(400).json({
                     message: "Dados inválidos.",
                     errors: error.errors,
+                });
+                return;
+            }
+
+            if (error instanceof QuestionRoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof QuestionRoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
                 });
                 return;
             }

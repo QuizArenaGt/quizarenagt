@@ -1,9 +1,14 @@
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 import { QuestionType } from "@prisma/client";
 
 import { QuestionController } from "../../src/questions/question.controller.js";
-import { InvalidQuestionDataError } from "../../src/questions/question.errors.js";
+import {
+    InvalidQuestionDataError,
+    QuestionRoomAccessDeniedError,
+    QuestionRoomNotFoundError,
+} from "../../src/questions/question.errors.js";
 import type { QuestionService } from "../../src/questions/question.service.js";
 
 describe("QuestionController", () => {
@@ -11,10 +16,22 @@ describe("QuestionController", () => {
         createQuestion: ReturnType<typeof vi.fn>;
     };
     let controller: QuestionController;
-    let req: Partial<Request>;
+    type AuthenticatedRequest = Request & {
+        user: {
+            id: string;
+            role: "HOST";
+        };
+    };
+
+    let req: Partial<AuthenticatedRequest>;
     let res: {
         status: ReturnType<typeof vi.fn>;
         json: ReturnType<typeof vi.fn>;
+    };
+
+    const authenticatedUser = {
+        id: "authenticated-host-uuid",
+        role: "HOST" as const,
     };
 
     const validBody = {
@@ -40,6 +57,7 @@ describe("QuestionController", () => {
 
         req = {
             body: validBody,
+            user: authenticatedUser,
         };
 
         res = {
@@ -52,24 +70,18 @@ describe("QuestionController", () => {
         vi.restoreAllMocks();
     });
 
-    it("deve retornar 400 quando o payload for inválido", async () => {
-        req.body = {
-            statement: "",
-            options: [],
-        };
+    it("deve retornar 401 quando não houver usuário autenticado", async () => {
+        req.user = undefined as unknown as AuthenticatedRequest["user"];
 
         await controller.create(
             req as Request,
             res as unknown as Response,
         );
 
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith(
-            expect.objectContaining({
-                message: "Dados inválidos.",
-                errors: expect.any(Object),
-            }),
-        );
+        expect(res.status).toHaveBeenCalledWith(401);
+        expect(res.json).toHaveBeenCalledWith({
+            message: "Autenticação necessária.",
+        });
         expect(questionService.createQuestion).not.toHaveBeenCalled();
     });
 
@@ -97,9 +109,31 @@ describe("QuestionController", () => {
             res as unknown as Response,
         );
 
-        expect(questionService.createQuestion).toHaveBeenCalledWith(validBody);
+        expect(questionService.createQuestion).toHaveBeenCalledWith({
+            ...validBody,
+            hostId: authenticatedUser.id,
+        });
         expect(res.status).toHaveBeenCalledWith(201);
         expect(res.json).toHaveBeenCalledWith(createdQuestion);
+    });
+
+    it("deve utilizar o ID do usuário autenticado, ignorando hostId enviado no body", async () => {
+        req.body = {
+            ...validBody,
+            hostId: "fake-host-uuid",
+        };
+
+        questionService.createQuestion.mockResolvedValue({});
+
+        await controller.create(
+            req as Request,
+            res as unknown as Response,
+        );
+
+        expect(questionService.createQuestion).toHaveBeenCalledWith({
+            ...validBody,
+            hostId: authenticatedUser.id,
+        });
     });
 
     it("deve retornar 400 quando o service lançar InvalidQuestionDataError", async () => {
@@ -121,10 +155,42 @@ describe("QuestionController", () => {
         });
     });
 
+    it("deve retornar 404 quando a sala não existir", async () => {
+        questionService.createQuestion.mockRejectedValue(
+            new QuestionRoomNotFoundError(),
+        );
+
+        await controller.create(
+            req as Request,
+            res as unknown as Response,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(404);
+        expect(res.json).toHaveBeenCalledWith({
+            message: "Sala não encontrada.",
+        });
+    });
+
+    it("deve retornar 403 quando o usuário não for o host da sala", async () => {
+        questionService.createQuestion.mockRejectedValue(
+            new QuestionRoomAccessDeniedError(),
+        );
+
+        await controller.create(
+            req as Request,
+            res as unknown as Response,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(403);
+        expect(res.json).toHaveBeenCalledWith({
+            message: "Você não tem permissão para adicionar perguntas nesta sala.",
+        });
+    });
+
     it("deve retornar 500 quando ocorrer um erro inesperado", async () => {
         const consoleSpy = vi
             .spyOn(console, "error")
-            .mockImplementation(() => {});
+            .mockImplementation(() => { });
 
         questionService.createQuestion.mockRejectedValue(
             new Error("Erro inesperado no banco"),
