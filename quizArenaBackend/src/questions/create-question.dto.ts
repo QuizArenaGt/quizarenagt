@@ -6,6 +6,7 @@ export type CreateQuestionOptionDto = {
 };
 
 export type CreateQuestionDto = {
+    roomId: string;
     statement: string;
     type: QuestionType;
     options: CreateQuestionOptionDto[];
@@ -49,7 +50,14 @@ export function validateCreateQuestion(
     }
 
     const payload = body as Record<string, unknown>;
-    const { statement, type, options } = payload;
+    const { roomId, statement, type, options } = payload;
+
+    const normalizedRoomId =
+        typeof roomId === "string" ? roomId.trim() : "";
+
+    if (!normalizedRoomId) {
+        errors.roomId = "O identificador da sala é obrigatório.";
+    }
 
     const normalizedStatement =
         typeof statement === "string" ? statement.trim() : "";
@@ -129,6 +137,7 @@ export function validateCreateQuestion(
     return {
         success: true,
         data: {
+            roomId: normalizedRoomId,
             statement: normalizedStatement,
             type: resolvedType,
             options: normalizedOptions,

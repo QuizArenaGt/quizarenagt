@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { QuestionType, Role } from "@prisma/client";
-
+import { randomUUID } from "node:crypto";
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
 import { JwtService } from "../../src/auth/jwt.service.js";
@@ -9,10 +9,9 @@ import { JwtService } from "../../src/auth/jwt.service.js";
 describe("POST /questions - Integração", () => {
     const jwtService = new JwtService();
 
-    const adminToken = jwtService.generate({
-        id: "admin-user-id",
-        role: Role.ADMIN,
-    });
+    let adminToken: string;
+    let roomId: string;
+    let adminId: string;
 
     const userToken = jwtService.generate({
         id: "regular-user-id",
@@ -25,6 +24,7 @@ describe("POST /questions - Integração", () => {
     });
 
     const validQuestionPayload = {
+        roomId: "",
         statement: "Qual é o maior planeta do Sistema Solar?",
         type: QuestionType.MULTIPLE_CHOICE,
         options: [
@@ -37,14 +37,57 @@ describe("POST /questions - Integração", () => {
 
     beforeAll(async () => {
         await prisma.$connect();
+
+        const suffix = randomUUID();
+
+        const admin = await prisma.user.create({
+            data: {
+                name: "Admin de Teste",
+                email: `admin-${suffix}@test.com`,
+                password: "test-password-hash",
+                role: Role.ADMIN,
+            },
+        });
+
+        adminId = admin.id;
+
+        const room = await prisma.room.create({
+            data: {
+                code: `TEST-${suffix}`,
+                hostId: admin.id,
+                maxPlayers: 10,
+                questionTime: 20,
+            },
+        });
+
+        roomId = room.id;
+        validQuestionPayload.roomId = room.id;
+
+        adminToken = jwtService.generate({
+            id: admin.id,
+            role: Role.ADMIN,
+        });
     });
 
     beforeEach(async () => {
-        await prisma.question.deleteMany();
+        await prisma.question.deleteMany({
+            where: { roomId },
+        });
     });
 
     afterAll(async () => {
-        await prisma.question.deleteMany();
+        if (roomId) {
+            await prisma.room.delete({
+                where: { id: roomId },
+            });
+        }
+
+        if (adminId) {
+            await prisma.user.delete({
+                where: { id: adminId },
+            });
+        }
+
         await prisma.$disconnect();
     });
 
@@ -96,7 +139,9 @@ describe("POST /questions - Integração", () => {
         expect(hostResponse.status).toBe(403);
         expect(hostResponse.body).toHaveProperty("message");
 
-        const count = await prisma.question.count();
+        const count = await prisma.question.count({
+            where: { roomId },
+        });
         expect(count).toBe(0);
     });
 

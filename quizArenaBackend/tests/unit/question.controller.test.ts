@@ -18,6 +18,7 @@ describe("QuestionController", () => {
     };
 
     const validBody = {
+        roomId: "room-test-uuid",
         statement: "Qual é a capital do Brasil?",
         type: QuestionType.MULTIPLE_CHOICE,
         options: [
@@ -75,6 +76,7 @@ describe("QuestionController", () => {
     it("deve criar uma pergunta e retornar 201", async () => {
         const createdQuestion = {
             id: "question-123",
+            roomId: validBody.roomId,
             statement: validBody.statement,
             type: validBody.type,
             isActive: true,

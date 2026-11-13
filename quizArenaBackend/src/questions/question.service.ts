@@ -16,6 +16,7 @@ type QuestionRepositoryContract = Pick<
 >;
 
 export type CreateQuestionInput = {
+    roomId: string;
     statement: string;
     type?: QuestionType;
     options: CreateQuestionDto["options"];
@@ -39,6 +40,7 @@ export class QuestionService {
         }
 
         return this.questionRepository.create({
+            roomId: validation.data.roomId,
             statement: validation.data.statement,
             type: validation.data.type ?? QuestionType.MULTIPLE_CHOICE,
             options: validation.data.options,
