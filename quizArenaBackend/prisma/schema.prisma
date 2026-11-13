@@ -60,6 +60,7 @@ model QuestionOption {
 
 enum GameMode {
   CLASSIC
+  HARDCORE
 }
 
 enum RoomStatus {
