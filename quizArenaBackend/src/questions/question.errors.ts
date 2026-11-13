@@ -1,3 +1,4 @@
+
 export class InvalidQuestionDataError extends Error {
     public readonly errors: Record<string, string>;
 
@@ -8,5 +9,19 @@ export class InvalidQuestionDataError extends Error {
         super(message);
         this.name = "InvalidQuestionDataError";
         this.errors = errors;
+    }
+}
+
+export class QuestionRoomNotFoundError extends Error {
+    constructor(message = "Sala não encontrada.") {
+        super(message);
+        this.name = "QuestionRoomNotFoundError";
+    }
+}
+
+export class QuestionRoomAccessDeniedError extends Error {
+    constructor(message = "Você não tem permissão para adicionar perguntas nesta sala.") {
+        super(message);
+        this.name = "QuestionRoomAccessDeniedError";
     }
 }
