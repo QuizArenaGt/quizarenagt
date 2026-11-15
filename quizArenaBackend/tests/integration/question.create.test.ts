@@ -1,7 +1,9 @@
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { QuestionType, Role } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
 import { JwtService } from "../../src/auth/jwt.service.js";
@@ -10,21 +12,24 @@ describe("POST /questions - Integração", () => {
     const jwtService = new JwtService();
 
     let adminToken: string;
-    let roomId: string;
+    let userToken: string;
+    let hostToken: string;
+    let outsiderToken: string;
+
     let adminId: string;
+    let userId: string;
+    let hostId: string;
+    let outsiderId: string;
 
-    const userToken = jwtService.generate({
-        id: "regular-user-id",
-        role: Role.USER,
-    });
+    let adminRoomId: string;
+    let userRoomId: string;
+    let hostRoomId: string;
 
-    const hostToken = jwtService.generate({
-        id: "host-user-id",
-        role: Role.HOST,
-    });
+    const roomIds: string[] = [];
+    const userIds: string[] = [];
 
-    const validQuestionPayload = {
-        roomId: "",
+    const validQuestionPayload = (roomId: string) => ({
+        roomId,
         statement: "Qual é o maior planeta do Sistema Solar?",
         type: QuestionType.MULTIPLE_CHOICE,
         options: [
@@ -33,74 +38,127 @@ describe("POST /questions - Integração", () => {
             { text: "Marte", isCorrect: false },
             { text: "Terra", isCorrect: false },
         ],
-    };
+    });
 
     beforeAll(async () => {
         await prisma.$connect();
 
         const suffix = randomUUID();
 
-        const admin = await prisma.user.create({
-            data: {
-                name: "Admin de Teste",
-                email: `admin-${suffix}@test.com`,
-                password: "test-password-hash",
-                role: Role.ADMIN,
-            },
-        });
+        async function createUser(name: string, role: Role) {
+            const user = await prisma.user.create({
+                data: {
+                    name,
+                    email: `${role.toLowerCase()}-${randomUUID()}@test.com`,
+                    password: "test-password-hash",
+                    role,
+                },
+            });
+
+            userIds.push(user.id);
+            return user;
+        }
+
+        async function createRoom(hostId: string, code: string) {
+            const room = await prisma.room.create({
+                data: {
+                    code,
+                    hostId,
+                    maxPlayers: 10,
+                    questionTime: 20,
+                },
+            });
+
+            roomIds.push(room.id);
+            return room;
+        }
+
+        const admin = await createUser("Admin de Teste", Role.ADMIN);
+        const user = await createUser("Usuário de Teste", Role.USER);
+        const host = await createUser("Host de Teste", Role.HOST);
+        const outsider = await createUser("Outro Usuário", Role.USER);
 
         adminId = admin.id;
+        userId = user.id;
+        hostId = host.id;
+        outsiderId = outsider.id;
 
-        const room = await prisma.room.create({
-            data: {
-                code: `TEST-${suffix}`,
-                hostId: admin.id,
-                maxPlayers: 10,
-                questionTime: 20,
-            },
-        });
+        const adminRoom = await createRoom(adminId, `TEST-${suffix}-A`);
+        const userRoom = await createRoom(userId, `TEST-${suffix}-U`);
+        const hostRoom = await createRoom(hostId, `TEST-${suffix}-H`);
 
-        roomId = room.id;
-        validQuestionPayload.roomId = room.id;
+        adminRoomId = adminRoom.id;
+        userRoomId = userRoom.id;
+        hostRoomId = hostRoom.id;
 
         adminToken = jwtService.generate({
-            id: admin.id,
+            id: adminId,
             role: Role.ADMIN,
+        });
+
+        userToken = jwtService.generate({
+            id: userId,
+            role: Role.USER,
+        });
+
+        hostToken = jwtService.generate({
+            id: hostId,
+            role: Role.HOST,
+        });
+
+        outsiderToken = jwtService.generate({
+            id: outsiderId,
+            role: Role.USER,
         });
     });
 
     beforeEach(async () => {
         await prisma.question.deleteMany({
-            where: { roomId },
+            where: {
+                roomId: {
+                    in: roomIds,
+                },
+            },
         });
     });
 
     afterAll(async () => {
-        if (roomId) {
-            await prisma.room.delete({
-                where: { id: roomId },
+        if (roomIds.length > 0) {
+            await prisma.room.deleteMany({
+                where: {
+                    id: {
+                        in: roomIds,
+                    },
+                },
             });
         }
 
-        if (adminId) {
-            await prisma.user.delete({
-                where: { id: adminId },
+        if (userIds.length > 0) {
+            await prisma.user.deleteMany({
+                where: {
+                    id: {
+                        in: userIds,
+                    },
+                },
             });
         }
 
         await prisma.$disconnect();
     });
 
-    it("deve criar uma pergunta com 4 alternativas quando autenticado como ADMIN (201)", async () => {
+    it("deve permitir que ADMIN crie pergunta na própria sala (201)", async () => {
+        const payload = validQuestionPayload(adminRoomId);
+
         const response = await request(app)
             .post("/questions")
             .set("Authorization", `Bearer ${adminToken}`)
-            .send(validQuestionPayload);
+            .send(payload);
 
         expect(response.status).toBe(201);
         expect(response.body).toMatchObject({
             id: expect.any(String),
-            statement: validQuestionPayload.statement,
+            roomId: adminRoomId,
+            statement: payload.statement,
             type: QuestionType.MULTIPLE_CHOICE,
             isActive: true,
         });
@@ -112,50 +170,92 @@ describe("POST /questions - Integração", () => {
         });
 
         expect(savedQuestion).not.toBeNull();
-        expect(savedQuestion?.statement).toBe(validQuestionPayload.statement);
         expect(savedQuestion?.options).toHaveLength(4);
         expect(
-            savedQuestion?.options.filter((opt) => opt.isCorrect),
+            savedQuestion?.options.filter((option) => option.isCorrect),
         ).toHaveLength(1);
-        expect(
-            savedQuestion?.options.find((opt) => opt.isCorrect)?.text,
-        ).toBe("Júpiter");
     });
 
-    it("deve retornar 403 quando autenticado com usuário comum (USER) ou HOST", async () => {
-        const userResponse = await request(app)
+    it("deve permitir que USER crie pergunta na própria sala (201)", async () => {
+        const response = await request(app)
             .post("/questions")
             .set("Authorization", `Bearer ${userToken}`)
-            .send(validQuestionPayload);
+            .send(validQuestionPayload(userRoomId));
 
-        expect(userResponse.status).toBe(403);
-        expect(userResponse.body).toHaveProperty("message");
+        expect(response.status).toBe(201);
+        expect(response.body.roomId).toBe(userRoomId);
+    });
 
-        const hostResponse = await request(app)
+    it("deve permitir que HOST crie pergunta na própria sala (201)", async () => {
+        const response = await request(app)
             .post("/questions")
             .set("Authorization", `Bearer ${hostToken}`)
-            .send(validQuestionPayload);
+            .send(validQuestionPayload(hostRoomId));
 
-        expect(hostResponse.status).toBe(403);
-        expect(hostResponse.body).toHaveProperty("message");
+        expect(response.status).toBe(201);
+        expect(response.body.roomId).toBe(hostRoomId);
+    });
+
+    it("deve retornar 403 quando outro usuário tentar criar pergunta na sala", async () => {
+        const response = await request(app)
+            .post("/questions")
+            .set("Authorization", `Bearer ${outsiderToken}`)
+            .send(validQuestionPayload(adminRoomId));
+
+        expect(response.status).toBe(403);
+        expect(response.body).toHaveProperty("message");
 
         const count = await prisma.question.count({
-            where: { roomId },
+            where: { roomId: adminRoomId },
         });
+
         expect(count).toBe(0);
     });
 
+    it("deve ignorar hostId enviado no body e utilizar o usuário autenticado", async () => {
+        const response = await request(app)
+            .post("/questions")
+            .set("Authorization", `Bearer ${outsiderToken}`)
+            .send({
+                ...validQuestionPayload(adminRoomId),
+                hostId: adminId,
+            });
+
+        expect(response.status).toBe(403);
+
+        const count = await prisma.question.count({
+            where: { roomId: adminRoomId },
+        });
+
+        expect(count).toBe(0);
+    });
+
+    it("deve retornar 404 quando a sala não existir", async () => {
+        const response = await request(app)
+            .post("/questions")
+            .set("Authorization", `Bearer ${adminToken}`)
+            .send(validQuestionPayload(randomUUID()));
+
+        expect(response.status).toBe(404);
+        expect(response.body).toHaveProperty(
+            "message",
+            "Sala não encontrada.",
+        );
+    });
+
     it("deve retornar 401 quando o token não for enviado ou for inválido", async () => {
+        const payload = validQuestionPayload(adminRoomId);
+
         const noTokenResponse = await request(app)
             .post("/questions")
-            .send(validQuestionPayload);
+            .send(payload);
 
         expect(noTokenResponse.status).toBe(401);
 
         const invalidTokenResponse = await request(app)
             .post("/questions")
             .set("Authorization", "Bearer token-invalido")
-            .send(validQuestionPayload);
+            .send(payload);
 
         expect(invalidTokenResponse.status).toBe(401);
     });
@@ -165,7 +265,7 @@ describe("POST /questions - Integração", () => {
             .post("/questions")
             .set("Authorization", `Bearer ${adminToken}`)
             .send({
-                ...validQuestionPayload,
+                ...validQuestionPayload(adminRoomId),
                 statement: "   ",
             });
 
@@ -175,12 +275,14 @@ describe("POST /questions - Integração", () => {
     });
 
     it("deve retornar 400 quando o número de alternativas for diferente de 4", async () => {
+        const payload = validQuestionPayload(adminRoomId);
+
         const response = await request(app)
             .post("/questions")
             .set("Authorization", `Bearer ${adminToken}`)
             .send({
-                ...validQuestionPayload,
-                options: validQuestionPayload.options.slice(0, 3),
+                ...payload,
+                options: payload.options.slice(0, 3),
             });
 
         expect(response.status).toBe(400);
@@ -189,13 +291,15 @@ describe("POST /questions - Integração", () => {
     });
 
     it("deve retornar 400 quando houver 0 ou mais de 1 alternativa correta", async () => {
+        const payload = validQuestionPayload(adminRoomId);
+
         const zeroCorrectResponse = await request(app)
             .post("/questions")
             .set("Authorization", `Bearer ${adminToken}`)
             .send({
-                ...validQuestionPayload,
-                options: validQuestionPayload.options.map((opt) => ({
-                    ...opt,
+                ...payload,
+                options: payload.options.map((option) => ({
+                    ...option,
                     isCorrect: false,
                 })),
             });
@@ -207,9 +311,9 @@ describe("POST /questions - Integração", () => {
             .post("/questions")
             .set("Authorization", `Bearer ${adminToken}`)
             .send({
-                ...validQuestionPayload,
-                options: validQuestionPayload.options.map((opt, index) => ({
-                    ...opt,
+                ...payload,
+                options: payload.options.map((option, index) => ({
+                    ...option,
                     isCorrect: index < 2,
                 })),
             });

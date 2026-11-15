@@ -2,11 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GameMode, RoomStatus, type Room } from "@prisma/client";
 
 import { RoomService } from "../../src/rooms/room.service.js";
-import { InvalidRoomDataError } from "../../src/rooms/room.errors.js";
+import {
+    InvalidRoomDataError,
+    RoomNotFoundError,
+    RoomAccessDeniedError,
+    RoomNotEditableError,
+} from "../../src/rooms/room.errors.js";
 import type { RoomRepository } from "../../src/rooms/room.repository.js";
 import type { RoomCodeGenerator } from "../../src/rooms/room-code-generator.js";
 
-type Repository = Pick<RoomRepository, "create">;
+
+
+type Repository = Pick<
+    RoomRepository,
+    "create" | "findById" | "update"
+>;
 type CodeGenerator = Pick<RoomCodeGenerator, "generate">;
 
 const validData = {
@@ -33,6 +43,8 @@ const roomFixture: Room = {
 describe("RoomService", () => {
     let repository: {
         create: ReturnType<typeof vi.fn>;
+        findById: ReturnType<typeof vi.fn>;
+        update: ReturnType<typeof vi.fn>;
     };
 
     let codeGenerator: {
@@ -44,6 +56,8 @@ describe("RoomService", () => {
     beforeEach(() => {
         repository = {
             create: vi.fn(),
+            findById: vi.fn(),
+            update: vi.fn(),
         };
 
         codeGenerator = {
@@ -150,4 +164,115 @@ describe("RoomService", () => {
             databaseError,
         );
     });
+
+
+    describe("updateRoom", () => {
+        const updateInput = {
+            roomId: roomFixture.id,
+            hostId: roomFixture.hostId,
+            data: {
+                maxPlayers: 20,
+            },
+        };
+
+        beforeEach(() => {
+            repository.findById.mockResolvedValue(roomFixture);
+            repository.update.mockResolvedValue({
+                ...roomFixture,
+                maxPlayers: 20,
+            });
+        });
+
+        it("deve atualizar as configurações de uma sala", async () => {
+            const result = await service.updateRoom(updateInput);
+
+            expect(repository.findById).toHaveBeenCalledWith(
+                roomFixture.id,
+            );
+            expect(repository.update).toHaveBeenCalledWith(
+                roomFixture.id,
+                { maxPlayers: 20 },
+            );
+            expect(result.maxPlayers).toBe(20);
+        });
+
+        it("deve atualizar somente os campos informados", async () => {
+            await service.updateRoom({
+                ...updateInput,
+                data: {
+                    questionTime: 60,
+                    gameMode: GameMode.HARDCORE,
+                },
+            });
+
+            expect(repository.update).toHaveBeenCalledWith(
+                roomFixture.id,
+                {
+                    questionTime: 60,
+                    gameMode: GameMode.HARDCORE,
+                },
+            );
+        });
+
+        it("deve rejeitar atualização com dados inválidos", async () => {
+            await expect(
+                service.updateRoom({
+                    ...updateInput,
+                    data: { maxPlayers: 1 },
+                }),
+            ).rejects.toBeInstanceOf(InvalidRoomDataError);
+
+            expect(repository.findById).not.toHaveBeenCalled();
+            expect(repository.update).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar atualização quando a sala não existir", async () => {
+            repository.findById.mockResolvedValue(null);
+
+            await expect(
+                service.updateRoom(updateInput),
+            ).rejects.toBeInstanceOf(RoomNotFoundError);
+
+            expect(repository.update).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar atualização por usuário que não seja o host", async () => {
+            await expect(
+                service.updateRoom({
+                    ...updateInput,
+                    hostId: "another-user-uuid",
+                }),
+            ).rejects.toBeInstanceOf(RoomAccessDeniedError);
+
+            expect(repository.update).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar atualização quando a sala não estiver aguardando jogadores", async () => {
+            repository.findById.mockResolvedValue({
+                ...roomFixture,
+                status: RoomStatus.IN_PROGRESS,
+            });
+
+            await expect(
+                service.updateRoom(updateInput),
+            ).rejects.toBeInstanceOf(RoomNotEditableError);
+
+            expect(repository.update).not.toHaveBeenCalled();
+        });
+
+        it("deve propagar erros inesperados do repositório", async () => {
+            const databaseError = new Error(
+                "Falha de conexão com o banco",
+            );
+
+            repository.findById.mockRejectedValue(databaseError);
+
+            await expect(
+                service.updateRoom(updateInput),
+            ).rejects.toBe(databaseError);
+
+            expect(repository.update).not.toHaveBeenCalled();
+        });
+    });
+
 });

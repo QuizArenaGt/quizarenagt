@@ -1,14 +1,26 @@
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { QuestionType, type Question, type QuestionOption } from "@prisma/client";
+import {
+    QuestionType,
+    type Question,
+    type QuestionOption,
+    type Room,
+} from "@prisma/client";
 
 import { QuestionService } from "../../src/questions/question.service.js";
-import { InvalidQuestionDataError } from "../../src/questions/question.errors.js";
+import {
+    InvalidQuestionDataError,
+    QuestionRoomAccessDeniedError,
+    QuestionRoomNotFoundError,
+} from "../../src/questions/question.errors.js";
 import type { QuestionRepository } from "../../src/questions/question.repository.js";
-import type { CreateQuestionDto } from "../../src/questions/create-question.dto.js";
+import type { RoomRepository } from "../../src/rooms/room.repository.js";
+import type { CreateQuestionInput } from "../../src/questions/question.service.js";
 
-type Repository = Pick<QuestionRepository, "create">;
+type QuestionRepositoryMock = Pick<QuestionRepository, "create">;
+type RoomRepositoryMock = Pick<RoomRepository, "findById">;
 
-const validData: CreateQuestionDto = {
+const validData: CreateQuestionInput = {
     statement: "Qual é a capital do Brasil?",
     type: QuestionType.MULTIPLE_CHOICE,
     options: [
@@ -18,13 +30,26 @@ const validData: CreateQuestionDto = {
         { text: "Salvador", isCorrect: false },
     ],
     roomId: "room-test-uuid",
+    hostId: "host-test-uuid",
+};
+
+const roomFixture: Room = {
+    id: validData.roomId,
+    code: "ABC123",
+    hostId: validData.hostId,
+    maxPlayers: 10,
+    questionTime: 30,
+    gameMode: "CLASSIC",
+    status: "WAITING",
+    createdAt: new Date("2026-11-12T12:00:00.000Z"),
+    updatedAt: new Date("2026-11-12T12:00:00.000Z"),
 };
 
 const questionFixture: Question & { options: QuestionOption[] } = {
     id: "question-test-uuid",
-    roomId: "room-test-uuid",
+    roomId: validData.roomId,
     statement: validData.statement,
-    type: validData.type,
+    type: QuestionType.MULTIPLE_CHOICE,
     isActive: true,
     createdAt: new Date("2026-11-12T12:00:00.000Z"),
     updatedAt: new Date("2026-11-12T12:00:00.000Z"),
@@ -37,26 +62,40 @@ const questionFixture: Question & { options: QuestionOption[] } = {
 };
 
 describe("QuestionService", () => {
-    let repository: {
+    let questionRepository: {
         create: ReturnType<typeof vi.fn>;
+    };
+    let roomRepository: {
+        findById: ReturnType<typeof vi.fn>;
     };
     let service: QuestionService;
 
     beforeEach(() => {
-        repository = {
+        questionRepository = {
             create: vi.fn(),
         };
 
-        service = new QuestionService(repository as Repository);
+        roomRepository = {
+            findById: vi.fn(),
+        };
+
+        service = new QuestionService(
+            questionRepository as QuestionRepositoryMock,
+            roomRepository as RoomRepositoryMock,
+        );
+
+        roomRepository.findById.mockResolvedValue(roomFixture);
+        questionRepository.create.mockResolvedValue(questionFixture);
     });
 
-    it("deve criar uma pergunta com 4 alternativas e 1 correta", async () => {
-        repository.create.mockResolvedValue(questionFixture);
-
+    it("deve criar uma pergunta quando o usuário for o host da sala", async () => {
         const result = await service.createQuestion(validData);
 
-        expect(repository.create).toHaveBeenCalledTimes(1);
-        expect(repository.create).toHaveBeenCalledWith({
+        expect(roomRepository.findById).toHaveBeenCalledWith(
+            validData.roomId,
+        );
+        expect(questionRepository.create).toHaveBeenCalledTimes(1);
+        expect(questionRepository.create).toHaveBeenCalledWith({
             roomId: validData.roomId,
             statement: validData.statement,
             type: QuestionType.MULTIPLE_CHOICE,
@@ -73,7 +112,8 @@ describe("QuestionService", () => {
             }),
         ).rejects.toBeInstanceOf(InvalidQuestionDataError);
 
-        expect(repository.create).not.toHaveBeenCalled();
+        expect(roomRepository.findById).not.toHaveBeenCalled();
+        expect(questionRepository.create).not.toHaveBeenCalled();
     });
 
     it("deve rejeitar criação quando não houver exatamente 4 alternativas", async () => {
@@ -84,7 +124,8 @@ describe("QuestionService", () => {
             }),
         ).rejects.toBeInstanceOf(InvalidQuestionDataError);
 
-        expect(repository.create).not.toHaveBeenCalled();
+        expect(roomRepository.findById).not.toHaveBeenCalled();
+        expect(questionRepository.create).not.toHaveBeenCalled();
     });
 
     it("deve rejeitar criação quando não houver exatamente 1 alternativa correta", async () => {
@@ -98,15 +139,50 @@ describe("QuestionService", () => {
             }),
         ).rejects.toBeInstanceOf(InvalidQuestionDataError);
 
-        expect(repository.create).not.toHaveBeenCalled();
+        expect(roomRepository.findById).not.toHaveBeenCalled();
+        expect(questionRepository.create).not.toHaveBeenCalled();
     });
 
-    it("deve propagar erros inesperados do repositório", async () => {
-        const databaseError = new Error("Falha de conexão com o banco");
-        repository.create.mockRejectedValue(databaseError);
+    it("deve rejeitar criação quando a sala não existir", async () => {
+        roomRepository.findById.mockResolvedValue(null);
 
-        await expect(service.createQuestion(validData)).rejects.toBe(
-            databaseError,
-        );
+        await expect(
+            service.createQuestion(validData),
+        ).rejects.toBeInstanceOf(QuestionRoomNotFoundError);
+
+        expect(questionRepository.create).not.toHaveBeenCalled();
+    });
+
+    it("deve rejeitar criação quando o usuário não for o host da sala", async () => {
+        roomRepository.findById.mockResolvedValue({
+            ...roomFixture,
+            hostId: "another-host-uuid",
+        });
+
+        await expect(
+            service.createQuestion(validData),
+        ).rejects.toBeInstanceOf(QuestionRoomAccessDeniedError);
+
+        expect(questionRepository.create).not.toHaveBeenCalled();
+    });
+
+    it("deve propagar erros inesperados do repositório de perguntas", async () => {
+        const databaseError = new Error("Falha de conexão com o banco");
+        questionRepository.create.mockRejectedValue(databaseError);
+
+        await expect(
+            service.createQuestion(validData),
+        ).rejects.toBe(databaseError);
+    });
+
+    it("deve propagar erros inesperados do repositório de salas", async () => {
+        const databaseError = new Error("Falha ao consultar a sala");
+        roomRepository.findById.mockRejectedValue(databaseError);
+
+        await expect(
+            service.createQuestion(validData),
+        ).rejects.toBe(databaseError);
+
+        expect(questionRepository.create).not.toHaveBeenCalled();
     });
 });

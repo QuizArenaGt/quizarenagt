@@ -14,4 +14,12 @@ roomRoutes.post(
     },
 );
 
+roomRoutes.patch(
+    "/:id",
+    authenticateToken,
+    (req, res) => {
+        void roomController.update(req, res);
+    },
+);
+
 export { roomRoutes };
