@@ -4,6 +4,7 @@ import cors from "cors";
 import { authRoutes } from "./auth/auth.routes.js";
 import { questionRoutes } from "./questions/question.routes.js";
 import { roomRoutes } from "./rooms/room.routes.js";
+import { roundRoutes } from "./rounds/round.routes.js";
 
 const app = express();
 
@@ -20,5 +21,6 @@ app.get("/", (_req, res) => {
 app.use("/auth", authRoutes);
 app.use("/questions", questionRoutes);
 app.use("/rooms", roomRoutes);
+app.use("/rooms", roundRoutes);
 
 export { app };
