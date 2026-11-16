@@ -6,6 +6,9 @@ import {
     RoomNotFoundError,
     RoomAccessDeniedError,
     RoomNotEditableError,
+    RoomNotJoinableError,
+    RoomFullError,
+    DuplicateNicknameError,
 } from "./room.errors.js";
 
 
@@ -106,6 +109,46 @@ export class RoomController {
 
             res.status(500).json({
                 message: "Erro interno ao atualizar sala.",
+            });
+        }
+    }
+
+    async join(req: Request, res: Response): Promise<void> {
+        try {
+            const result = await this.roomService.joinRoom(req.body);
+
+            res.status(201).json(result);
+        } catch (error: unknown) {
+            if (error instanceof InvalidRoomDataError) {
+                res.status(400).json({
+                    message: "Dados inválidos.",
+                    errors: error.errors,
+                });
+                return;
+            }
+
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (
+                error instanceof RoomNotJoinableError ||
+                error instanceof RoomFullError ||
+                error instanceof DuplicateNicknameError
+            ) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao entrar na sala.");
+
+            res.status(500).json({
+                message: "Erro interno ao entrar na sala.",
             });
         }
     }

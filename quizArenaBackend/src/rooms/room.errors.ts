@@ -32,3 +32,24 @@ export class RoomNotEditableError extends Error {
         this.name = "RoomNotEditableError";
     }
 }
+
+export class RoomNotJoinableError extends Error {
+    constructor(message = "Esta sala não está aceitando novos jogadores.") {
+        super(message);
+        this.name = "RoomNotJoinableError";
+    }
+}
+
+export class RoomFullError extends Error {
+    constructor(message = "Esta sala atingiu o limite de jogadores.") {
+        super(message);
+        this.name = "RoomFullError";
+    }
+}
+
+export class DuplicateNicknameError extends Error {
+    constructor(message = "Este nickname já está sendo utilizado nesta sala.") {
+        super(message);
+        this.name = "DuplicateNicknameError";
+    }
+}

@@ -1,5 +1,11 @@
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GameMode, RoomStatus, type Room } from "@prisma/client";
+import {
+    GameMode,
+    RoomStatus,
+    Prisma,
+    type Room,
+} from "@prisma/client";
 
 import { RoomService } from "../../src/rooms/room.service.js";
 import {
@@ -7,16 +13,29 @@ import {
     RoomNotFoundError,
     RoomAccessDeniedError,
     RoomNotEditableError,
+    RoomNotJoinableError,
+    RoomFullError,
+    DuplicateNicknameError,
 } from "../../src/rooms/room.errors.js";
+
 import type { RoomRepository } from "../../src/rooms/room.repository.js";
 import type { RoomCodeGenerator } from "../../src/rooms/room-code-generator.js";
+import type { RoomPlayerRepository } from "../../src/rooms/room-player.repository.js";
 
-
+import {
+    hashRoomPlayerSessionToken,
+} from "../../src/rooms/room-player-session-token.js";
 
 type Repository = Pick<
     RoomRepository,
-    "create" | "findById" | "update"
+    "create" | "findById" | "findByCode" | "update"
 >;
+
+type PlayerRepository = Pick<
+    RoomPlayerRepository,
+    "createIfRoomHasCapacity"
+>;
+
 type CodeGenerator = Pick<RoomCodeGenerator, "generate">;
 
 const validData = {
@@ -44,7 +63,12 @@ describe("RoomService", () => {
     let repository: {
         create: ReturnType<typeof vi.fn>;
         findById: ReturnType<typeof vi.fn>;
+        findByCode: ReturnType<typeof vi.fn>;
         update: ReturnType<typeof vi.fn>;
+    };
+
+    let playerRepository: {
+        createIfRoomHasCapacity: ReturnType<typeof vi.fn>;
     };
 
     let codeGenerator: {
@@ -57,7 +81,12 @@ describe("RoomService", () => {
         repository = {
             create: vi.fn(),
             findById: vi.fn(),
+            findByCode: vi.fn(),
             update: vi.fn(),
+        };
+
+        playerRepository = {
+            createIfRoomHasCapacity: vi.fn(),
         };
 
         codeGenerator = {
@@ -67,104 +96,311 @@ describe("RoomService", () => {
         service = new RoomService(
             repository as Repository,
             codeGenerator as CodeGenerator,
+            playerRepository as PlayerRepository,
         );
     });
 
-    it("deve criar uma sala com as configurações informadas", async () => {
-        repository.create.mockResolvedValue(roomFixture);
+    describe("createRoom", () => {
+        it("deve criar uma sala com as configurações informadas", async () => {
+            repository.create.mockResolvedValue(roomFixture);
 
-        const result = await service.createRoom(validData);
+            const result = await service.createRoom(validData);
 
-        expect(codeGenerator.generate).toHaveBeenCalledTimes(1);
-        expect(repository.create).toHaveBeenCalledTimes(1);
-        expect(repository.create).toHaveBeenCalledWith({
-            code: generatedCode,
-            hostId: validData.hostId,
-            maxPlayers: validData.maxPlayers,
-            questionTime: validData.questionTime,
-            gameMode: GameMode.CLASSIC,
-        });
-        expect(result).toEqual(roomFixture);
-    });
-
-    it("deve criar uma sala no modo HARDCORE", async () => {
-        repository.create.mockResolvedValue({
-            ...roomFixture,
-            gameMode: GameMode.HARDCORE,
+            expect(codeGenerator.generate).toHaveBeenCalledTimes(1);
+            expect(repository.create).toHaveBeenCalledTimes(1);
+            expect(repository.create).toHaveBeenCalledWith({
+                code: generatedCode,
+                hostId: validData.hostId,
+                maxPlayers: validData.maxPlayers,
+                questionTime: validData.questionTime,
+                gameMode: GameMode.CLASSIC,
+            });
+            expect(result).toEqual(roomFixture);
         });
 
-        await service.createRoom({
-            ...validData,
-            gameMode: GameMode.HARDCORE,
-        });
+        it("deve criar uma sala no modo HARDCORE", async () => {
+            repository.create.mockResolvedValue({
+                ...roomFixture,
+                gameMode: GameMode.HARDCORE,
+            });
 
-        expect(repository.create).toHaveBeenCalledWith({
-            code: generatedCode,
-            hostId: validData.hostId,
-            maxPlayers: validData.maxPlayers,
-            questionTime: validData.questionTime,
-            gameMode: GameMode.HARDCORE,
-        });
-    });
-
-    it("deve rejeitar criação quando a quantidade de jogadores for inválida", async () => {
-        await expect(
-            service.createRoom({
+            await service.createRoom({
                 ...validData,
-                maxPlayers: 1,
-            }),
-        ).rejects.toBeInstanceOf(InvalidRoomDataError);
+                gameMode: GameMode.HARDCORE,
+            });
 
-        expect(codeGenerator.generate).not.toHaveBeenCalled();
-        expect(repository.create).not.toHaveBeenCalled();
+            expect(repository.create).toHaveBeenCalledWith({
+                code: generatedCode,
+                hostId: validData.hostId,
+                maxPlayers: validData.maxPlayers,
+                questionTime: validData.questionTime,
+                gameMode: GameMode.HARDCORE,
+            });
+        });
+
+        it("deve rejeitar criação quando a quantidade de jogadores for inválida", async () => {
+            await expect(
+                service.createRoom({
+                    ...validData,
+                    maxPlayers: 1,
+                }),
+            ).rejects.toBeInstanceOf(InvalidRoomDataError);
+
+            expect(codeGenerator.generate).not.toHaveBeenCalled();
+            expect(repository.create).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar criação quando o tempo por pergunta for inválido", async () => {
+            await expect(
+                service.createRoom({
+                    ...validData,
+                    questionTime: 181,
+                }),
+            ).rejects.toBeInstanceOf(InvalidRoomDataError);
+
+            expect(codeGenerator.generate).not.toHaveBeenCalled();
+            expect(repository.create).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar criação quando o modo de jogo for inválido", async () => {
+            await expect(
+                service.createRoom({
+                    ...validData,
+                    gameMode: "INVALID" as GameMode,
+                }),
+            ).rejects.toBeInstanceOf(InvalidRoomDataError);
+
+            expect(codeGenerator.generate).not.toHaveBeenCalled();
+            expect(repository.create).not.toHaveBeenCalled();
+        });
+
+        it("deve propagar erros inesperados do gerador de código", async () => {
+            const generatorError = new Error("Falha ao gerar código");
+
+            codeGenerator.generate.mockRejectedValue(generatorError);
+
+            await expect(service.createRoom(validData)).rejects.toBe(
+                generatorError,
+            );
+
+            expect(repository.create).not.toHaveBeenCalled();
+        });
+
+        it("deve propagar erros inesperados do repositório", async () => {
+            const databaseError = new Error(
+                "Falha de conexão com o banco",
+            );
+
+            repository.create.mockRejectedValue(databaseError);
+
+            await expect(service.createRoom(validData)).rejects.toBe(
+                databaseError,
+            );
+        });
     });
 
-    it("deve rejeitar criação quando o tempo por pergunta for inválido", async () => {
-        await expect(
-            service.createRoom({
-                ...validData,
-                questionTime: 181,
-            }),
-        ).rejects.toBeInstanceOf(InvalidRoomDataError);
+    describe("joinRoom", () => {
+        const joinInput = {
+            code: "ABC123",
+            nickname: "JogadorTeste",
+        };
 
-        expect(codeGenerator.generate).not.toHaveBeenCalled();
-        expect(repository.create).not.toHaveBeenCalled();
+        const createdPlayer = {
+            id: "player-test-uuid",
+            roomId: roomFixture.id,
+            userId: null,
+            nickname: "JogadorTeste",
+            score: 0,
+            joinedAt: new Date("2026-11-16T00:00:00.000Z"),
+            sessionTokenHash: "hash-placeholder",
+        };
+
+        beforeEach(() => {
+            repository.findByCode.mockResolvedValue(roomFixture);
+
+            playerRepository.createIfRoomHasCapacity.mockImplementation(
+                async (data) => ({
+                    ...createdPlayer,
+                    ...data,
+                }),
+            );
+        });
+
+        it("deve permitir a entrada de um jogador e retornar seu token de sessão", async () => {
+            const result = await service.joinRoom(joinInput);
+
+            expect(repository.findByCode).toHaveBeenCalledWith("ABC123");
+
+            expect(
+                playerRepository.createIfRoomHasCapacity,
+            ).toHaveBeenCalledWith({
+                roomId: roomFixture.id,
+                nickname: "JogadorTeste",
+                sessionTokenHash: expect.any(String),
+            });
+
+            expect(result.player).toEqual({
+                id: createdPlayer.id,
+                roomId: createdPlayer.roomId,
+                userId: null,
+                nickname: createdPlayer.nickname,
+                score: 0,
+                joinedAt: createdPlayer.joinedAt,
+            });
+
+            expect(result.sessionToken).toEqual(expect.any(String));
+
+            expect(
+                hashRoomPlayerSessionToken(result.sessionToken),
+            ).toBe(
+                playerRepository.createIfRoomHasCapacity.mock.calls[0][0]
+                    .sessionTokenHash,
+            );
+
+            expect(result.player).not.toHaveProperty("sessionTokenHash");
+        });
+
+        it("deve rejeitar entrada com dados inválidos", async () => {
+            await expect(
+                service.joinRoom({
+                    code: "ABC",
+                    nickname: "JogadorTeste",
+                }),
+            ).rejects.toBeInstanceOf(InvalidRoomDataError);
+
+            expect(repository.findByCode).not.toHaveBeenCalled();
+            expect(
+                playerRepository.createIfRoomHasCapacity,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar entrada quando a sala não existir", async () => {
+            repository.findByCode.mockResolvedValue(null);
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBeInstanceOf(RoomNotFoundError);
+
+            expect(
+                playerRepository.createIfRoomHasCapacity,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar entrada quando a sala deixar de existir durante a operação", async () => {
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                new Error("ROOM_NOT_FOUND"),
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBeInstanceOf(RoomNotFoundError);
+        });
+
+        it("deve rejeitar entrada quando a sala não estiver aguardando jogadores", async () => {
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                new Error("ROOM_NOT_JOINABLE"),
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBeInstanceOf(RoomNotJoinableError);
+        });
+
+        it("deve rejeitar entrada quando o nickname já estiver em uso", async () => {
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                new Error("DUPLICATE_NICKNAME"),
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBeInstanceOf(DuplicateNicknameError);
+        });
+
+        it("deve rejeitar entrada quando a sala estiver lotada", async () => {
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                new Error("ROOM_FULL"),
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBeInstanceOf(RoomFullError);
+        });
+
+        it("deve converter conflito de chave única do Prisma em erro de nickname duplicado", async () => {
+            const uniqueError =
+                new Prisma.PrismaClientKnownRequestError(
+                    "Unique constraint failed",
+                    {
+                        code: "P2002",
+                        clientVersion: "test",
+                        meta: {
+                            target: ["roomId", "nickname"],
+                        },
+                    },
+                );
+
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                uniqueError,
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBeInstanceOf(DuplicateNicknameError);
+        });
+
+        it("deve propagar erros inesperados ao buscar a sala", async () => {
+            const databaseError = new Error(
+                "Falha de conexão com o banco",
+            );
+
+            repository.findByCode.mockRejectedValue(databaseError);
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBe(databaseError);
+
+            expect(
+                playerRepository.createIfRoomHasCapacity,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("deve propagar erros inesperados durante a entrada", async () => {
+            const databaseError = new Error(
+                "Falha de conexão com o banco",
+            );
+
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                databaseError,
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBe(databaseError);
+        });
+
+        it("deve propagar conflito de chave única do token de sessão", async () => {
+            const uniqueError =
+                new Prisma.PrismaClientKnownRequestError(
+                    "Unique constraint failed",
+                    {
+                        code: "P2002",
+                        clientVersion: "test",
+                        meta: {
+                            target: ["sessionTokenHash"],
+                        },
+                    },
+                );
+
+            playerRepository.createIfRoomHasCapacity.mockRejectedValue(
+                uniqueError,
+            );
+
+            await expect(
+                service.joinRoom(joinInput),
+            ).rejects.toBe(uniqueError);
+        });
+
     });
-
-    it("deve rejeitar criação quando o modo de jogo for inválido", async () => {
-        await expect(
-            service.createRoom({
-                ...validData,
-                gameMode: "INVALID" as GameMode,
-            }),
-        ).rejects.toBeInstanceOf(InvalidRoomDataError);
-
-        expect(codeGenerator.generate).not.toHaveBeenCalled();
-        expect(repository.create).not.toHaveBeenCalled();
-    });
-
-    it("deve propagar erros inesperados do gerador de código", async () => {
-        const generatorError = new Error("Falha ao gerar código");
-
-        codeGenerator.generate.mockRejectedValue(generatorError);
-
-        await expect(service.createRoom(validData)).rejects.toBe(
-            generatorError,
-        );
-
-        expect(repository.create).not.toHaveBeenCalled();
-    });
-
-    it("deve propagar erros inesperados do repositório", async () => {
-        const databaseError = new Error("Falha de conexão com o banco");
-
-        repository.create.mockRejectedValue(databaseError);
-
-        await expect(service.createRoom(validData)).rejects.toBe(
-            databaseError,
-        );
-    });
-
 
     describe("updateRoom", () => {
         const updateInput = {
@@ -189,10 +425,12 @@ describe("RoomService", () => {
             expect(repository.findById).toHaveBeenCalledWith(
                 roomFixture.id,
             );
+
             expect(repository.update).toHaveBeenCalledWith(
                 roomFixture.id,
                 { maxPlayers: 20 },
             );
+
             expect(result.maxPlayers).toBe(20);
         });
 
@@ -274,5 +512,4 @@ describe("RoomService", () => {
             expect(repository.update).not.toHaveBeenCalled();
         });
     });
-
 });
