@@ -19,6 +19,7 @@ import {
     RoomFullError,
     DuplicateNicknameError,
     RoomAuthenticationError,
+    RoomStartRequirementsError,
 } from "./room.errors.js";
 import { RoomPlayerRepository } from "./room-player.repository.js";
 import {
@@ -30,7 +31,12 @@ import { JwtService } from "../auth/jwt.service.js";
 
 type RoomRepositoryContract = Pick<
     RoomRepository,
-    "create" | "findById" | "findByCode" | "findByCodeWithLobby" | "update"
+    | "create"
+    | "findById"
+    | "findByCode"
+    | "findByCodeWithLobby"
+    | "update"
+    | "startIfReady"
 >;
 
 type RoomCodeGeneratorContract = Pick<
@@ -156,6 +162,34 @@ export class RoomService {
             room.id,
             validation.data,
         );
+    }
+
+    async startRoom(roomId: string, hostId: string): Promise<Room> {
+        const result = await this.roomRepository.startIfReady(
+            roomId,
+            hostId,
+        );
+
+        if (result.success) {
+            return result.room;
+        }
+
+        switch (result.reason) {
+            case "ROOM_NOT_FOUND":
+                throw new RoomNotFoundError();
+
+            case "ACCESS_DENIED":
+                throw new RoomAccessDeniedError();
+
+            case "ROOM_NOT_WAITING":
+                throw new RoomNotEditableError(
+                    "Esta sala já foi iniciada ou não está disponível para início.",
+                );
+
+            case "NOT_ENOUGH_PLAYERS":
+            case "NOT_ENOUGH_QUESTIONS":
+                throw new RoomStartRequirementsError(result.reason);
+        }
     }
 
     async joinRoom(data: unknown): Promise<JoinRoomResult> {

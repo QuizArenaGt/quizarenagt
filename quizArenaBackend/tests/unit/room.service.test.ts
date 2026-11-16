@@ -34,6 +34,7 @@ type Repository = Pick<
     | "findByCode"
     | "findByCodeWithLobby"
     | "update"
+    | "startIfReady"
 >;
 
 type PlayerRepository = Pick<
@@ -71,6 +72,7 @@ describe("RoomService", () => {
         findByCode: ReturnType<typeof vi.fn>;
         findByCodeWithLobby: ReturnType<typeof vi.fn>;
         update: ReturnType<typeof vi.fn>;
+        startIfReady: ReturnType<typeof vi.fn>;
     };
 
     let playerRepository: {
@@ -94,6 +96,7 @@ describe("RoomService", () => {
             findByCode: vi.fn(),
             findByCodeWithLobby: vi.fn(),
             update: vi.fn(),
+            startIfReady: vi.fn(),
         };
 
         playerRepository = {

@@ -61,3 +61,23 @@ export class RoomAuthenticationError extends Error {
         this.name = "RoomAuthenticationError";
     }
 }
+
+export type RoomStartRequirement =
+    | "NOT_ENOUGH_PLAYERS"
+    | "NOT_ENOUGH_QUESTIONS";
+
+export class RoomStartRequirementsError extends Error {
+    constructor(
+        public readonly reason: RoomStartRequirement,
+    ) {
+        const messages: Record<RoomStartRequirement, string> = {
+            NOT_ENOUGH_PLAYERS:
+                "A partida precisa de pelo menos 2 jogadores.",
+            NOT_ENOUGH_QUESTIONS:
+                "A partida precisa de pelo menos 5 perguntas ativas.",
+        };
+
+        super(messages[reason]);
+        this.name = "RoomStartRequirementsError";
+    }
+}

@@ -37,4 +37,8 @@ roomRoutes.patch(
     },
 );
 
+roomRoutes.post("/:id/start", authenticateToken, (req, res) => {
+    void roomController.start(req, res);
+});
+
 export { roomRoutes };
