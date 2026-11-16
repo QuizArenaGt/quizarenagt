@@ -22,7 +22,10 @@ type UpdateRoomData = {
 };
 
 export type StartRoomResult =
-    | { success: true; room: Room }
+    | {
+        success: true;
+        room: Room;
+    }
     | {
         success: false;
         reason:
@@ -196,6 +199,12 @@ export class RoomRepository {
                             },
                         })),
                     },
+                },
+            });
+
+            await tx.game.create({
+                data: {
+                    roomId,
                 },
             });
 
