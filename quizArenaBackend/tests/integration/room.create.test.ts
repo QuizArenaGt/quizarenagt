@@ -167,7 +167,7 @@ describe("POST /rooms - Integração", () => {
     });
 
     it("deve retornar 400 quando as configurações forem inválidas", async () => {
-        const { token } = await createUserAndToken(
+        const { user, token } = await createUserAndToken(
             "room.host@email.com",
         );
 
@@ -183,7 +183,11 @@ describe("POST /rooms - Integração", () => {
         expect(response.body).toHaveProperty("message", "Dados inválidos.");
         expect(response.body).toHaveProperty("errors");
 
-        const rooms = await prisma.room.findMany();
+        const rooms = await prisma.room.findMany({
+            where: {
+                hostId: user.id,
+            },
+        });
 
         expect(rooms).toHaveLength(0);
     });

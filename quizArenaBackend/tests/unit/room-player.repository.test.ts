@@ -12,6 +12,7 @@ vi.mock("../../src/database/prisma.js", () => ({
             findMany: vi.fn(),
             create: vi.fn(),
             delete: vi.fn(),
+            count: vi.fn(),
         },
     },
 }));
@@ -21,6 +22,7 @@ const roomPlayerModel = prisma.roomPlayer as unknown as {
     findMany: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
+    count: ReturnType<typeof vi.fn>;
 };
 
 const roomPlayerFixture = {
@@ -30,12 +32,14 @@ const roomPlayerFixture = {
     nickname: "Jogador 1",
     score: 0,
     joinedAt: new Date("2026-11-08T12:00:00.000Z"),
+    sessionTokenHash: "a".repeat(64),
 } satisfies RoomPlayer;
 
 const createRoomPlayerData = {
     roomId: "room-test-uuid",
     userId: "user-test-uuid",
     nickname: "Jogador 1",
+    sessionTokenHash: "a".repeat(64),
 };
 
 describe("RoomPlayerRepository", () => {
@@ -44,6 +48,34 @@ describe("RoomPlayerRepository", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         repository = new RoomPlayerRepository();
+    });
+
+    describe("countByRoomId", () => {
+        it("deve retornar a quantidade de participantes da sala", async () => {
+            roomPlayerModel.count.mockResolvedValue(3);
+
+            const result = await repository.countByRoomId(
+                roomPlayerFixture.roomId,
+            );
+
+            expect(roomPlayerModel.count).toHaveBeenCalledWith({
+                where: {
+                    roomId: roomPlayerFixture.roomId,
+                },
+            });
+
+            expect(result).toBe(3);
+        });
+
+        it("deve retornar zero quando a sala não possuir participantes", async () => {
+            roomPlayerModel.count.mockResolvedValue(0);
+
+            const result = await repository.countByRoomId(
+                roomPlayerFixture.roomId,
+            );
+
+            expect(result).toBe(0);
+        });
     });
 
     describe("findById", () => {
@@ -150,6 +182,34 @@ describe("RoomPlayerRepository", () => {
         });
     });
 
+    describe("findBySessionTokenHash", () => {
+        it("deve encontrar um participante pelo hash do token", async () => {
+            roomPlayerModel.findUnique.mockResolvedValue(roomPlayerFixture);
+
+            const result = await repository.findBySessionTokenHash(
+                roomPlayerFixture.sessionTokenHash!,
+            );
+
+            expect(roomPlayerModel.findUnique).toHaveBeenCalledWith({
+                where: {
+                    sessionTokenHash: roomPlayerFixture.sessionTokenHash,
+                },
+            });
+
+            expect(result).toEqual(roomPlayerFixture);
+        });
+
+        it("deve retornar null quando o hash não corresponder a um participante", async () => {
+            roomPlayerModel.findUnique.mockResolvedValue(null);
+
+            const result = await repository.findBySessionTokenHash(
+                "invalid-token-hash",
+            );
+
+            expect(result).toBeNull();
+        });
+    });
+
     describe("create", () => {
         it("deve cadastrar um participante na sala", async () => {
             roomPlayerModel.create.mockResolvedValue(roomPlayerFixture);
@@ -166,6 +226,7 @@ describe("RoomPlayerRepository", () => {
             const anonymousPlayer = {
                 ...roomPlayerFixture,
                 userId: null,
+                sessionTokenHash: "b".repeat(64),
             };
 
             roomPlayerModel.create.mockResolvedValue(anonymousPlayer);
@@ -173,12 +234,14 @@ describe("RoomPlayerRepository", () => {
             const result = await repository.create({
                 roomId: roomPlayerFixture.roomId,
                 nickname: "Jogador Anônimo",
+                sessionTokenHash: "b".repeat(64),
             });
 
             expect(roomPlayerModel.create).toHaveBeenCalledWith({
                 data: {
                     roomId: roomPlayerFixture.roomId,
                     nickname: "Jogador Anônimo",
+                    sessionTokenHash: "b".repeat(64),
                 },
             });
 

@@ -95,6 +95,7 @@ model RoomPlayer {
   nickname String
   score    Int      @default(0)
   joinedAt DateTime @default(now())
+  sessionTokenHash String?  @unique
 
   room Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
