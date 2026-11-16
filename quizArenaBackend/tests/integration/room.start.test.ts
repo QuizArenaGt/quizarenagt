@@ -97,14 +97,28 @@ async function createQuestions(
     quantity: number,
     isActive = true,
 ): Promise<void> {
-    await prisma.question.createMany({
-        data: Array.from({ length: quantity }, (_, index) => ({
-            roomId,
-            statement: `Pergunta de teste ${index + 1}`,
-            type: "TRUE_FALSE",
-            isActive,
-        })),
-    });
+    await Promise.all(
+        Array.from({ length: quantity }, (_, index) =>
+            prisma.question.create({
+                data: {
+                    roomId,
+                    statement: `Pergunta de teste ${index + 1}`,
+                    type: "MULTIPLE_CHOICE",
+                    isActive,
+                    options: {
+                        create: Array.from(
+                            { length: 4 },
+                            (_, optionIndex) => ({
+                                text: `Alternativa ${optionIndex + 1}`,
+                                isCorrect: optionIndex === 0,
+                                position: optionIndex,
+                            }),
+                        ),
+                    },
+                },
+            }),
+        ),
+    );
 }
 
 describe("POST /rooms/:id/start - Integração", () => {
@@ -136,11 +150,24 @@ describe("POST /rooms/:id/start - Integração", () => {
         expect(persistedRoom?.status).toBe("WAITING");
     });
 
-    it("deve iniciar a partida quando todos os requisitos forem atendidos", async () => {
+    it("deve iniciar a partida e persistir o snapshot do deck", async () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 2);
         await createQuestions(room.id, 5);
+
+        const originalQuestions = await prisma.question.findMany({
+            where: { roomId: room.id },
+            include: {
+                options: {
+                    orderBy: { position: "asc" },
+                },
+            },
+            orderBy: [
+                { createdAt: "asc" },
+                { id: "asc" },
+            ],
+        });
 
         const response = await request(app)
             .post(`/rooms/${room.id}/start`)
@@ -154,6 +181,100 @@ describe("POST /rooms/:id/start - Integração", () => {
         });
 
         expect(persistedRoom?.status).toBe("IN_PROGRESS");
+
+        const snapshot = await prisma.roomQuestionSnapshot.findUnique({
+            where: { roomId: room.id },
+            include: {
+                questions: {
+                    orderBy: { position: "asc" },
+                    include: {
+                        options: {
+                            orderBy: { position: "asc" },
+                        },
+                    },
+                },
+            },
+        });
+
+        expect(snapshot).not.toBeNull();
+        expect(snapshot?.questions).toHaveLength(5);
+
+        for (const [index, snapshotQuestion] of (
+            snapshot?.questions ?? []
+        ).entries()) {
+            const originalQuestion = originalQuestions[index];
+
+            expect(snapshotQuestion.sourceQuestionId).toBe(
+                originalQuestion.id,
+            );
+            expect(snapshotQuestion.statement).toBe(
+                originalQuestion.statement,
+            );
+            expect(snapshotQuestion.type).toBe(originalQuestion.type);
+            expect(snapshotQuestion.position).toBe(index);
+
+            expect(snapshotQuestion.options).toHaveLength(4);
+
+            for (const [optionIndex, snapshotOption] of (
+                snapshotQuestion.options
+            ).entries()) {
+                const originalOption = originalQuestion.options[optionIndex];
+
+                expect(snapshotOption.sourceOptionId).toBe(
+                    originalOption.id,
+                );
+                expect(snapshotOption.text).toBe(originalOption.text);
+                expect(snapshotOption.isCorrect).toBe(
+                    originalOption.isCorrect,
+                );
+                expect(snapshotOption.position).toBe(optionIndex);
+            }
+        }
+
+        // Altera as perguntas originais depois do início.
+        await prisma.question.updateMany({
+            where: { roomId: room.id },
+            data: {
+                statement: "Pergunta modificada após o início",
+                isActive: false,
+            },
+        });
+
+        await prisma.question.delete({
+            where: { id: originalQuestions[0].id },
+        });
+
+        const snapshotAfterChanges =
+            await prisma.roomQuestionSnapshot.findUnique({
+                where: { roomId: room.id },
+                include: {
+                    questions: {
+                        orderBy: { position: "asc" },
+                        include: {
+                            options: {
+                                orderBy: { position: "asc" },
+                            },
+                        },
+                    },
+                },
+            });
+
+        expect(snapshotAfterChanges?.questions).toHaveLength(5);
+
+        expect(
+            snapshotAfterChanges?.questions.some(
+                (question) =>
+                    question.sourceQuestionId === originalQuestions[0].id,
+            ),
+        ).toBe(true);
+
+        for (const snapshotQuestion of (
+            snapshotAfterChanges?.questions ?? []
+        )) {
+            expect(snapshotQuestion.statement).not.toBe(
+                "Pergunta modificada após o início",
+            );
+        }
     });
 
     it("não deve permitir que outro usuário inicie a partida", async () => {
@@ -207,6 +328,11 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(response.status).toBe(409);
 
+        const snapshot = await prisma.roomQuestionSnapshot.findUnique({
+            where: { roomId: room.id },
+        });
+
+        expect(snapshot).toBeNull();
         const persistedRoom = await prisma.room.findUnique({
             where: { id: room.id },
         });
@@ -292,5 +418,11 @@ describe("POST /rooms/:id/start - Integração", () => {
         });
 
         expect(persistedRoom?.status).toBe("IN_PROGRESS");
+
+        const snapshotCount = await prisma.roomQuestionSnapshot.count({
+            where: { roomId: room.id },
+        });
+
+        expect(snapshotCount).toBe(1);
     });
 });

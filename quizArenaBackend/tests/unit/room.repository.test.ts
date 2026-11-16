@@ -34,7 +34,10 @@ const transactionClient = {
         count: vi.fn(),
     },
     question: {
-        count: vi.fn(),
+        findMany: vi.fn(),
+    },
+    roomQuestionSnapshot: {
+        create: vi.fn(),
     },
 };
 
@@ -68,6 +71,25 @@ const createRoomData = {
     gameMode: "CLASSIC" as const,
 };
 
+const questionsFixture = Array.from({ length: 5 }, (_, questionIndex) => ({
+    id: `question-${questionIndex + 1}`,
+    statement: `Pergunta ${questionIndex + 1}`,
+    type: "MULTIPLE_CHOICE" as const,
+    isActive: true,
+    createdAt: new Date(
+        `2026-11-0${questionIndex + 1}T12:00:00.000Z`,
+    ),
+    updatedAt: new Date("2026-11-08T12:00:00.000Z"),
+    roomId: roomFixture.id,
+    options: Array.from({ length: 4 }, (_, optionIndex) => ({
+        id: `option-${questionIndex + 1}-${optionIndex + 1}`,
+        text: `Alternativa ${optionIndex + 1}`,
+        isCorrect: optionIndex === 0,
+        questionId: `question-${questionIndex + 1}`,
+        position: optionIndex,
+    })),
+}));
+
 describe("RoomRepository", () => {
     let repository: RoomRepository;
 
@@ -89,7 +111,13 @@ describe("RoomRepository", () => {
         });
 
         transactionClient.roomPlayer.count.mockResolvedValue(2);
-        transactionClient.question.count.mockResolvedValue(5);
+        transactionClient.question.findMany.mockResolvedValue(
+            questionsFixture,
+        );
+        transactionClient.roomQuestionSnapshot.create.mockResolvedValue({
+            id: "snapshot-test-uuid",
+            roomId: roomFixture.id,
+        });
 
         repository = new RoomRepository();
     });
@@ -231,7 +259,7 @@ describe("RoomRepository", () => {
     });
 
     describe("startIfReady", () => {
-        it("deve iniciar a sala quando todos os requisitos forem atendidos", async () => {
+        it("deve criar o snapshot e iniciar a sala quando todos os requisitos forem atendidos", async () => {
             const updatedRoom = {
                 ...roomFixture,
                 status: "IN_PROGRESS" as const,
@@ -255,10 +283,47 @@ describe("RoomRepository", () => {
                 where: { roomId: roomFixture.id },
             });
 
-            expect(transactionClient.question.count).toHaveBeenCalledWith({
+            expect(transactionClient.question.findMany).toHaveBeenCalledWith({
                 where: {
                     roomId: roomFixture.id,
                     isActive: true,
+                },
+                orderBy: [
+                    { createdAt: "asc" },
+                    { id: "asc" },
+                ],
+                include: {
+                    options: {
+                        orderBy: { position: "asc" },
+                    },
+                },
+            });
+
+            expect(
+                transactionClient.roomQuestionSnapshot.create,
+            ).toHaveBeenCalledWith({
+                data: {
+                    roomId: roomFixture.id,
+                    questions: {
+                        create: questionsFixture.map(
+                            (question, position) => ({
+                                sourceQuestionId: question.id,
+                                statement: question.statement,
+                                type: question.type,
+                                position,
+                                options: {
+                                    create: question.options.map(
+                                        (option, optionPosition) => ({
+                                            sourceOptionId: option.id,
+                                            text: option.text,
+                                            isCorrect: option.isCorrect,
+                                            position: optionPosition,
+                                        }),
+                                    ),
+                                },
+                            }),
+                        ),
+                    },
                 },
             });
 
@@ -266,6 +331,13 @@ describe("RoomRepository", () => {
                 where: { id: roomFixture.id },
                 data: { status: "IN_PROGRESS" },
             });
+
+            expect(
+                transactionClient.roomQuestionSnapshot.create.mock
+                    .invocationCallOrder[0],
+            ).toBeLessThan(
+                transactionClient.room.update.mock.invocationCallOrder[0],
+            );
 
             expect(result).toEqual({
                 success: true,
@@ -287,7 +359,10 @@ describe("RoomRepository", () => {
             });
 
             expect(transactionClient.roomPlayer.count).not.toHaveBeenCalled();
-            expect(transactionClient.question.count).not.toHaveBeenCalled();
+            expect(transactionClient.question.findMany).not.toHaveBeenCalled();
+            expect(
+                transactionClient.roomQuestionSnapshot.create,
+            ).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -303,7 +378,10 @@ describe("RoomRepository", () => {
             });
 
             expect(transactionClient.roomPlayer.count).not.toHaveBeenCalled();
-            expect(transactionClient.question.count).not.toHaveBeenCalled();
+            expect(transactionClient.question.findMany).not.toHaveBeenCalled();
+            expect(
+                transactionClient.roomQuestionSnapshot.create,
+            ).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -324,7 +402,10 @@ describe("RoomRepository", () => {
             });
 
             expect(transactionClient.roomPlayer.count).not.toHaveBeenCalled();
-            expect(transactionClient.question.count).not.toHaveBeenCalled();
+            expect(transactionClient.question.findMany).not.toHaveBeenCalled();
+            expect(
+                transactionClient.roomQuestionSnapshot.create,
+            ).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -341,12 +422,17 @@ describe("RoomRepository", () => {
                 reason: "NOT_ENOUGH_PLAYERS",
             });
 
-            expect(transactionClient.question.count).not.toHaveBeenCalled();
+            expect(transactionClient.question.findMany).not.toHaveBeenCalled();
+            expect(
+                transactionClient.roomQuestionSnapshot.create,
+            ).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
         it("deve retornar NOT_ENOUGH_QUESTIONS quando houver menos de 5 perguntas ativas", async () => {
-            transactionClient.question.count.mockResolvedValue(4);
+            transactionClient.question.findMany.mockResolvedValue(
+                questionsFixture.slice(0, 4),
+            );
 
             const result = await repository.startIfReady(
                 roomFixture.id,
@@ -358,6 +444,9 @@ describe("RoomRepository", () => {
                 reason: "NOT_ENOUGH_QUESTIONS",
             });
 
+            expect(
+                transactionClient.roomQuestionSnapshot.create,
+            ).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
     });
