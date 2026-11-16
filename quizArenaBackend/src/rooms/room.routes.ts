@@ -22,6 +22,13 @@ roomRoutes.post(
     },
 );
 
+roomRoutes.get(
+    "/:code",
+    (req, res) => {
+        void roomController.getLobby(req, res);
+    },
+);
+
 roomRoutes.patch(
     "/:id",
     authenticateToken,

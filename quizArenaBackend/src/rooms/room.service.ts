@@ -18,16 +18,19 @@ import {
     RoomNotJoinableError,
     RoomFullError,
     DuplicateNicknameError,
+    RoomAuthenticationError,
 } from "./room.errors.js";
 import { RoomPlayerRepository } from "./room-player.repository.js";
 import {
     generateRoomPlayerSessionToken,
     hashRoomPlayerSessionToken,
 } from "./room-player-session-token.js";
+import { JwtService } from "../auth/jwt.service.js";
+
 
 type RoomRepositoryContract = Pick<
     RoomRepository,
-    "create" | "findById" | "findByCode" | "update"
+    "create" | "findById" | "findByCode" | "findByCodeWithLobby" | "update"
 >;
 
 type RoomCodeGeneratorContract = Pick<
@@ -37,8 +40,10 @@ type RoomCodeGeneratorContract = Pick<
 
 type RoomPlayerRepositoryContract = Pick<
     RoomPlayerRepository,
-    "createIfRoomHasCapacity"
+    "createIfRoomHasCapacity" | "findBySessionTokenHash"
 >;
+
+type JwtServiceContract = Pick<JwtService, "verify">;
 
 export type CreateRoomInput = CreateRoomDto & {
     hostId: string;
@@ -54,6 +59,11 @@ export type JoinRoomResult = {
     player: Omit<RoomPlayer, "sessionTokenHash">;
     sessionToken: string;
 };
+
+type RoomLobby = NonNullable<
+    Awaited<ReturnType<RoomRepository["findByCodeWithLobby"]>>
+>;
+
 
 function isNicknameUniqueConstraint(error: unknown): boolean {
     if (
@@ -83,6 +93,7 @@ function isNicknameUniqueConstraint(error: unknown): boolean {
 }
 
 export class RoomService {
+
     constructor(
         private readonly roomRepository: RoomRepositoryContract =
             new RoomRepository(),
@@ -90,7 +101,11 @@ export class RoomService {
             new RoomCodeGenerator(),
         private readonly roomPlayerRepository: RoomPlayerRepositoryContract =
             new RoomPlayerRepository(),
+        private readonly jwtService: JwtServiceContract = {
+            verify: (token) => new JwtService().verify(token),
+        },
     ) { }
+
 
     async createRoom(data: CreateRoomInput): Promise<Room> {
         const validation = validateCreateRoom(data);
@@ -212,4 +227,57 @@ export class RoomService {
             sessionToken,
         };
     }
+
+    async getRoomLobby(code: string, token: string): Promise<RoomLobby> {
+        let authenticatedUserId: string | null = null;
+
+        try {
+            const payload = this.jwtService.verify(token);
+            authenticatedUserId = payload.sub;
+        } catch {
+            // Tokens que não são JWT válidos serão verificados como sessões de jogadores.
+        }
+
+        if (authenticatedUserId) {
+            const room = await this.roomRepository.findByCodeWithLobby(code);
+
+            if (!room) {
+                throw new RoomNotFoundError();
+            }
+
+            if (room.hostId !== authenticatedUserId) {
+                throw new RoomAccessDeniedError(
+                    "Somente o host pode consultar esta sala com sua conta.",
+                );
+            }
+
+            return room;
+        }
+
+        const sessionTokenHash = hashRoomPlayerSessionToken(token);
+
+        const player =
+            await this.roomPlayerRepository.findBySessionTokenHash(
+                sessionTokenHash,
+            );
+
+        if (!player) {
+            throw new RoomAuthenticationError();
+        }
+
+        const room = await this.roomRepository.findByCodeWithLobby(code);
+
+        if (!room) {
+            throw new RoomNotFoundError();
+        }
+
+        if (player.roomId !== room.id) {
+            throw new RoomAccessDeniedError(
+                "Você não participa desta sala.",
+            );
+        }
+
+        return room;
+    }
+
 }

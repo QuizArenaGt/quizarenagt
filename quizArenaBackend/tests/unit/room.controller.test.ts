@@ -8,6 +8,7 @@ import {
     RoomNotFoundError,
     RoomAccessDeniedError,
     RoomNotEditableError,
+    RoomAuthenticationError,
 } from "../../src/rooms/room.errors.js";
 import type { RoomService } from "../../src/rooms/room.service.js";
 
@@ -15,6 +16,7 @@ describe("RoomController", () => {
     let roomService: {
         createRoom: ReturnType<typeof vi.fn>;
         updateRoom: ReturnType<typeof vi.fn>;
+        getRoomLobby: ReturnType<typeof vi.fn>;
     };
 
     let controller: RoomController;
@@ -55,6 +57,7 @@ describe("RoomController", () => {
         roomService = {
             createRoom: vi.fn(),
             updateRoom: vi.fn(),
+            getRoomLobby: vi.fn(),
         };
 
         controller = new RoomController(
@@ -230,6 +233,137 @@ describe("RoomController", () => {
                 message: "Erro interno ao atualizar sala.",
             });
             expect(consoleSpy).toHaveBeenCalled();
+        });
+    });
+
+    describe("getLobby", () => {
+        const lobbyFixture = {
+            id: roomFixture.id,
+            code: roomFixture.code,
+            status: "WAITING",
+            gameMode: "CLASSIC",
+            maxPlayers: 10,
+            questionTime: 30,
+            createdAt: new Date("2026-11-16T00:00:00.000Z"),
+            host: {
+                id: authenticatedUser.id,
+                name: "HostTeste",
+            },
+            players: [
+                {
+                    id: "player-test-uuid",
+                    nickname: "JogadorTeste",
+                    score: 0,
+                    joinedAt: new Date("2026-11-16T00:01:00.000Z"),
+                },
+            ],
+        };
+
+        beforeEach(() => {
+            req.params = { code: "ABC123" };
+            req.headers = {
+                authorization: "Bearer token-de-teste",
+            } as Request["headers"];
+        });
+
+        it("deve retornar 400 quando o código da sala for inválido", async () => {
+            req.params = { code: "ABC" };
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(roomService.getRoomLobby).not.toHaveBeenCalled();
+        });
+
+        it("deve retornar 401 quando não houver credencial", async () => {
+            req.headers = {} as Request["headers"];
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(roomService.getRoomLobby).not.toHaveBeenCalled();
+        });
+
+        it("deve retornar 401 quando o token estiver vazio", async () => {
+            req.headers = {
+                authorization: "Bearer ",
+            } as Request["headers"];
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(roomService.getRoomLobby).not.toHaveBeenCalled();
+        });
+
+        it("deve consultar o lobby e retornar 200", async () => {
+            roomService.getRoomLobby.mockResolvedValue(lobbyFixture);
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(roomService.getRoomLobby).toHaveBeenCalledWith(
+                "ABC123",
+                "token-de-teste",
+            );
+
+            expect(res.status).toHaveBeenCalledWith(200);
+
+            expect(res.json).toHaveBeenCalledWith({
+                room: {
+                    ...lobbyFixture,
+                    playerCount: 1,
+                },
+            });
+        });
+
+        it("deve retornar 401 quando o serviço rejeitar a autenticação", async () => {
+            roomService.getRoomLobby.mockRejectedValue(
+                new RoomAuthenticationError(),
+            );
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(401);
+        });
+
+        it("deve retornar 403 quando o usuário não tiver acesso à sala", async () => {
+            roomService.getRoomLobby.mockRejectedValue(
+                new RoomAccessDeniedError(),
+            );
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(403);
+        });
+
+        it("deve retornar 404 quando a sala não existir", async () => {
+            roomService.getRoomLobby.mockRejectedValue(
+                new RoomNotFoundError(),
+            );
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(404);
         });
     });
 });

@@ -34,6 +34,31 @@ export class RoomRepository {
         });
     }
 
+    async findByCodeWithLobby(code: string) {
+        return prisma.room.findUnique({
+            where: { code },
+            include: {
+                host: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                players: {
+                    select: {
+                        id: true,
+                        nickname: true,
+                        score: true,
+                        joinedAt: true,
+                    },
+                    orderBy: {
+                        joinedAt: "asc",
+                    },
+                },
+            },
+        });
+    }
+
     async findManyByHostId(hostId: string): Promise<Room[]> {
         return prisma.room.findMany({
             where: { hostId },
