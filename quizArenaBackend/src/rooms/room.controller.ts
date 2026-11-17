@@ -9,6 +9,7 @@ import {
     RoomNotJoinableError,
     RoomFullError,
     DuplicateNicknameError,
+    RoomAuthenticationError,
 } from "./room.errors.js";
 
 
@@ -152,5 +153,84 @@ export class RoomController {
             });
         }
     }
+
+
+    async getLobby(req: Request, res: Response): Promise<void> {
+        const code = req.params.code;
+        const authorization = req.headers.authorization;
+
+        if (typeof code !== "string" || !/^[A-Z0-9]{6}$/i.test(code)) {
+            res.status(400).json({
+                message: "Código da sala inválido.",
+            });
+            return;
+        }
+
+        if (!authorization?.startsWith("Bearer ")) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const token = authorization.slice(7).trim();
+
+        if (!token) {
+            res.status(401).json({
+                message: "Token inválido.",
+            });
+            return;
+        }
+
+        try {
+            const room = await this.roomService.getRoomLobby(
+                code.toUpperCase(),
+                token,
+            );
+
+            res.status(200).json({
+                room: {
+                    id: room.id,
+                    code: room.code,
+                    status: room.status,
+                    gameMode: room.gameMode,
+                    maxPlayers: room.maxPlayers,
+                    questionTime: room.questionTime,
+                    createdAt: room.createdAt,
+                    host: room.host,
+                    players: room.players,
+                    playerCount: room.players.length,
+                },
+            });
+        } catch (error: unknown) {
+            if (error instanceof RoomAuthenticationError) {
+                res.status(401).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao consultar lobby.");
+
+            res.status(500).json({
+                message: "Erro interno ao consultar lobby.",
+            });
+        }
+    }
+
 
 }

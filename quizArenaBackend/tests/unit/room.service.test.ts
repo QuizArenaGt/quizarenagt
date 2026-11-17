@@ -16,6 +16,7 @@ import {
     RoomNotJoinableError,
     RoomFullError,
     DuplicateNicknameError,
+    RoomAuthenticationError,
 } from "../../src/rooms/room.errors.js";
 
 import type { RoomRepository } from "../../src/rooms/room.repository.js";
@@ -28,12 +29,16 @@ import {
 
 type Repository = Pick<
     RoomRepository,
-    "create" | "findById" | "findByCode" | "update"
+    | "create"
+    | "findById"
+    | "findByCode"
+    | "findByCodeWithLobby"
+    | "update"
 >;
 
 type PlayerRepository = Pick<
     RoomPlayerRepository,
-    "createIfRoomHasCapacity"
+    "createIfRoomHasCapacity" | "findBySessionTokenHash"
 >;
 
 type CodeGenerator = Pick<RoomCodeGenerator, "generate">;
@@ -64,40 +69,193 @@ describe("RoomService", () => {
         create: ReturnType<typeof vi.fn>;
         findById: ReturnType<typeof vi.fn>;
         findByCode: ReturnType<typeof vi.fn>;
+        findByCodeWithLobby: ReturnType<typeof vi.fn>;
         update: ReturnType<typeof vi.fn>;
     };
 
     let playerRepository: {
         createIfRoomHasCapacity: ReturnType<typeof vi.fn>;
+        findBySessionTokenHash: ReturnType<typeof vi.fn>;
     };
 
     let codeGenerator: {
         generate: ReturnType<typeof vi.fn>;
     };
 
-    let service: RoomService;
+    let jwtService: {
+        verify: ReturnType<typeof vi.fn>;
+    };
 
+    let service: RoomService;
     beforeEach(() => {
         repository = {
             create: vi.fn(),
             findById: vi.fn(),
             findByCode: vi.fn(),
+            findByCodeWithLobby: vi.fn(),
             update: vi.fn(),
         };
 
         playerRepository = {
             createIfRoomHasCapacity: vi.fn(),
+            findBySessionTokenHash: vi.fn(),
         };
 
         codeGenerator = {
             generate: vi.fn().mockResolvedValue(generatedCode),
         };
 
+        jwtService = {
+            verify: vi.fn(),
+        };
+
         service = new RoomService(
             repository as Repository,
             codeGenerator as CodeGenerator,
             playerRepository as PlayerRepository,
+            jwtService as never,
         );
+    });
+
+    describe("getRoomLobby", () => {
+        const token = "token-de-teste";
+
+        const lobbyFixture = {
+            ...roomFixture,
+            host: {
+                id: roomFixture.hostId,
+                name: "HostTeste",
+            },
+            players: [
+                {
+                    id: "player-test-uuid",
+                    nickname: "JogadorTeste",
+                    score: 0,
+                    joinedAt: new Date("2026-11-16T00:00:00.000Z"),
+                },
+            ],
+        };
+
+        const playerFixture = {
+            id: "player-test-uuid",
+            roomId: roomFixture.id,
+            userId: null,
+            nickname: "JogadorTeste",
+            score: 0,
+            joinedAt: new Date("2026-11-16T00:00:00.000Z"),
+            sessionTokenHash: hashRoomPlayerSessionToken(token),
+        };
+
+        it("deve permitir que o host consulte o lobby usando JWT", async () => {
+            jwtService.verify.mockReturnValue({
+                sub: roomFixture.hostId,
+                role: "HOST",
+            });
+
+            repository.findByCodeWithLobby.mockResolvedValue(lobbyFixture);
+
+            const result = await service.getRoomLobby(
+                generatedCode,
+                token,
+            );
+
+            expect(jwtService.verify).toHaveBeenCalledWith(token);
+            expect(repository.findByCodeWithLobby).toHaveBeenCalledWith(
+                generatedCode,
+            );
+            expect(result).toEqual(lobbyFixture);
+            expect(
+                playerRepository.findBySessionTokenHash,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar JWT válido de usuário que não seja o host", async () => {
+            jwtService.verify.mockReturnValue({
+                sub: "another-user-uuid",
+                role: "USER",
+            });
+
+            repository.findByCodeWithLobby.mockResolvedValue(lobbyFixture);
+
+            await expect(
+                service.getRoomLobby(generatedCode, token),
+            ).rejects.toBeInstanceOf(RoomAccessDeniedError);
+
+            expect(
+                playerRepository.findBySessionTokenHash,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("deve permitir que um jogador consulte o lobby usando seu token de sessão", async () => {
+            jwtService.verify.mockImplementation(() => {
+                throw new Error("JWT inválido");
+            });
+
+            playerRepository.findBySessionTokenHash.mockResolvedValue(
+                playerFixture,
+            );
+
+            repository.findByCodeWithLobby.mockResolvedValue(lobbyFixture);
+
+            const result = await service.getRoomLobby(
+                generatedCode,
+                token,
+            );
+
+            expect(
+                playerRepository.findBySessionTokenHash,
+            ).toHaveBeenCalledWith(hashRoomPlayerSessionToken(token));
+
+            expect(repository.findByCodeWithLobby).toHaveBeenCalledWith(
+                generatedCode,
+            );
+
+            expect(result).toEqual(lobbyFixture);
+        });
+
+        it("deve rejeitar token de sessão inexistente", async () => {
+            jwtService.verify.mockImplementation(() => {
+                throw new Error("JWT inválido");
+            });
+
+            playerRepository.findBySessionTokenHash.mockResolvedValue(null);
+
+            await expect(
+                service.getRoomLobby(generatedCode, token),
+            ).rejects.toBeInstanceOf(RoomAuthenticationError);
+
+            expect(repository.findByCodeWithLobby).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar jogador que pertence a outra sala", async () => {
+            jwtService.verify.mockImplementation(() => {
+                throw new Error("JWT inválido");
+            });
+
+            playerRepository.findBySessionTokenHash.mockResolvedValue({
+                ...playerFixture,
+                roomId: "another-room-uuid",
+            });
+
+            repository.findByCodeWithLobby.mockResolvedValue(lobbyFixture);
+
+            await expect(
+                service.getRoomLobby(generatedCode, token),
+            ).rejects.toBeInstanceOf(RoomAccessDeniedError);
+        });
+
+        it("deve rejeitar consulta quando a sala não existir para o host", async () => {
+            jwtService.verify.mockReturnValue({
+                sub: roomFixture.hostId,
+                role: "HOST",
+            });
+
+            repository.findByCodeWithLobby.mockResolvedValue(null);
+
+            await expect(
+                service.getRoomLobby(generatedCode, token),
+            ).rejects.toBeInstanceOf(RoomNotFoundError);
+        });
     });
 
     describe("createRoom", () => {

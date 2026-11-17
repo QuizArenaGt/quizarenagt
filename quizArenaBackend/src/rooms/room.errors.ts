@@ -53,3 +53,11 @@ export class DuplicateNicknameError extends Error {
         this.name = "DuplicateNicknameError";
     }
 }
+
+
+export class RoomAuthenticationError extends Error {
+    constructor(message = "Token de acesso inválido ou ausente.") {
+        super(message);
+        this.name = "RoomAuthenticationError";
+    }
+}
