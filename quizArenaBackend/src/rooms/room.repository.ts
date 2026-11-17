@@ -152,19 +152,52 @@ export class RoomRepository {
                 };
             }
 
-            const questionCount = await tx.question.count({
+            const questions = await tx.question.findMany({
                 where: {
                     roomId,
                     isActive: true,
                 },
+                orderBy: [
+                    { createdAt: "asc" },
+                    { id: "asc" },
+                ],
+                include: {
+                    options: {
+                        orderBy: { position: "asc" },
+                    },
+                },
             });
 
-            if (questionCount < 5) {
+            if (questions.length < 5) {
                 return {
                     success: false,
                     reason: "NOT_ENOUGH_QUESTIONS",
                 };
             }
+
+            await tx.roomQuestionSnapshot.create({
+                data: {
+                    roomId,
+                    questions: {
+                        create: questions.map((question, position) => ({
+                            sourceQuestionId: question.id,
+                            statement: question.statement,
+                            type: question.type,
+                            position,
+                            options: {
+                                create: question.options.map(
+                                    (option, optionPosition) => ({
+                                        sourceOptionId: option.id,
+                                        text: option.text,
+                                        isCorrect: option.isCorrect,
+                                        position: optionPosition,
+                                    }),
+                                ),
+                            },
+                        })),
+                    },
+                },
+            });
 
             const updatedRoom = await tx.room.update({
                 where: { id: roomId },

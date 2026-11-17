@@ -33,13 +33,21 @@ export class QuestionRepository {
     async findById(id: string): Promise<QuestionWithOptions | null> {
         return prisma.question.findUnique({
             where: { id },
-            include: { options: true },
+            include: {
+                options: {
+                    orderBy: { position: "asc" },
+                },
+            },
         });
     }
 
     async findMany(): Promise<QuestionWithOptions[]> {
         return prisma.question.findMany({
-            include: { options: true },
+            include: {
+                options: {
+                    orderBy: { position: "asc" },
+                },
+            },
             orderBy: { createdAt: "desc" },
         });
     }
@@ -51,10 +59,17 @@ export class QuestionRepository {
                 type: data.type,
                 roomId: data.roomId,
                 options: {
-                    create: data.options,
+                    create: data.options.map((option, position) => ({
+                        ...option,
+                        position,
+                    })),
                 },
             },
-            include: { options: true },
+            include: {
+                options: {
+                    orderBy: { position: "asc" },
+                },
+            },
         });
     }
 
@@ -74,11 +89,18 @@ export class QuestionRepository {
                 ...(data.options !== undefined && {
                     options: {
                         deleteMany: {},
-                        create: data.options,
+                        create: data.options.map((option, position) => ({
+                            ...option,
+                            position,
+                        })),
                     },
                 }),
             },
-            include: { options: true },
+            include: {
+                options: {
+                    orderBy: { position: "asc" },
+                },
+            },
         });
     }
 

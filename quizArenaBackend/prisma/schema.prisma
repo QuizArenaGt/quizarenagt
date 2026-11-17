@@ -43,7 +43,7 @@ model Question {
   roomId    String
   room      Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
-  options       QuestionOption[]
+  options QuestionOption[]
 
   @@map("questions")
 }
@@ -52,9 +52,11 @@ model QuestionOption {
   id         String   @id @default(uuid())
   text       String
   isCorrect  Boolean  @default(false)
+  position   Int
   questionId String
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
+  @@unique([questionId, position])
   @@map("question_options")
 }
 
@@ -71,30 +73,31 @@ enum RoomStatus {
 }
 
 model Room {
-  id           String       @id @default(uuid())
-  code         String       @unique
-  hostId       String
-  maxPlayers   Int
-  questionTime Int
-  gameMode     GameMode     @default(CLASSIC)
-  status       RoomStatus   @default(WAITING)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  players      RoomPlayer[]
-  questions    Question[]
+  id               String                @id @default(uuid())
+  code             String                @unique
+  hostId           String
+  maxPlayers       Int
+  questionTime     Int
+  gameMode         GameMode              @default(CLASSIC)
+  status           RoomStatus            @default(WAITING)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  players          RoomPlayer[]
+  questions        Question[]
+  questionSnapshot RoomQuestionSnapshot?
 
-  host          User           @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  host User @relation(fields: [hostId], references: [id], onDelete: Restrict)
 
   @@map("rooms")
 }
 
 model RoomPlayer {
-  id       String   @id @default(uuid())
-  roomId   String
-  userId   String?
-  nickname String
-  score    Int      @default(0)
-  joinedAt DateTime @default(now())
+  id               String   @id @default(uuid())
+  roomId           String
+  userId           String?
+  nickname         String
+  score            Int      @default(0)
+  joinedAt         DateTime @default(now())
   sessionTokenHash String?  @unique
 
   room Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -103,4 +106,44 @@ model RoomPlayer {
   @@unique([roomId, nickname])
   @@unique([roomId, userId])
   @@map("room_players")
+}
+
+model RoomQuestionSnapshot {
+  id        String   @id @default(uuid())
+  roomId    String   @unique
+  createdAt DateTime @default(now())
+
+  room      Room                           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  questions RoomQuestionSnapshotQuestion[]
+
+  @@map("room_question_snapshots")
+}
+
+model RoomQuestionSnapshotQuestion {
+  id               String       @id @default(uuid())
+  sourceQuestionId String
+  statement        String
+  type             QuestionType
+  position         Int
+  snapshotId       String
+
+  snapshot RoomQuestionSnapshot         @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  options  RoomQuestionSnapshotOption[]
+
+  @@unique([snapshotId, position])
+  @@map("room_question_snapshot_questions")
+}
+
+model RoomQuestionSnapshotOption {
+  id                 String  @id @default(uuid())
+  sourceOptionId     String
+  text               String
+  isCorrect          Boolean @default(false)
+  position           Int
+  questionSnapshotId String
+
+  questionSnapshot RoomQuestionSnapshotQuestion @relation(fields: [questionSnapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([questionSnapshotId, position])
+  @@map("room_question_snapshot_options")
 }
