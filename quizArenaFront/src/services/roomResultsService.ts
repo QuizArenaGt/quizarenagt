@@ -1,95 +1,99 @@
-/*
- * SERVICE TEMPORÁRIO — resultados das salas no navegador.
- *
- * Registra o resultado de cada aluno que conclui uma partida em uma sala
- * do professor, para o relatório da sala finalizada. Também guarda os
- * jogadores simulados de cada sala, para que todos os alunos (e o
- * professor) vejam a mesma turma.
- *
- * Com o backend, estes dados virão do servidor (ex.: GET /rooms/:id/results).
- */
-import type { OpponentPlayer } from '../models/game';
 import type { PlayerResult, RoomResults } from '../models/roomReport';
-import { simulatePlayers } from './mock/simulatedPlayers';
-
-const STORAGE_KEY = 'quizarena:room-results';
+import type { RoundClosedPayload } from './socket';
 
 type ResultsStore = Record<string, RoomResults>;
 
-function readStore(): ResultsStore {
-    try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            const parsed: unknown = JSON.parse(stored);
-            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-                return parsed as ResultsStore;
-            }
-        }
-    } catch {
-        // Dado corrompido ou localStorage indisponível: começa vazio.
-    }
-    return {};
-}
-
-function writeStore(store: ResultsStore): void {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-    } catch {
-        // Sem espaço ou sem permissão: os resultados valem só nesta sessão.
-    }
-}
-
-function sameQuestions(a: string[], b: string[]): boolean {
-    return a.length === b.length && a.every((id, index) => id === b[index]);
-}
+const memoryStore: ResultsStore = {};
 
 export function loadRoomResults(roomId: string): RoomResults | null {
-    return readStore()[roomId] ?? null;
+    return memoryStore[roomId] ?? null;
 }
 
-/** Resultados de todas as salas, indexados pelo id da sala. */
 export function loadAllRoomResults(): Record<string, RoomResults> {
-    return readStore();
+    return { ...memoryStore };
 }
 
-/**
- * Devolve os jogadores simulados da sala, criando-os na primeira entrada.
- * Se o professor mudou as perguntas da sala, os resultados antigos deixam
- * de ser comparáveis e são recomeçados.
- */
-export function getOrCreateSimulatedPlayers(
+export function recordRoundClosedResult(
     roomId: string,
-    questionIds: string[],
-    timePerQuestion: number,
-): OpponentPlayer[] {
-    const store = readStore();
-    const existing = store[roomId];
+    payload: RoundClosedPayload,
+): void {
+    const { round } = payload;
+    const questionId = round.question.id;
 
-    if (existing && sameQuestions(existing.questionIds, questionIds)) {
-        return existing.simulatedPlayers;
+    const existing: RoomResults = memoryStore[roomId] ?? {
+        questionIds: [],
+        simulatedPlayers: [],
+        players: [],
+    };
+
+    if (!existing.questionIds.includes(questionId)) {
+        existing.questionIds.push(questionId);
     }
 
-    const simulatedPlayers = simulatePlayers(questionIds.length, timePerQuestion);
-    store[roomId] = { questionIds, simulatedPlayers, players: [] };
-    writeStore(store);
-    return simulatedPlayers;
+    const allParticipants = new Map<
+        string,
+        { nickname: string; isCorrect: boolean; points: number }
+    >();
+
+    for (const ans of round.answers) {
+        allParticipants.set(ans.player.nickname, {
+            nickname: ans.player.nickname,
+            isCorrect: ans.isCorrect,
+            points: ans.points,
+        });
+    }
+
+    for (const unanswered of round.unansweredPlayers) {
+        if (!allParticipants.has(unanswered.nickname)) {
+            allParticipants.set(unanswered.nickname, {
+                nickname: unanswered.nickname,
+                isCorrect: false,
+                points: 0,
+            });
+        }
+    }
+
+    for (const [nickname, outcome] of allParticipants.entries()) {
+        let playerResult = existing.players.find((p) => p.nickname === nickname);
+        if (!playerResult) {
+            playerResult = {
+                nickname,
+                isSimulated: false,
+                answers: [],
+            };
+            existing.players.push(playerResult);
+        }
+
+        const otherAnswers = playerResult.answers.filter(
+            (a) => a.questionId !== questionId,
+        );
+        playerResult.answers = [
+            ...otherAnswers,
+            {
+                questionId,
+                isCorrect: outcome.isCorrect,
+                points: outcome.points,
+            },
+        ];
+    }
+
+    memoryStore[roomId] = existing;
 }
 
-/** Registra o resultado do aluno; se o mesmo apelido jogar de novo, vale o último. */
 export function savePlayerResult(roomId: string, result: PlayerResult): void {
-    const store = readStore();
-    const roomResults = store[roomId];
-    if (!roomResults) return;
+    const existing: RoomResults = memoryStore[roomId] ?? {
+        questionIds: result.answers.map((a) => a.questionId),
+        simulatedPlayers: [],
+        players: [],
+    };
 
-    roomResults.players = [
-        ...roomResults.players.filter((player) => player.nickname !== result.nickname),
-        result,
+    existing.players = [
+        ...existing.players.filter((player) => player.nickname !== result.nickname),
+        { ...result, isSimulated: false },
     ];
-    writeStore(store);
+    memoryStore[roomId] = existing;
 }
 
 export function deleteRoomResults(roomId: string): void {
-    const store = readStore();
-    delete store[roomId];
-    writeStore(store);
+    delete memoryStore[roomId];
 }

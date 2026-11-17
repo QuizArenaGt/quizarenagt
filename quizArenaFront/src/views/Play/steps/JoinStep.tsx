@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
-import { DEMO_ROOM_PIN, PIN_LENGTH } from '../../../models/game';
+import { PIN_LENGTH } from '../../../models/game';
 
 interface JoinStepProps {
     pin: string;
@@ -30,9 +30,9 @@ export default function JoinStep({ pin, error, isJoining, onPinChange, onSubmit 
                     ref={inputRef}
                     id="play-pin"
                     className="play-form__input play-form__input--pin"
-                    inputMode="numeric"
+                    type="text"
                     autoComplete="off"
-                    placeholder="000000"
+                    placeholder="EX: A1B2C3"
                     maxLength={PIN_LENGTH}
                     value={pin}
                     onChange={(event) => onPinChange(event.target.value)}
@@ -47,13 +47,12 @@ export default function JoinStep({ pin, error, isJoining, onPinChange, onSubmit 
                 )}
 
                 <Button type="submit" size="lg" fullWidth disabled={isJoining}>
-                    {isJoining ? 'Entrando…' : 'Entrar'}
+                    {isJoining ? 'Continuando…' : 'Continuar'}
                 </Button>
             </form>
 
             <p id="play-join-hint" className="play-card__hint">
-                Modo de demonstração: use o código <strong>{DEMO_ROOM_PIN}</strong> ou o de uma sala criada no
-                painel do professor neste navegador.
+                Informe o código de 6 caracteres (letras e números) exibido pelo anfitrião.
             </p>
         </section>
     );

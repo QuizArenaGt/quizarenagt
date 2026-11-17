@@ -1,4 +1,3 @@
-import Button from '../../../components/ui/Button/Button';
 import Icon from '../../../components/ui/Icon/Icon';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
 import type { PlayerAnswer, RankingEntry } from '../../../models/game';
@@ -11,12 +10,9 @@ interface FeedbackStepProps {
     totalScore: number;
     ranking: RankingEntry[];
     playerPosition: number | null;
-    isLastQuestion: boolean;
-    onNext: () => void;
 }
 
-/** Quantas posições aparecem no ranking parcial entre as perguntas. */
-const PARTIAL_RANKING_SIZE = 3;
+const PARTIAL_RANKING_SIZE = 5;
 
 export default function FeedbackStep({
     question,
@@ -24,8 +20,6 @@ export default function FeedbackStep({
     totalScore,
     ranking,
     playerPosition,
-    isLastQuestion,
-    onNext,
 }: FeedbackStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
 
@@ -40,6 +34,9 @@ export default function FeedbackStep({
         timeout: 'Tempo esgotado!',
     }[status];
 
+    const formattedPoints =
+        answer.points >= 0 ? `+${answer.points} pontos` : `${answer.points} pontos`;
+
     return (
         <section
             className={`play-card play-card--center play-feedback play-feedback--${status}`}
@@ -53,7 +50,7 @@ export default function FeedbackStep({
                 {title}
             </h1>
 
-            <p className="play-feedback__points">+{answer.points} pontos</p>
+            <p className="play-feedback__points">{formattedPoints}</p>
 
             {!answer.isCorrect && correctOption && (
                 <p className="play-feedback__answer">
@@ -76,9 +73,14 @@ export default function FeedbackStep({
                 <RankingList entries={ranking} limit={PARTIAL_RANKING_SIZE} />
             </div>
 
-            <Button size="lg" fullWidth onClick={onNext}>
-                {isLastQuestion ? 'Ver resultado' : 'Próxima pergunta'}
-            </Button>
+            <p className="play-lobby__waiting" style={{ marginTop: '16px' }}>
+                Aguardando o anfitrião avançar a rodada
+                <span className="play-lobby__dots" aria-hidden="true">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                </span>
+            </p>
         </section>
     );
 }

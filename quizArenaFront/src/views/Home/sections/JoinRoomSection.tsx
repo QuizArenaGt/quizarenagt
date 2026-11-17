@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
-import { DEMO_ROOM_PIN, PIN_LENGTH } from '../../../models/game';
+import { PIN_LENGTH } from '../../../models/game';
 
 interface JoinRoomSectionProps {
     id: string;
@@ -47,10 +47,10 @@ export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps
                                 id="room-pin"
                                 name="room-pin"
                                 className="home-join__input"
-                                inputMode="numeric"
+                                type="text"
                                 autoComplete="off"
                                 maxLength={PIN_LENGTH}
-                                placeholder="000000"
+                                placeholder="EX: A1B2C3"
                                 aria-describedby={hintId}
                             />
                             <Button type="submit" size="lg" fullWidth>
@@ -58,7 +58,7 @@ export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps
                             </Button>
                         </div>
                         <p id={hintId} className="home-join__hint">
-                            Modo de demonstração: use o código <strong>{DEMO_ROOM_PIN}</strong>.
+                            Informe o código de 6 caracteres exibido pelo anfitrião da partida.
                         </p>
                     </form>
                 </div>

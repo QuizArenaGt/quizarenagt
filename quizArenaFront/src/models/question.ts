@@ -24,6 +24,7 @@ export interface Question {
     isActive: boolean;
     theme: string;
     options: QuestionOption[];
+    roomId?: string;
 }
 
 // ===== Regras de domínio =====

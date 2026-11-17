@@ -14,7 +14,6 @@ interface ResultStepProps {
     correctCount: number;
     ranking: RankingEntry[];
     playerPosition: number | null;
-    isDemo: boolean;
     onPlayAgain: () => void;
     onLeave: () => void;
 }
@@ -27,7 +26,6 @@ export default function ResultStep({
     correctCount,
     ranking,
     playerPosition,
-    isDemo,
     onPlayAgain,
     onLeave,
 }: ResultStepProps) {
@@ -53,33 +51,40 @@ export default function ResultStep({
 
             <Podium ranking={ranking} />
 
-            <h2 className="play-result__subtitle">Classificação</h2>
+            <h2 className="play-result__subtitle">Classificação Final</h2>
             <RankingList entries={ranking} />
-            {isDemo && (
-                <p className="play-result__note">Os demais jogadores são simulados nesta demonstração.</p>
-            )}
 
-            <h2 className="play-result__subtitle">Suas respostas</h2>
-            <ol className="play-result__list">
-                {questions.map((question) => {
-                    const answer = answers.find((item) => item.questionId === question.id);
-                    const isCorrect = answer?.isCorrect ?? false;
-                    return (
-                        <li key={question.id} className={`play-result__item${isCorrect ? ' is-correct' : ''}`}>
-                            <span className="play-result__mark">
-                                <Icon name={isCorrect ? 'check' : 'close'} size={16} />
-                                <span className="sr-only">{isCorrect ? 'Acertou' : 'Errou'}</span>
-                            </span>
-                            <span className="play-result__statement">{question.statement}</span>
-                            <span className="play-result__points">+{answer?.points ?? 0}</span>
-                        </li>
-                    );
-                })}
-            </ol>
+            {questions.length > 0 && (
+                <>
+                    <h2 className="play-result__subtitle">Suas respostas</h2>
+                    <ol className="play-result__list">
+                        {questions.map((question) => {
+                            const answer = answers.find((item) => item.questionId === question.id);
+                            const isCorrect = answer?.isCorrect ?? false;
+                            const pts = answer?.points ?? 0;
+                            return (
+                                <li
+                                    key={question.id}
+                                    className={`play-result__item${isCorrect ? ' is-correct' : ''}`}
+                                >
+                                    <span className="play-result__mark">
+                                        <Icon name={isCorrect ? 'check' : 'close'} size={16} />
+                                        <span className="sr-only">{isCorrect ? 'Acertou' : 'Errou'}</span>
+                                    </span>
+                                    <span className="play-result__statement">{question.statement}</span>
+                                    <span className="play-result__points">
+                                        {pts >= 0 ? `+${pts}` : `${pts}`}
+                                    </span>
+                                </li>
+                            );
+                        })}
+                    </ol>
+                </>
+            )}
 
             <div className="play-result__actions">
                 <Button size="lg" onClick={onPlayAgain}>
-                    Jogar novamente
+                    Entrar em outra sala
                 </Button>
                 <Button size="lg" variant="secondary" onClick={onLeave}>
                     Voltar ao início

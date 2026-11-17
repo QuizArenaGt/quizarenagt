@@ -7,10 +7,13 @@ interface QuestionStepProps {
     totalQuestions: number;
     remainingSeconds: number;
     timeLimit: number;
+    selectedOptionId: string | null;
+    hasSubmittedAnswer: boolean;
+    isSubmittingAnswer: boolean;
+    answerError: string | null;
     onAnswer: (optionId: string) => void;
 }
 
-/** Abaixo deste tempo o cronômetro muda de cor para avisar o aluno. */
 const LOW_TIME_SECONDS = 5;
 
 export default function QuestionStep({
@@ -19,17 +22,25 @@ export default function QuestionStep({
     totalQuestions,
     remainingSeconds,
     timeLimit,
+    selectedOptionId,
+    hasSubmittedAnswer,
+    isSubmittingAnswer,
+    answerError,
     onAnswer,
 }: QuestionStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
     const timeRatio = timeLimit > 0 ? remainingSeconds / timeLimit : 0;
     const isLowTime = remainingSeconds <= LOW_TIME_SECONDS;
+    const isLocked = hasSubmittedAnswer || isSubmittingAnswer || remainingSeconds <= 0;
 
     return (
         <section className="play-question" aria-labelledby="play-question-title">
             <div className="play-question__top">
                 <span className="play-question__counter">
-                    Pergunta {questionNumber} de {totalQuestions} · {QUESTION_TYPE_LABEL[question.type]}
+                    {totalQuestions > 0
+                        ? `Pergunta ${questionNumber} de ${totalQuestions}`
+                        : `Rodada ${questionNumber}`}{' '}
+                    · {QUESTION_TYPE_LABEL[question.type]}
                 </span>
                 <span
                     className={`play-question__timer${isLowTime ? ' is-low' : ''}`}
@@ -40,7 +51,6 @@ export default function QuestionStep({
                 </span>
             </div>
 
-            {/* Barra de tempo: só visual; o valor acessível está no timer acima */}
             <div className="play-question__progress" aria-hidden="true">
                 <span
                     className={isLowTime ? 'is-low' : undefined}
@@ -57,20 +67,54 @@ export default function QuestionStep({
                 role="group"
                 aria-label="Alternativas"
             >
-                {question.options.map((option, index) => (
-                    <button
-                        key={option.id}
-                        type="button"
-                        className={`play-option play-option--${index}`}
-                        onClick={() => onAnswer(option.id)}
-                    >
-                        <span className="play-option__letter" aria-hidden="true">
-                            {CHOICE_LETTERS[index]}
-                        </span>
-                        <span className="play-option__text">{option.text}</span>
-                    </button>
-                ))}
+                {question.options.map((option, index) => {
+                    const isSelected = selectedOptionId === option.id;
+                    return (
+                        <button
+                            key={option.id}
+                            type="button"
+                            className={`play-option play-option--${index}`}
+                            onClick={() => onAnswer(option.id)}
+                            disabled={isLocked}
+                            style={{
+                                outline: isSelected ? '4px solid #ffffff' : undefined,
+                                opacity: isLocked && !isSelected ? 0.65 : 1,
+                            }}
+                        >
+                            <span className="play-option__letter" aria-hidden="true">
+                                {CHOICE_LETTERS[index]}
+                            </span>
+                            <span className="play-option__text">{option.text}</span>
+                        </button>
+                    );
+                })}
             </div>
+
+            {answerError && (
+                <p className="play-form__error" role="alert" style={{ marginTop: '16px', textAlign: 'center' }}>
+                    {answerError}
+                </p>
+            )}
+
+            {hasSubmittedAnswer && (
+                <p
+                    className="play-lobby__waiting"
+                    role="status"
+                    style={{ marginTop: '20px', textAlign: 'center', fontWeight: 600 }}
+                >
+                    Resposta registrada! Aguardando o encerramento da rodada para revelar o gabarito e a pontuação…
+                </p>
+            )}
+
+            {!hasSubmittedAnswer && remainingSeconds <= 0 && (
+                <p
+                    className="play-lobby__waiting"
+                    role="status"
+                    style={{ marginTop: '20px', textAlign: 'center', fontWeight: 600 }}
+                >
+                    Tempo esgotado! Aguardando o encerramento da rodada…
+                </p>
+            )}
         </section>
     );
 }

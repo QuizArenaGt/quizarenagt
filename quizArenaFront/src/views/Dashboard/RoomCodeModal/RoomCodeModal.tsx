@@ -54,11 +54,12 @@ function RoomCodeContent({ room, onClose }: { room: Room; onClose: () => void })
             <ul className="room-code__details">
                 <li>{room.theme}</li>
                 <li>{room.timeLimit} segundos por pergunta</li>
+                <li>{room.players.length} / {room.maxPlayers} jogadores no lobby</li>
                 <li>{room.status}</li>
             </ul>
 
             <p className="room-code__note">
-                Enquanto as salas não estão no servidor, o código funciona apenas neste navegador.
+                Compartilhe este código com os jogadores para entrarem em tempo real.
             </p>
 
             <div className="room-code__actions">

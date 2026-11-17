@@ -9,12 +9,6 @@ import QuestionStep from './steps/QuestionStep';
 import ResultStep from './steps/ResultStep';
 import './PlayView.css';
 
-/*
- * VIEW da experiência do aluno (rota /jogar).
- *
- * Mostra uma etapa por vez, de acordo com `phase` do usePlayViewModel.
- * Cada etapa é uma subview que só recebe dados e callbacks por props.
- */
 export default function PlayView() {
     const viewModel = usePlayViewModel();
     const { phase } = viewModel;
@@ -28,7 +22,6 @@ export default function PlayView() {
                 </Link>
 
                 <div className="play__topbar-info">
-                    {viewModel.room?.isDemo && <span className="play__chip">Modo demonstração</span>}
                     {isInGame && (
                         <span className="play__chip play__chip--score">
                             {viewModel.totalScore} pts
@@ -55,24 +48,33 @@ export default function PlayView() {
                     <NicknameStep
                         nickname={viewModel.nickname}
                         error={viewModel.error}
+                        isJoining={viewModel.isJoining}
                         onNicknameChange={viewModel.changeNickname}
                         onSubmit={viewModel.submitNickname}
                     />
                 )}
 
                 {phase === 'lobby' && viewModel.room && (
-                    <LobbyStep room={viewModel.room} nickname={viewModel.nickname} onStart={viewModel.startGame} />
+                    <LobbyStep
+                        room={viewModel.room}
+                        nickname={viewModel.nickname}
+                        playerId={viewModel.playerId}
+                        players={viewModel.lobbyPlayers}
+                    />
                 )}
 
-                {phase === 'question' && viewModel.currentQuestion && viewModel.room && (
-                    // A key força uma nova montagem a cada pergunta (foco e animação).
+                {phase === 'question' && viewModel.currentQuestion && (
                     <QuestionStep
-                        key={viewModel.currentQuestion.id}
+                        key={`${viewModel.questionNumber}-${viewModel.currentQuestion.id}`}
                         question={viewModel.currentQuestion}
                         questionNumber={viewModel.questionNumber}
                         totalQuestions={viewModel.totalQuestions}
                         remainingSeconds={viewModel.remainingSeconds}
-                        timeLimit={viewModel.room.timePerQuestion}
+                        timeLimit={viewModel.currentTimeLimit}
+                        selectedOptionId={viewModel.selectedOptionId}
+                        hasSubmittedAnswer={viewModel.hasSubmittedAnswer}
+                        isSubmittingAnswer={viewModel.isSubmittingAnswer}
+                        answerError={viewModel.answerError}
                         onAnswer={viewModel.answer}
                     />
                 )}
@@ -84,21 +86,18 @@ export default function PlayView() {
                         totalScore={viewModel.totalScore}
                         ranking={viewModel.ranking}
                         playerPosition={viewModel.playerRanking?.position ?? null}
-                        isLastQuestion={viewModel.isLastQuestion}
-                        onNext={viewModel.goToNext}
                     />
                 )}
 
-                {phase === 'finished' && viewModel.room && (
+                {phase === 'finished' && (
                     <ResultStep
                         nickname={viewModel.nickname}
-                        questions={viewModel.room.questions}
+                        questions={viewModel.playedQuestions}
                         answers={viewModel.answers}
                         totalScore={viewModel.totalScore}
                         correctCount={viewModel.correctCount}
                         ranking={viewModel.ranking}
                         playerPosition={viewModel.playerRanking?.position ?? null}
-                        isDemo={viewModel.room.isDemo}
                         onPlayAgain={viewModel.playAgain}
                         onLeave={viewModel.leaveRoom}
                     />

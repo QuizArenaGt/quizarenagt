@@ -4,92 +4,88 @@ import {
     NICKNAME_MAX_LENGTH,
     NICKNAME_MIN_LENGTH,
     PIN_LENGTH,
-    buildRanking,
-    calculatePoints,
     sanitizePin,
     type GameRoom,
     type PlayPhase,
     type PlayerAnswer,
+    type RankingEntry,
 } from '../models/game';
-import { joinRoom } from '../services/gameRoomService';
-import { savePlayerResult } from '../services/roomResultsService';
+import type { Question } from '../models/question';
+import { joinRoomWithNickname, submitPlayerRoundAnswer } from '../services/gameRoomService';
+import {
+    createPlayerSocket,
+    type LobbyPlayerDto,
+    type PlayerJoinedPayload,
+    type RoomUpdatedPayload,
+    type RoundClosedPayload,
+    type RoundStartedPayload,
+} from '../services/socket';
 
-/** Intervalo de atualização do cronômetro (ms). */
 const TIMER_TICK_MS = 200;
 
-/*
- * VIEWMODEL da experiência do aluno (rota /jogar).
- *
- * Funciona como uma máquina de estados (PlayPhase):
- *   join → nickname → lobby → question ⇄ feedback → finished
- *
- * Responsabilidades: validar código e apelido, entrar na sala pelo
- * gameRoomService, controlar o cronômetro de cada pergunta, registrar as
- * respostas e calcular a pontuação (regra no Model: calculatePoints).
- *
- * Observação: na demonstração não há professor conduzindo a partida;
- * o próprio aluno inicia a partida e avança entre as perguntas.
- */
 export function usePlayViewModel() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
 
     const [phase, setPhase] = useState<PlayPhase>('join');
-    // O código pode chegar pela URL (/jogar?codigo=123456), vindo da landing page.
     const [pin, setPinState] = useState(() => sanitizePin(searchParams.get('codigo') ?? ''));
     const [nickname, setNickname] = useState('');
     const [room, setRoom] = useState<GameRoom | null>(null);
+    const [playerId, setPlayerId] = useState<string | null>(null);
+    const [sessionToken, setSessionToken] = useState<string | null>(null);
+    const [lobbyPlayers, setLobbyPlayers] = useState<LobbyPlayerDto[]>([]);
+
     const [error, setError] = useState<string | null>(null);
     const [isJoining, setIsJoining] = useState(false);
-    const [questionIndex, setQuestionIndex] = useState(0);
-    const [answers, setAnswers] = useState<PlayerAnswer[]>([]);
+
+    // Estado da rodada e perguntas recebidas do servidor
+    const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
+    const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+    const [questionNumber, setQuestionNumber] = useState(1);
+    const [currentTimeLimit, setCurrentTimeLimit] = useState(30);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
 
-    // Momento em que o tempo da pergunta atual termina.
+    // Submissão de resposta na rodada aberta
+    const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+    const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(false);
+    const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+    const [answerError, setAnswerError] = useState<string | null>(null);
+
+    // Histórico consolidado exclusivamente a partir de round:closed (servidor)
+    const [playedQuestions, setPlayedQuestions] = useState<Question[]>([]);
+    const [answers, setAnswers] = useState<PlayerAnswer[]>([]);
+    const [serverRanking, setServerRanking] = useState<RankingEntry[]>([]);
+    const [serverTotalScore, setServerTotalScore] = useState(0);
+
     const deadlineRef = useRef(0);
-    // Impede que um clique duplo registre duas respostas na mesma pergunta.
     const hasAnsweredRef = useRef(false);
+    const currentQuestionTypeRef = useRef<Question['type']>('MULTIPLE_CHOICE');
 
-    const currentQuestion = room?.questions[questionIndex] ?? null;
-    const totalQuestions = room?.questions.length ?? 0;
     const lastAnswer = answers.length > 0 ? answers[answers.length - 1] : null;
-    const isLastQuestion = questionIndex >= totalQuestions - 1;
-
-    const totalScore = useMemo(() => answers.reduce((sum, answer) => sum + answer.points, 0), [answers]);
-    const correctCount = useMemo(() => answers.filter((answer) => answer.isCorrect).length, [answers]);
-
-    // Ranking considerando apenas as perguntas já respondidas pelo aluno,
-    // para que a comparação com os demais seja sempre na mesma rodada.
-    const ranking = useMemo(
-        () => buildRanking({ nickname, score: totalScore }, room?.opponents ?? [], answers.length),
-        [nickname, totalScore, room, answers.length],
+    const correctCount = useMemo(
+        () => answers.filter((ans) => ans.isCorrect).length,
+        [answers],
     );
-    const playerRanking = ranking.find((entry) => entry.isCurrentPlayer) ?? null;
+    const playerRanking = useMemo(
+        () => serverRanking.find((entry) => entry.isCurrentPlayer) ?? null,
+        [serverRanking],
+    );
 
-    // ===== Entrada na sala =====
+    // ===== Entrada na sala (Passo 1: Código -> Passo 2: Apelido + POST /rooms/join) =====
 
     function setPin(value: string) {
         setPinState(sanitizePin(value));
         setError(null);
     }
 
-    async function submitPin(event: FormEvent<HTMLFormElement>) {
+    function submitPin(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (pin.length !== PIN_LENGTH) {
-            setError(`O código da sala tem ${PIN_LENGTH} dígitos.`);
+            setError(`O código da sala deve possuir ${PIN_LENGTH} caracteres.`);
             return;
         }
-
-        setIsJoining(true);
         setError(null);
-        try {
-            setRoom(await joinRoom(pin));
-            setPhase('nickname');
-        } catch (joinError) {
-            setError(joinError instanceof Error ? joinError.message : 'Não foi possível entrar na sala.');
-        } finally {
-            setIsJoining(false);
-        }
+        setPhase('nickname');
     }
 
     function changeNickname(value: string) {
@@ -97,93 +93,242 @@ export function usePlayViewModel() {
         setError(null);
     }
 
-    function submitNickname(event: FormEvent<HTMLFormElement>) {
+    async function submitNickname(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        if (nickname.trim().length < NICKNAME_MIN_LENGTH) {
+        const trimmedNickname = nickname.trim();
+        if (trimmedNickname.length < NICKNAME_MIN_LENGTH) {
             setError(`O apelido precisa ter pelo menos ${NICKNAME_MIN_LENGTH} caracteres.`);
             return;
         }
-        setNickname(nickname.trim());
-        setPhase('lobby');
+
+        setIsJoining(true);
+        setError(null);
+
+        try {
+            const session = await joinRoomWithNickname(pin, trimmedNickname);
+            setNickname(session.player.nickname);
+            setPlayerId(session.player.id);
+            setSessionToken(session.sessionToken);
+            setLobbyPlayers(session.lobby.players);
+            setCurrentTimeLimit(session.lobby.questionTime);
+            setRoom({
+                pin: session.lobby.code,
+                roomId: session.lobby.id,
+                title: `Sala de ${session.lobby.host.name}`,
+                timePerQuestion: session.lobby.questionTime,
+                questions: [],
+                opponents: [],
+                isDemo: false,
+            });
+            setPhase('lobby');
+        } catch (joinErr) {
+            setError(
+                joinErr instanceof Error
+                    ? joinErr.message
+                    : 'Não foi possível entrar na sala. Verifique o código e tente novamente.',
+            );
+        } finally {
+            setIsJoining(false);
+        }
     }
 
-    // ===== Partida =====
+    // ===== Conexão Socket.IO em Tempo Real do Jogador =====
 
-    const startQuestion = useCallback(
-        (index: number) => {
-            if (!room) return;
+    useEffect(() => {
+        if (!sessionToken || !playerId) return;
+
+        const socket = createPlayerSocket(sessionToken);
+
+        socket.on('player:joined', (payload: PlayerJoinedPayload) => {
+            setLobbyPlayers((current) => {
+                const exists = current.some((p) => p.id === payload.player.id);
+                return exists
+                    ? current.map((p) => (p.id === payload.player.id ? payload.player : p))
+                    : [...current, payload.player];
+            });
+        });
+
+        socket.on('room:updated', (payload: RoomUpdatedPayload) => {
+            setCurrentTimeLimit(payload.questionTime);
+            setRoom((current) =>
+                current
+                    ? {
+                          ...current,
+                          timePerQuestion: payload.questionTime,
+                      }
+                    : current,
+            );
+        });
+
+        socket.on('round:started', (payload: RoundStartedPayload) => {
+            const { round } = payload;
             hasAnsweredRef.current = false;
-            deadlineRef.current = Date.now() + room.timePerQuestion * 1000;
-            setQuestionIndex(index);
-            setRemainingSeconds(room.timePerQuestion);
+            currentQuestionTypeRef.current = round.question.type;
+
+            const openedAtMs = new Date(round.openedAt).getTime();
+            const deadlineMs = openedAtMs + round.timeLimit * 1000;
+            deadlineRef.current = deadlineMs;
+
+            const initialRemaining = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+
+            setCurrentRoundId(round.id);
+            setQuestionNumber(round.roundNumber);
+            setCurrentTimeLimit(round.timeLimit);
+            setRemainingSeconds(initialRemaining);
+            setSelectedOptionId(null);
+            setHasSubmittedAnswer(false);
+            setIsSubmittingAnswer(false);
+            setAnswerError(null);
+
+            // As alternativas enviadas em round:started não possuem gabarito (isCorrect)
+            setCurrentQuestion({
+                id: round.question.id,
+                statement: round.question.statement,
+                type: round.question.type,
+                isActive: true,
+                theme: 'Geral',
+                options: round.question.options.map((opt) => ({
+                    id: opt.id,
+                    text: opt.text,
+                    isCorrect: false,
+                })),
+            });
+
             setPhase('question');
-        },
-        [room],
-    );
+        });
 
-    function startGame() {
-        setAnswers([]);
-        startQuestion(0);
-    }
+        socket.on('round:closed', (payload: RoundClosedPayload) => {
+            const { round } = payload;
 
-    /** Registra a resposta (ou null quando o tempo acaba) e mostra o resultado. */
-    const answer = useCallback(
-        (optionId: string | null) => {
-            if (!room || !currentQuestion || hasAnsweredRef.current) return;
-            hasAnsweredRef.current = true;
+            const revealedQuestion: Question = {
+                id: round.question.id,
+                statement: round.question.statement,
+                type: currentQuestionTypeRef.current,
+                isActive: true,
+                theme: 'Geral',
+                options: round.question.options.map((opt) => ({
+                    id: opt.id,
+                    text: opt.text,
+                    isCorrect: opt.isCorrect,
+                })),
+            };
 
-            const correctOption = currentQuestion.options.find((option) => option.isCorrect);
-            const isCorrect = optionId !== null && optionId === correctOption?.id;
-            const timeLeftMs = Math.max(0, deadlineRef.current - Date.now());
+            const myServerAnswer = round.answers.find((ans) => ans.player.id === playerId);
 
-            setAnswers((current) => [
-                ...current,
-                {
-                    questionId: currentQuestion.id,
-                    selectedOptionId: optionId,
-                    isCorrect,
-                    points: calculatePoints(isCorrect, timeLeftMs, room.timePerQuestion * 1000),
-                },
-            ]);
+            const roundAnswer: PlayerAnswer = {
+                questionId: round.question.id,
+                selectedOptionId: myServerAnswer ? myServerAnswer.option.id : null,
+                isCorrect: myServerAnswer ? myServerAnswer.isCorrect : false,
+                points: myServerAnswer ? myServerAnswer.points : 0,
+            };
+
+            const updatedRanking: RankingEntry[] = round.ranking.map((entry, idx) => ({
+                position: idx + 1,
+                nickname: entry.nickname,
+                score: entry.score,
+                isCurrentPlayer: entry.id === playerId,
+            }));
+
+            const myRankingEntry = round.ranking.find((entry) => entry.id === playerId);
+
+            setCurrentQuestion(revealedQuestion);
+            setPlayedQuestions((current) => {
+                const exists = current.some((q) => q.id === revealedQuestion.id);
+                return exists
+                    ? current.map((q) => (q.id === revealedQuestion.id ? revealedQuestion : q))
+                    : [...current, revealedQuestion];
+            });
+            setAnswers((current) => {
+                const exists = current.some((a) => a.questionId === roundAnswer.questionId);
+                return exists
+                    ? current.map((a) =>
+                          a.questionId === roundAnswer.questionId ? roundAnswer : a,
+                      )
+                    : [...current, roundAnswer];
+            });
+            setServerRanking(updatedRanking);
+            if (myRankingEntry) {
+                setServerTotalScore(myRankingEntry.score);
+            }
+            setRemainingSeconds(0);
             setPhase('feedback');
+        });
+
+        socket.on('game:finished', () => {
+            setRemainingSeconds(0);
+            setPhase('finished');
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [sessionToken, playerId]);
+
+    // ===== Submissão de resposta ao Servidor (POST /rounds/:id/answer) =====
+
+    const answer = useCallback(
+        async (optionId: string) => {
+            if (
+                !currentRoundId ||
+                !sessionToken ||
+                hasAnsweredRef.current ||
+                isSubmittingAnswer
+            ) {
+                return;
+            }
+
+            hasAnsweredRef.current = true;
+            setSelectedOptionId(optionId);
+            setIsSubmittingAnswer(true);
+            setAnswerError(null);
+
+            try {
+                await submitPlayerRoundAnswer(currentRoundId, optionId, sessionToken);
+                setHasSubmittedAnswer(true);
+            } catch (err) {
+                hasAnsweredRef.current = false;
+                setSelectedOptionId(null);
+                setAnswerError(
+                    err instanceof Error
+                        ? err.message
+                        : 'Não foi possível enviar sua resposta.',
+                );
+            } finally {
+                setIsSubmittingAnswer(false);
+            }
         },
-        [room, currentQuestion],
+        [currentRoundId, sessionToken, isSubmittingAnswer],
     );
 
-    // Cronômetro: roda apenas durante a fase de pergunta. O tempo restante
-    // é calculado a partir do prazo (deadline), e não somando ticks, para
-    // não acumular atraso caso o navegador atrase o intervalo.
+    // Cronômetro visual durante a pergunta aberta
     useEffect(() => {
         if (phase !== 'question') return;
 
         const intervalId = window.setInterval(() => {
             const timeLeftMs = deadlineRef.current - Date.now();
             if (timeLeftMs <= 0) {
+                setRemainingSeconds(0);
                 window.clearInterval(intervalId);
-                answer(null);
             } else {
                 setRemainingSeconds(Math.ceil(timeLeftMs / 1000));
             }
         }, TIMER_TICK_MS);
 
         return () => window.clearInterval(intervalId);
-    }, [phase, answer]);
+    }, [phase, currentRoundId]);
 
-    function goToNext() {
-        if (isLastQuestion) {
-            // Ao concluir uma sala do professor, o resultado é registrado
-            // para o relatório da sala (a sala 123456 não gera relatório).
-            if (room?.roomId) {
-                savePlayerResult(room.roomId, {
-                    nickname,
-                    isSimulated: false,
-                    answers: answers.map(({ questionId, isCorrect, points }) => ({ questionId, isCorrect, points })),
-                });
-            }
-            setPhase('finished');
-        } else {
-            startQuestion(questionIndex + 1);
-        }
+    function resetToJoin() {
+        setSessionToken(null);
+        setPlayerId(null);
+        setRoom(null);
+        setLobbyPlayers([]);
+        setPlayedQuestions([]);
+        setAnswers([]);
+        setServerRanking([]);
+        setServerTotalScore(0);
+        setPinState('');
+        setError(null);
+        setPhase('join');
     }
 
     function leaveRoom() {
@@ -193,29 +338,34 @@ export function usePlayViewModel() {
     return {
         phase,
         room,
+        playerId,
+        lobbyPlayers,
         error,
         isJoining,
         pin,
         nickname,
         currentQuestion,
-        questionNumber: questionIndex + 1,
-        totalQuestions,
+        questionNumber,
+        totalQuestions: 0,
+        currentTimeLimit,
         remainingSeconds,
+        selectedOptionId,
+        hasSubmittedAnswer,
+        isSubmittingAnswer,
+        answerError,
         lastAnswer,
+        playedQuestions,
         answers,
-        totalScore,
+        totalScore: serverTotalScore,
         correctCount,
-        ranking,
+        ranking: serverRanking,
         playerRanking,
-        isLastQuestion,
         setPin,
         submitPin,
         changeNickname,
         submitNickname,
-        startGame,
         answer,
-        goToNext,
-        playAgain: startGame,
+        playAgain: resetToJoin,
         leaveRoom,
     };
 }

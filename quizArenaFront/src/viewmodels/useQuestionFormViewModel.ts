@@ -12,22 +12,15 @@ import {
     type QuestionType,
 } from '../models/question';
 
-/*
- * VIEWMODEL do formulário de pergunta (criar/editar).
- *
- * Mantém o rascunho em edição e expõe ações simples para a View
- * (alterar enunciado, tipo, alternativas, resposta correta). As regras
- * de validação ficam no Model (validateDraft); aqui só as aplicamos no
- * envio e exibimos a mensagem.
- *
- * O componente que usa este hook é montado a cada abertura do modal,
- * então o estado inicial sempre reflete a pergunta escolhida.
- */
-export function useQuestionFormViewModel(initial: Question | null, onSave: (question: Question) => void) {
+export function useQuestionFormViewModel(
+    initial: Question | null,
+    onSave: (question: Question) => Promise<void> | void,
+) {
     const [draft, setDraft] = useState<QuestionDraft>(() =>
         initial ? questionToDraft(initial) : createEmptyDraft(),
     );
     const [error, setError] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     function update(changes: Partial<QuestionDraft>) {
         setDraft((current) => ({ ...current, ...changes }));
@@ -49,24 +42,32 @@ export function useQuestionFormViewModel(initial: Question | null, onSave: (ques
         if (draft.choices.length <= MIN_CHOICES) return;
         update({
             choices: draft.choices.filter((choice) => choice.id !== id),
-            // Se a alternativa removida era a correta, a marcação é desfeita.
             correctChoiceId: draft.correctChoiceId === id ? null : draft.correctChoiceId,
         });
     }
 
-    function submit(event: FormEvent<HTMLFormElement>) {
+    async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         const validationError = validateDraft(draft);
         if (validationError) {
             setError(validationError);
             return;
         }
-        onSave(draftToQuestion(draft, initial));
+        setIsSaving(true);
+        setError(null);
+        try {
+            await onSave(draftToQuestion(draft, initial));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Erro ao salvar pergunta na sala.');
+        } finally {
+            setIsSaving(false);
+        }
     }
 
     return {
         draft,
         error,
+        isSaving,
         isEditing: initial !== null,
         canAddChoice: draft.choices.length < MAX_CHOICES,
         canRemoveChoice: draft.choices.length > MIN_CHOICES,

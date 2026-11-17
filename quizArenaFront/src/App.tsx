@@ -1,38 +1,117 @@
 
+import { useEffect, useState } from "react";
+
 import {
     BrowserRouter,
     Routes,
     Route,
-    useNavigate
+    useNavigate,
+    Navigate,
 } from "react-router-dom";
 
 import HomeView from "./views/Home/HomeView";
 import PlayView from "./views/Play/PlayView";
 import LoginForm from "./features/auth/components/LoginForm/LoginForm";
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
-import DashboardForm from './features/Dashboard/components/DashboardForm';
-import RecoverPasswordForm from './features/auth/components/RecoverPasswordForm/RecoverPasswordForm';
+import DashboardForm from "./features/Dashboard/components/DashboardForm";
+import RecoverPasswordForm from "./features/auth/components/RecoverPasswordForm/RecoverPasswordForm";
+
+import { apiRequest, ApiError } from "./services/api";
+
+interface AuthenticatedUser {
+    id: string;
+    role: "USER" | "ADMIN" | "HOST";
+}
+
+function ProtectedRoute() {
+    const [status, setStatus] = useState<
+        "checking" | "authenticated" | "unauthorized" | "error"
+    >("checking");
+
+    useEffect(() => {
+        let active = true;
+
+        async function validateSession() {
+            const token = localStorage.getItem("token");
+
+            if (!token) {
+                if (active) setStatus("unauthorized");
+                return;
+            }
+
+            try {
+                await apiRequest<AuthenticatedUser>("/auth/me", {
+                    method: "GET",
+                    token,
+                });
+
+                if (active) {
+                    setStatus("authenticated");
+                }
+            } catch (error) {
+                if (!active) return;
+
+                if (error instanceof ApiError && error.status === 401) {
+                    localStorage.removeItem("token");
+                    localStorage.removeItem("user");
+                    setStatus("unauthorized");
+                    return;
+                }
+
+                setStatus("error");
+            }
+        }
+
+        validateSession();
+
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    if (status === "checking") {
+        return <div>Validando sessão...</div>;
+    }
+
+    if (status === "unauthorized") {
+        return <Navigate to="/login" replace />;
+    }
+
+    if (status === "error") {
+        return (
+            <div>
+                <h2>Não foi possível validar sua sessão.</h2>
+                <p>Verifique se o servidor está disponível.</p>
+                <button onClick={() => window.location.reload()}>
+                    Tentar novamente
+                </button>
+            </div>
+        );
+    }
+
+    return <DashboardForm />;
+}
 
 function AppRoutes() {
     const navigate = useNavigate();
 
     const handleLoginSuccess = (): void => {
-        navigate('/dashboard');
+        navigate("/dashboard");
     };
 
     const handleRegisterSuccess = (): void => {
-        navigate('/login');
+        navigate("/login");
     };
 
     const handleRecoverPasswordSuccess = (): void => {
-        navigate('/login');
+        navigate("/login");
     };
 
     return (
         <Routes>
             <Route
                 path="/dashboard"
-                element={<DashboardForm />}
+                element={<ProtectedRoute />}
             />
 
             <Route
@@ -62,15 +141,11 @@ function AppRoutes() {
                 }
             />
 
-            {/* Área do aluno: entrar em uma sala pelo código e jogar.
-                Sem login; por enquanto apenas a sala de demonstração. */}
             <Route
                 path="/jogar"
                 element={<PlayView />}
             />
 
-            {/* Landing page pública. O login continua disponível em /login
-                e também é aberto em um modal a partir desta página. */}
             <Route
                 path="/"
                 element={<HomeView />}

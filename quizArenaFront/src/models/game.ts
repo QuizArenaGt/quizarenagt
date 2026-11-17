@@ -100,7 +100,7 @@ export function calculatePoints(isCorrect: boolean, timeLeftMs: number, timeLimi
     return Math.round(MIN_POINTS + SPEED_BONUS * speedRatio);
 }
 
-/** Mantém apenas dígitos e limita ao tamanho do código. */
+/** Mantém apenas caracteres alfanuméricos em maiúsculas e limita ao tamanho do código. */
 export function sanitizePin(value: string): string {
-    return value.replace(/\D/g, '').slice(0, PIN_LENGTH);
+    return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, PIN_LENGTH);
 }

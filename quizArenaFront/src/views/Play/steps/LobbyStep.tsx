@@ -1,15 +1,16 @@
-import Button from '../../../components/ui/Button/Button';
 import Icon from '../../../components/ui/Icon/Icon';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
 import type { GameRoom } from '../../../models/game';
+import type { LobbyPlayerDto } from '../../../services/socket';
 
 interface LobbyStepProps {
     room: GameRoom;
     nickname: string;
-    onStart: () => void;
+    playerId: string | null;
+    players: LobbyPlayerDto[];
 }
 
-export default function LobbyStep({ room, nickname, onStart }: LobbyStepProps) {
+export default function LobbyStep({ room, nickname, playerId, players }: LobbyStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
 
     return (
@@ -26,45 +27,35 @@ export default function LobbyStep({ room, nickname, onStart }: LobbyStepProps) {
 
             <ul className="play-lobby__facts">
                 <li>
-                    <Icon name="book" size={18} /> {room.questions.length} perguntas
-                </li>
-                <li>
-                    <Icon name="bolt" size={18} /> {room.timePerQuestion} segundos cada
+                    <Icon name="bolt" size={18} /> {room.timePerQuestion} segundos por pergunta
                 </li>
             </ul>
 
             <div className="play-lobby__players">
                 <p className="play-lobby__players-title">
-                    {room.opponents.length + 1} jogadores na sala
+                    {players.length} {players.length === 1 ? 'jogador na sala' : 'jogadores na sala'}
                 </p>
                 <ul className="play-lobby__players-list">
-                    <li className="is-current">{nickname} (você)</li>
-                    {room.opponents.map((opponent) => (
-                        <li key={opponent.nickname}>{opponent.nickname}</li>
-                    ))}
+                    {players.map((player) => {
+                        const isMe = playerId ? player.id === playerId : player.nickname === nickname;
+                        return (
+                            <li key={player.id} className={isMe ? 'is-current' : undefined}>
+                                {player.nickname}
+                                {isMe ? ' (você)' : ''}
+                            </li>
+                        );
+                    })}
                 </ul>
-                {room.isDemo && (
-                    <p className="play-lobby__players-note">Os demais jogadores são simulados nesta demonstração.</p>
-                )}
             </div>
 
             <p className="play-lobby__waiting">
-                Aguardando o professor iniciar a partida
+                Aguardando o anfitrião iniciar a partida
                 <span className="play-lobby__dots" aria-hidden="true">
                     <span>.</span>
                     <span>.</span>
                     <span>.</span>
                 </span>
             </p>
-
-            {room.isDemo && (
-                <div className="play-lobby__demo">
-                    <p>Nesta demonstração não há professor conduzindo a partida. Comece quando quiser.</p>
-                    <Button size="lg" fullWidth onClick={onStart}>
-                        Iniciar partida
-                    </Button>
-                </div>
-            )}
         </section>
     );
 }

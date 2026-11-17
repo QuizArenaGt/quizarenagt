@@ -19,7 +19,7 @@ interface QuestionFormModalProps {
     /** Pergunta em edição; null para criar uma nova. */
     question: Question | null;
     onClose: () => void;
-    onSave: (question: Question) => void;
+    onSave: (question: Question) => Promise<void> | void;
 }
 
 const TYPE_HINT: Record<QuestionType, string> = {
@@ -48,7 +48,7 @@ export default function QuestionFormModal({ isOpen, question, onClose, onSave }:
 
 interface QuestionFormProps {
     initial: Question | null;
-    onSave: (question: Question) => void;
+    onSave: (question: Question) => Promise<void> | void;
     onCancel: () => void;
 }
 
@@ -201,10 +201,16 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
             )}
 
             <div className="question-form__actions">
-                <Button variant="secondary" onClick={onCancel}>
+                <Button variant="secondary" onClick={onCancel} disabled={viewModel.isSaving}>
                     Cancelar
                 </Button>
-                <Button type="submit">{viewModel.isEditing ? 'Salvar alterações' : 'Salvar pergunta'}</Button>
+                <Button type="submit" disabled={viewModel.isSaving}>
+                    {viewModel.isSaving
+                        ? 'Salvando…'
+                        : viewModel.isEditing
+                          ? 'Salvar alterações'
+                          : 'Salvar pergunta'}
+                </Button>
             </div>
         </form>
     );

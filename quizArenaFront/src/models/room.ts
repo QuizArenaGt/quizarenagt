@@ -1,10 +1,5 @@
-/*
- * MODEL — salas criadas pelo professor.
- *
- * O backend ainda não possui salas; este tipo é a proposta do frontend.
- * Os valores de status foram mantidos iguais aos que o Dashboard já usava.
- */
-import { DEMO_ROOM_PIN, PIN_LENGTH } from './game';
+import { PIN_LENGTH } from './game';
+import type { BackendRoomStatus, GameMode, LobbyPlayerDto } from '../services/socket';
 
 export type RoomStatus = 'Aguardando' | 'Em Andamento' | 'Finalizado';
 
@@ -12,44 +7,50 @@ export interface Room {
     id: string;
     name: string;
     theme: string;
-    /** Tempo para responder cada pergunta, em segundos. */
+    /** Tempo para responder cada pergunta, em segundos (questionTime no backend). */
     timeLimit: number;
+    maxPlayers: number;
+    gameMode: GameMode;
     status: RoomStatus;
-    /** Código que os alunos digitam para entrar (6 dígitos). */
+    backendStatus: BackendRoomStatus;
+    /** Código alfanumérico de 6 caracteres gerado pelo backend. */
     code: string;
-    /** Perguntas escolhidas pelo professor, na ordem em que serão jogadas. */
+    /** IDs das perguntas vinculadas à sala. */
     questionIds: string[];
+    players: LobbyPlayerDto[];
 }
 
-/** Uma sala precisa de pelo menos uma pergunta para ser criada. */
+/** Uma sala precisa de pelo menos 5 perguntas ativas para iniciar no backend. */
 export const MIN_ROOM_QUESTIONS = 5;
+export const MIN_ROOM_PLAYERS = 2;
 
 export const ROOM_TIME_OPTIONS = [15, 30, 45, 60] as const;
 
-/**
- * Gera um código de sala de 6 dígitos que ainda não esteja em uso.
- * Regras: não começa com zero (evita confusão ao ditar o código) e nunca
- * repete o código da sala de demonstração nem o de outra sala.
- */
-export function generateRoomCode(codesInUse: string[]): string {
-    const reserved = new Set([...codesInUse, DEMO_ROOM_PIN]);
-    const min = 10 ** (PIN_LENGTH - 1);
-    const max = 10 ** PIN_LENGTH - 1;
+export const GAME_MODE_LABEL: Record<GameMode, string> = {
+    CLASSIC: 'Clássico (sem perda de pontos)',
+    HARDCORE: 'Hardcore (-30 pts ao errar)',
+};
 
-    let code: string;
-    do {
-        code = String(Math.floor(min + Math.random() * (max - min + 1)));
-    } while (reserved.has(code));
-
-    return code;
+export function mapBackendRoomStatus(status: BackendRoomStatus): RoomStatus {
+    switch (status) {
+        case 'WAITING':
+            return 'Aguardando';
+        case 'IN_PROGRESS':
+            return 'Em Andamento';
+        case 'FINISHED':
+        case 'CANCELLED':
+            return 'Finalizado';
+    }
 }
 
-/** Exibe o código em dois blocos (ex.: "482 913"), mais fácil de ler na projeção. */
+/** Exibe o código em dois blocos (ex.: "482 913" ou "A1B 2C3"), mais fácil de ler na projeção. */
 export function formatRoomCode(code: string): string {
-    return `${code.slice(0, 3)} ${code.slice(3)}`;
+    const clean = code.trim().toUpperCase();
+    if (clean.length <= 3) return clean;
+    return `${clean.slice(0, 3)} ${clean.slice(3, PIN_LENGTH)}`;
 }
 
-/** Alunos só podem entrar em salas que ainda não foram encerradas. */
+/** Alunos só podem entrar em salas que ainda estão aguardando início. */
 export function isRoomOpen(room: Room): boolean {
-    return room.status !== 'Finalizado';
+    return room.backendStatus === 'WAITING' && room.status === 'Aguardando';
 }

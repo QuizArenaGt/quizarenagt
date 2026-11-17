@@ -1,196 +1,566 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { createId, isPlayable, type Question } from '../models/question';
-import { MIN_ROOM_QUESTIONS, generateRoomCode, type Room, type RoomStatus } from '../models/room';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import type { Question } from '../models/question';
+import {
+    MIN_ROOM_PLAYERS,
+    MIN_ROOM_QUESTIONS,
+    mapBackendRoomStatus,
+    type Room,
+} from '../models/room';
 import { buildRoomReport, type RoomReport } from '../models/roomReport';
-import { deleteRoomResults, loadRoomResults } from '../services/roomResultsService';
-import { loadRooms, saveRooms } from '../services/roomStorageService';
+import {
+    deleteRoomResults,
+    loadRoomResults,
+    recordRoundClosedResult,
+} from '../services/roomResultsService';
+import {
+    closeRoundApi,
+    createNextRoundApi,
+    createRoomApi,
+    getRoomLobbyApi,
+    mapApiRoomToModel,
+    startRoomApi,
+    updateRoomApi,
+} from '../services/roomStorageService';
+import {
+    createHostSocket,
+    type GameFinishedPayload,
+    type GameMode,
+    type GameStartedPayload,
+    type PlayerJoinedPayload,
+    type RoomUpdatedPayload,
+    type RoundAnswerSubmittedPayload,
+    type RoundClosedPayload,
+    type RoundStartedPayload,
+} from '../services/socket';
 
 const DEFAULT_THEME = 'Tecnologia';
 const DEFAULT_TIME_LIMIT = 30;
+const DEFAULT_MAX_PLAYERS = 10;
+const DEFAULT_GAME_MODE: GameMode = 'CLASSIC';
 
-/*
- * VIEWMODEL das salas (aba "Salas de Quiz" do painel do professor).
- *
- * Responsabilidades:
- *  - manter a lista de salas e salvá-la (roomStorageService);
- *  - controlar o formulário de criação/edição, incluindo a seleção das
- *    perguntas que farão parte da sala;
- *  - excluir salas, sempre após confirmação do professor;
- *  - abrir o relatório de resultados das salas finalizadas;
- *  - gerar automaticamente o código da sala (regra no Model);
- *  - controlar a tela de exibição do código, aberta logo após criar a
- *    sala para o professor projetar para a turma.
- *
- * Recebe o banco de perguntas como parâmetro (vindo do
- * useQuestionBankViewModel) para não duplicar a fonte dos dados.
- */
-export function useRoomsViewModel(questionBank: Question[]) {
-    const [rooms, setRooms] = useState<Room[]>(() => loadRooms());
+export function useRoomsViewModel() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const initialCodeFromUrl = searchParams.get('sala')?.trim().toUpperCase() || null;
 
-    // Formulário de criação/edição (o mesmo formulário serve aos dois casos)
+    const [rooms, setRooms] = useState<Room[]>([]);
+    const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+    const [isLoadingRoom, setIsLoadingRoom] = useState(false);
+    const [roomActionError, setRoomActionError] = useState<string | null>(null);
+    const [isStartingMatch, setIsStartingMatch] = useState(false);
+    const [isAdvancingRound, setIsAdvancingRound] = useState(false);
+
+    // Estado da partida em tempo real conduzida pelo anfitrião
+    const [activeRound, setActiveRound] = useState<RoundStartedPayload['round'] | null>(null);
+    const [closedRound, setClosedRound] = useState<RoundClosedPayload['round'] | null>(null);
+    const [answeredPlayers, setAnsweredPlayers] = useState<{ id: string; nickname: string }[]>([]);
+    const [roundRemainingSeconds, setRoundRemainingSeconds] = useState(0);
+
+    // Formulário de criação/edição de sala
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingRoom, setEditingRoom] = useState<Room | null>(null);
     const [name, setName] = useState('');
     const [theme, setTheme] = useState(DEFAULT_THEME);
     const [timeLimit, setTimeLimit] = useState(DEFAULT_TIME_LIMIT);
-    const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+    const [maxPlayers, setMaxPlayers] = useState(DEFAULT_MAX_PLAYERS);
+    const [gameMode, setGameMode] = useState<GameMode>(DEFAULT_GAME_MODE);
     const [formError, setFormError] = useState<string | null>(null);
-    /** Temas usados para filtrar a lista de perguntas (vazio = todos os temas). */
-    const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
+    const [isSubmittingRoom, setIsSubmittingRoom] = useState(false);
 
-    // Sala cujo código está sendo exibido em destaque
+    // Busca de sala existente por código
+    const [lookupCode, setLookupCode] = useState('');
+
+    // Sala cujo código está sendo exibido em destaque (modal de projeção)
     const [displayedRoom, setDisplayedRoom] = useState<Room | null>(null);
 
-    // Sala aguardando confirmação de exclusão
+    // Sala aguardando confirmação de remoção da visualização
     const [roomPendingDeletion, setRoomPendingDeletion] = useState<Room | null>(null);
 
-    // Relatório aberto (sala finalizada + números calculados no momento)
+    // Relatório aberto
     const [reportView, setReportView] = useState<{ room: Room; report: RoomReport | null } | null>(null);
 
+    const closingRoundIdRef = useRef<string | null>(null);
+    const hasLoadedInitialUrlRef = useRef(false);
+
+    const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? rooms[0] ?? null;
+    const currentRoomId = activeRoom?.id ?? null;
+    const currentRoomCode = activeRoom?.code ?? null;
+    const currentRoomPlayerCount = activeRoom?.players.length ?? 0;
+
+    const selectRoom = useCallback(
+        (room: Room) => {
+            setActiveRoomId(room.id);
+            setRoomActionError(null);
+            setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set('sala', room.code);
+                return next;
+            }, { replace: true });
+        },
+        [setSearchParams],
+    );
+
+    const loadRoomByCode = useCallback(
+        async (code: string, meta?: { name?: string; theme?: string }) => {
+            const cleanCode = code.trim().toUpperCase();
+            if (!cleanCode) return null;
+
+            setIsLoadingRoom(true);
+            setRoomActionError(null);
+            try {
+                const lobby = await getRoomLobbyApi(cleanCode);
+                let mappedRoom: Room | null = null;
+
+                setRooms((current) => {
+                    const existing = current.find((r) => r.id === lobby.id);
+                    mappedRoom = mapApiRoomToModel(lobby, {
+                        name: meta?.name ?? existing?.name,
+                        theme: meta?.theme ?? existing?.theme,
+                        questionIds: existing?.questionIds ?? [],
+                    });
+                    const exists = current.some((r) => r.id === lobby.id);
+                    return exists
+                        ? current.map((r) => (r.id === lobby.id ? mappedRoom! : r))
+                        : [mappedRoom, ...current];
+                });
+
+                setActiveRoomId(lobby.id);
+                setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    next.set('sala', lobby.code);
+                    return next;
+                }, { replace: true });
+
+                return mappedRoom;
+            } catch (err) {
+                setRoomActionError(
+                    err instanceof Error
+                        ? err.message
+                        : 'Não foi possível carregar a sala informada.',
+                );
+                return null;
+            } finally {
+                setIsLoadingRoom(false);
+            }
+        },
+        [setSearchParams],
+    );
+
+    // Carrega automaticamente a sala se o código estiver na URL (?sala=XXXXXX)
     useEffect(() => {
-        saveRooms(rooms);
-    }, [rooms]);
+        if (!initialCodeFromUrl || hasLoadedInitialUrlRef.current) return;
+        hasLoadedInitialUrlRef.current = true;
 
-    /** Só perguntas ativas e com resposta correta definida podem entrar na sala. */
-    const selectableQuestions = useMemo(
-        () => questionBank.filter((question) => question.isActive && isPlayable(question)),
-        [questionBank],
+        let active = true;
+        getRoomLobbyApi(initialCodeFromUrl)
+            .then((lobby) => {
+                if (!active) return;
+                const mapped = mapApiRoomToModel(lobby);
+                setRooms((current) => {
+                    const exists = current.some((r) => r.id === lobby.id);
+                    return exists
+                        ? current.map((r) => (r.id === lobby.id ? mapped : r))
+                        : [mapped, ...current];
+                });
+                setActiveRoomId(lobby.id);
+            })
+            .catch(() => {
+                // Código da URL expirado ou não pertence ao host atual
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [initialCodeFromUrl]);
+
+    // Conexão Socket.IO do Anfitrião para a sala ativa
+    useEffect(() => {
+        if (!currentRoomId || !currentRoomCode) return;
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        const socket = createHostSocket(token, currentRoomCode);
+
+        socket.on('player:joined', (payload: PlayerJoinedPayload) => {
+            if (payload.roomId !== currentRoomId) return;
+            setRooms((current) =>
+                current.map((room) => {
+                    if (room.id !== payload.roomId) return room;
+                    const exists = room.players.some((p) => p.id === payload.player.id);
+                    const updatedPlayers = exists
+                        ? room.players.map((p) => (p.id === payload.player.id ? payload.player : p))
+                        : [...room.players, payload.player];
+                    return { ...room, players: updatedPlayers };
+                }),
+            );
+        });
+
+        socket.on('room:updated', (payload: RoomUpdatedPayload) => {
+            if (payload.roomId !== currentRoomId) return;
+            setRooms((current) =>
+                current.map((room) =>
+                    room.id === payload.roomId
+                        ? {
+                              ...room,
+                              maxPlayers: payload.maxPlayers,
+                              timeLimit: payload.questionTime,
+                              gameMode: payload.gameMode,
+                          }
+                        : room,
+                ),
+            );
+        });
+
+        socket.on('game:started', (payload: GameStartedPayload) => {
+            if (payload.roomId !== currentRoomId) return;
+            setRooms((current) =>
+                current.map((room) =>
+                    room.id === payload.roomId
+                        ? {
+                              ...room,
+                              backendStatus: payload.status,
+                              status: mapBackendRoomStatus(payload.status),
+                          }
+                        : room,
+                ),
+            );
+        });
+
+        socket.on('round:started', (payload: RoundStartedPayload) => {
+            closingRoundIdRef.current = null;
+            setActiveRound(payload.round);
+            setClosedRound(null);
+            setAnsweredPlayers([]);
+            const openedAtMs = new Date(payload.round.openedAt).getTime();
+            const deadlineMs = openedAtMs + payload.round.timeLimit * 1000;
+            const remaining = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+            setRoundRemainingSeconds(remaining);
+        });
+
+        socket.on('round:answer-submitted', (payload: RoundAnswerSubmittedPayload) => {
+            setAnsweredPlayers((current) => {
+                if (current.some((p) => p.id === payload.player.id)) return current;
+                return [...current, payload.player];
+            });
+        });
+
+        socket.on('round:closed', (payload: RoundClosedPayload) => {
+            recordRoundClosedResult(currentRoomId, payload);
+            setClosedRound(payload.round);
+            setActiveRound(null);
+            setRoundRemainingSeconds(0);
+            setRooms((current) =>
+                current.map((room) => {
+                    if (room.id !== currentRoomId) return room;
+                    const updatedPlayers = room.players.map((p) => {
+                        const ranked = payload.round.ranking.find((r) => r.id === p.id);
+                        return ranked ? { ...p, score: ranked.score } : p;
+                    });
+                    return { ...room, players: updatedPlayers };
+                }),
+            );
+        });
+
+        socket.on('game:finished', (payload: GameFinishedPayload) => {
+            if (payload.roomId !== currentRoomId) return;
+            setActiveRound(null);
+            setRoundRemainingSeconds(0);
+            setRooms((current) =>
+                current.map((room) =>
+                    room.id === payload.roomId
+                        ? {
+                              ...room,
+                              backendStatus: 'FINISHED',
+                              status: 'Finalizado',
+                          }
+                        : room,
+                ),
+            );
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [currentRoomId, currentRoomCode]);
+
+    // Encerrar rodada atual no servidor
+    const closeCurrentRound = useCallback(
+        async (roundIdToClose?: string) => {
+            const targetRoundId = roundIdToClose ?? activeRound?.id;
+            if (!targetRoundId || !currentRoomId) return;
+            if (closingRoundIdRef.current === targetRoundId) return;
+
+            closingRoundIdRef.current = targetRoundId;
+            setRoomActionError(null);
+
+            try {
+                const response = await closeRoundApi(targetRoundId);
+                recordRoundClosedResult(currentRoomId, response);
+                setClosedRound(response.round);
+                setActiveRound(null);
+                setRoundRemainingSeconds(0);
+                setRooms((current) =>
+                    current.map((room) => {
+                        if (room.id !== currentRoomId) return room;
+                        const updatedPlayers = room.players.map((p) => {
+                            const ranked = response.round.ranking.find((r) => r.id === p.id);
+                            return ranked ? { ...p, score: ranked.score } : p;
+                        });
+                        return { ...room, players: updatedPlayers };
+                    }),
+                );
+            } catch {
+                // Caso haja pequena diferença de relógio no servidor, tenta novamente após 500ms
+                window.setTimeout(async () => {
+                    try {
+                        const retryResponse = await closeRoundApi(targetRoundId);
+                        recordRoundClosedResult(currentRoomId, retryResponse);
+                        setClosedRound(retryResponse.round);
+                        setActiveRound(null);
+                        setRoundRemainingSeconds(0);
+                    } catch (retryErr) {
+                        closingRoundIdRef.current = null;
+                        setRoomActionError(
+                            retryErr instanceof Error
+                                ? retryErr.message
+                                : 'Não foi possível encerrar a rodada.',
+                        );
+                    }
+                }, 500);
+            }
+        },
+        [activeRound?.id, currentRoomId],
     );
 
-    /** Temas existentes entre as perguntas selecionáveis, em ordem alfabética. */
-    const availableThemes = useMemo(
-        () =>
-            [...new Set(selectableQuestions.map((question) => question.theme))].sort((a, b) =>
-                a.localeCompare(b, 'pt-BR'),
-            ),
-        [selectableQuestions],
+    // Cronômetro da rodada aberta e fechamento automático (quando todos respondem ou tempo expira)
+    useEffect(() => {
+        if (!activeRound) return;
+
+        const openedAtMs = new Date(activeRound.openedAt).getTime();
+        const deadlineMs = openedAtMs + activeRound.timeLimit * 1000;
+        const allAnswered =
+            currentRoomPlayerCount > 0 && answeredPlayers.length >= currentRoomPlayerCount;
+
+        const intervalId = window.setInterval(() => {
+            if (allAnswered) {
+                window.clearInterval(intervalId);
+                void closeCurrentRound(activeRound.id);
+                return;
+            }
+
+            const remainingMs = deadlineMs - Date.now();
+            if (remainingMs <= 0) {
+                setRoundRemainingSeconds(0);
+                if (remainingMs <= -450) {
+                    window.clearInterval(intervalId);
+                    void closeCurrentRound(activeRound.id);
+                }
+            } else {
+                setRoundRemainingSeconds(Math.ceil(remainingMs / 1000));
+            }
+        }, 200);
+
+        return () => window.clearInterval(intervalId);
+    }, [activeRound, currentRoomPlayerCount, answeredPlayers.length, closeCurrentRound]);
+
+    // Ações de condução da partida pelo anfitrião
+    const startMatch = useCallback(
+        async (roomToStart?: Room) => {
+            const targetRoom = roomToStart ?? activeRoom;
+            if (!targetRoom) return;
+
+            setIsStartingMatch(true);
+            setRoomActionError(null);
+
+            try {
+                const freshLobby = await getRoomLobbyApi(targetRoom.code);
+                if (freshLobby.players.length < MIN_ROOM_PLAYERS) {
+                    throw new Error(
+                        `São necessários pelo menos ${MIN_ROOM_PLAYERS} jogadores na sala para iniciar (atual: ${freshLobby.players.length}).`,
+                    );
+                }
+
+                const startedRoom = await startRoomApi(targetRoom.id);
+                setRooms((current) =>
+                    current.map((r) =>
+                        r.id === targetRoom.id
+                            ? {
+                                  ...r,
+                                  players: freshLobby.players,
+                                  backendStatus: startedRoom.status,
+                                  status: mapBackendRoomStatus(startedRoom.status),
+                              }
+                            : r,
+                    ),
+                );
+
+                // Abre imediatamente a 1ª rodada
+                const nextRoundResponse = await createNextRoundApi(targetRoom.id);
+                if (!nextRoundResponse.finished) {
+                    closingRoundIdRef.current = null;
+                    setActiveRound(nextRoundResponse.round);
+                    setClosedRound(null);
+                    setAnsweredPlayers([]);
+                    setRoundRemainingSeconds(nextRoundResponse.round.timeLimit);
+                }
+            } catch (err) {
+                setRoomActionError(
+                    err instanceof Error
+                        ? err.message
+                        : 'Não foi possível iniciar a partida.',
+                );
+            } finally {
+                setIsStartingMatch(false);
+            }
+        },
+        [activeRoom],
     );
 
-    /** Perguntas exibidas na lista conforme os temas escolhidos no filtro. */
-    const visibleQuestions = useMemo(
-        () =>
-            selectedThemes.length > 0
-                ? selectableQuestions.filter((question) => selectedThemes.includes(question.theme))
-                : selectableQuestions,
-        [selectableQuestions, selectedThemes],
-    );
+    const advanceToNextRound = useCallback(async () => {
+        if (!activeRoom) return;
+        setIsAdvancingRound(true);
+        setRoomActionError(null);
 
-    /** Liga/desliga um tema no filtro; vários temas podem ser combinados. */
-    function toggleTheme(theme: string) {
-        setSelectedThemes((current) =>
-            current.includes(theme) ? current.filter((item) => item !== theme) : [...current, theme],
-        );
-    }
+        try {
+            const result = await createNextRoundApi(activeRoom.id);
+            if (result.finished) {
+                setActiveRound(null);
+                setRooms((current) =>
+                    current.map((r) =>
+                        r.id === activeRoom.id
+                            ? {
+                                  ...r,
+                                  backendStatus: 'FINISHED',
+                                  status: 'Finalizado',
+                              }
+                            : r,
+                    ),
+                );
+                return;
+            }
 
-    const clearThemes = useCallback(() => setSelectedThemes([]), []);
+            closingRoundIdRef.current = null;
+            setActiveRound(result.round);
+            setClosedRound(null);
+            setAnsweredPlayers([]);
+            setRoundRemainingSeconds(result.round.timeLimit);
+        } catch (err) {
+            setRoomActionError(
+                err instanceof Error
+                    ? err.message
+                    : 'Não foi possível avançar para a próxima rodada.',
+            );
+        } finally {
+            setIsAdvancingRound(false);
+        }
+    }, [activeRoom]);
 
     const openCreate = useCallback(() => {
         setEditingRoom(null);
         setName('');
         setTheme(DEFAULT_THEME);
         setTimeLimit(DEFAULT_TIME_LIMIT);
-        setSelectedQuestionIds([]);
+        setMaxPlayers(DEFAULT_MAX_PLAYERS);
+        setGameMode(DEFAULT_GAME_MODE);
         setFormError(null);
-        setSelectedThemes([]);
         setIsCreateOpen(true);
     }, []);
 
-    /** Abre o formulário preenchido com os dados da sala. */
     function openEdit(room: Room) {
-        const selectableIds = selectableQuestions.map((question) => question.id);
-        // Mantém apenas perguntas que ainda podem ser escolhidas (ativas).
-        // Salas antigas, sem lista própria, usavam todas as ativas.
-        const selectedIds =
-            room.questionIds.length > 0
-                ? room.questionIds.filter((id) => selectableIds.includes(id))
-                : selectableIds;
-
         setEditingRoom(room);
         setName(room.name);
         setTheme(room.theme);
         setTimeLimit(room.timeLimit);
-        setSelectedQuestionIds(selectedIds);
+        setMaxPlayers(room.maxPlayers);
+        setGameMode(room.gameMode);
         setFormError(null);
-        setSelectedThemes([]);
         setIsCreateOpen(true);
     }
 
     const closeCreate = useCallback(() => setIsCreateOpen(false), []);
 
-    /** Marca/desmarca uma pergunta, mantendo a ordem em que foram escolhidas. */
-    function toggleQuestion(id: string) {
-        setSelectedQuestionIds((current) =>
-            current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id],
-        );
-        setFormError(null);
-    }
-
-    const allVisibleSelected =
-        visibleQuestions.length > 0 &&
-        visibleQuestions.every((question) => selectedQuestionIds.includes(question.id));
-
-    /**
-     * Marca ou desmarca todas as perguntas VISÍVEIS (respeitando os temas
-     * escolhidos no filtro). Perguntas de outros temas já escolhidas não são afetadas.
-     */
-    function toggleAllQuestions() {
-        const visibleIds = visibleQuestions.map((question) => question.id);
-        setSelectedQuestionIds((current) =>
-            allVisibleSelected
-                ? current.filter((id) => !visibleIds.includes(id))
-                : [...current, ...visibleIds.filter((id) => !current.includes(id))],
-        );
-        setFormError(null);
-    }
-
-    /** Envio do formulário: cria uma sala nova ou salva a edição. */
-    function submitRoom(event: FormEvent<HTMLFormElement>) {
+    async function submitRoom(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
         if (!name.trim()) {
-            setFormError('Dê um nome para a sala.');
-            return;
-        }
-        if (selectedQuestionIds.length < MIN_ROOM_QUESTIONS) {
-            setFormError('Selecione pelo menos uma pergunta para a sala.');
+            setFormError('Dê um nome de identificação para a sala.');
             return;
         }
 
-        const details = {
-            name: name.trim(),
-            theme: theme.trim() || DEFAULT_THEME,
-            timeLimit,
-            questionIds: selectedQuestionIds,
-        };
+        if (maxPlayers < 2 || maxPlayers > 50) {
+            setFormError('A capacidade deve ser entre 2 e 50 jogadores.');
+            return;
+        }
 
-        if (editingRoom) {
-            // Edição: o código e o status são mantidos, para não invalidar o
-            // código que o professor já mostrou à turma.
-            setRooms((current) =>
-                current.map((room) => (room.id === editingRoom.id ? { ...room, ...details } : room)),
-            );
+        setIsSubmittingRoom(true);
+        setFormError(null);
+
+        try {
+            if (editingRoom) {
+                const updatedApi = await updateRoomApi(editingRoom.id, {
+                    maxPlayers,
+                    questionTime: timeLimit,
+                    gameMode,
+                });
+
+                setRooms((current) =>
+                    current.map((room) =>
+                        room.id === editingRoom.id
+                            ? {
+                                  ...room,
+                                  name: name.trim(),
+                                  theme: theme.trim() || DEFAULT_THEME,
+                                  timeLimit: updatedApi.questionTime,
+                                  maxPlayers: updatedApi.maxPlayers,
+                                  gameMode: updatedApi.gameMode,
+                              }
+                            : room,
+                    ),
+                );
+                setIsCreateOpen(false);
+                return;
+            }
+
+            const createdApi = await createRoomApi({
+                maxPlayers,
+                questionTime: timeLimit,
+                gameMode,
+            });
+
+            const newRoom = mapApiRoomToModel(createdApi, {
+                name: name.trim(),
+                theme: theme.trim() || DEFAULT_THEME,
+                questionIds: [],
+            });
+
+            setRooms((current) => [newRoom, ...current]);
+            setActiveRoomId(newRoom.id);
+            setActiveRound(null);
+            setClosedRound(null);
+            setAnsweredPlayers([]);
+            setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set('sala', newRoom.code);
+                return next;
+            }, { replace: true });
             setIsCreateOpen(false);
-            return;
+        } catch (err) {
+            setFormError(
+                err instanceof Error ? err.message : 'Erro ao salvar sala no servidor.',
+            );
+        } finally {
+            setIsSubmittingRoom(false);
         }
-
-        const room: Room = {
-            ...details,
-            id: createId(),
-            status: 'Aguardando',
-            code: generateRoomCode(rooms.map((existing) => existing.code)),
-        };
-
-        setRooms((current) => [...current, room]);
-        setIsCreateOpen(false);
-        // Mostra o código imediatamente, pronto para ser projetado.
-        setDisplayedRoom(room);
     }
 
-    const updateStatus = useCallback((id: string, status: RoomStatus) => {
-        setRooms((current) => current.map((room) => (room.id === id ? { ...room, status } : room)));
-    }, []);
-
-    // ===== Exclusão (sempre com confirmação) =====
+    async function handleLookupRoom(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (!lookupCode.trim()) return;
+        const loaded = await loadRoomByCode(lookupCode);
+        if (loaded) {
+            setLookupCode('');
+        }
+    }
 
     const requestDelete = useCallback((room: Room) => setRoomPendingDeletion(room), []);
     const cancelDelete = useCallback(() => setRoomPendingDeletion(null), []);
@@ -200,49 +570,65 @@ export function useRoomsViewModel(questionBank: Question[]) {
         const deletedId = roomPendingDeletion.id;
         setRooms((current) => current.filter((room) => room.id !== deletedId));
         setDisplayedRoom((current) => (current?.id === deletedId ? null : current));
+        if (activeRoomId === deletedId) {
+            setActiveRoomId(null);
+        }
         deleteRoomResults(deletedId);
         setRoomPendingDeletion(null);
     }
 
-    // ===== Relatório da sala finalizada =====
-
-    /** Calcula o relatório com os resultados registrados até agora. */
-    function openReport(room: Room) {
-        setReportView({ room, report: buildRoomReport(loadRoomResults(room.id), questionBank) });
+    function openReport(room: Room, questions: Question[] = []) {
+        setReportView({ room, report: buildRoomReport(loadRoomResults(room.id), questions) });
     }
 
     const closeReport = useCallback(() => setReportView(null), []);
-
     const showCode = useCallback((room: Room) => setDisplayedRoom(room), []);
     const hideCode = useCallback(() => setDisplayedRoom(null), []);
 
     return {
         rooms,
+        activeRoom,
+        selectRoom,
+        isLoadingRoom,
+        roomActionError,
+        clearRoomActionError: () => setRoomActionError(null),
+        refreshActiveRoomLobby: () =>
+            activeRoom
+                ? loadRoomByCode(activeRoom.code, { name: activeRoom.name, theme: activeRoom.theme })
+                : Promise.resolve(null),
+        lookupCode,
+        setLookupCode: (val: string) =>
+            setLookupCode(val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)),
+        handleLookupRoom,
+        activeRound,
+        closedRound,
+        answeredPlayers,
+        roundRemainingSeconds,
+        isStartingMatch,
+        isAdvancingRound,
+        minPlayers: MIN_ROOM_PLAYERS,
+        minQuestions: MIN_ROOM_QUESTIONS,
+        startMatch,
+        closeCurrentRound: () => closeCurrentRound(),
+        advanceToNextRound,
         isCreateOpen,
-        form: { name, theme, timeLimit, selectedQuestionIds },
+        isSubmittingRoom,
+        form: { name, theme, timeLimit, maxPlayers, gameMode },
         formError,
-        selectableQuestions,
-        visibleQuestions,
-        availableThemes,
-        selectedThemes,
-        toggleTheme,
-        clearThemes,
-        allVisibleSelected,
         setName: (value: string) => {
             setName(value);
             setFormError(null);
         },
         setTheme,
         setTimeLimit,
-        toggleQuestion,
-        toggleAllQuestions,
+        setMaxPlayers,
+        setGameMode,
         openCreate,
         openEdit,
         closeCreate,
         isEditing: editingRoom !== null,
         editingRoom,
         submitRoom,
-        updateStatus,
         roomPendingDeletion,
         requestDelete,
         cancelDelete,

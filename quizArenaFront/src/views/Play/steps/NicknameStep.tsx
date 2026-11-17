@@ -6,13 +6,18 @@ import { NICKNAME_MAX_LENGTH } from '../../../models/game';
 interface NicknameStepProps {
     nickname: string;
     error: string | null;
+    isJoining?: boolean;
     onNicknameChange: (nickname: string) => void;
     onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
-export default function NicknameStep({ nickname, error, onNicknameChange, onSubmit }: NicknameStepProps) {
-    // Em etapas com formulário o foco vai direto para o campo, para o
-    // aluno já poder digitar.
+export default function NicknameStep({
+    nickname,
+    error,
+    isJoining = false,
+    onNicknameChange,
+    onSubmit,
+}: NicknameStepProps) {
     const inputRef = useFocusOnMount<HTMLInputElement>();
 
     return (
@@ -20,7 +25,7 @@ export default function NicknameStep({ nickname, error, onNicknameChange, onSubm
             <h1 id="play-nickname-title" className="play-card__title">
                 Como você quer ser chamado?
             </h1>
-            <p className="play-card__text">Seu apelido aparece para o professor e para a turma.</p>
+            <p className="play-card__text">Seu apelido aparece para o anfitrião e para os participantes.</p>
 
             <form className="play-form" onSubmit={onSubmit} noValidate>
                 <label htmlFor="play-nickname" className="sr-only">
@@ -37,6 +42,7 @@ export default function NicknameStep({ nickname, error, onNicknameChange, onSubm
                     onChange={(event) => onNicknameChange(event.target.value)}
                     aria-invalid={error ? true : undefined}
                     aria-describedby={error ? 'play-nickname-error' : undefined}
+                    disabled={isJoining}
                 />
 
                 {error && (
@@ -45,8 +51,8 @@ export default function NicknameStep({ nickname, error, onNicknameChange, onSubm
                     </p>
                 )}
 
-                <Button type="submit" size="lg" fullWidth>
-                    Entrar na sala
+                <Button type="submit" size="lg" fullWidth disabled={isJoining}>
+                    {isJoining ? 'Entrando na sala…' : 'Entrar na sala'}
                 </Button>
             </form>
         </section>
