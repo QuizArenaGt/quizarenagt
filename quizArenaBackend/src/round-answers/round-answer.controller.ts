@@ -1,9 +1,8 @@
 
 import type { Request, Response } from "express";
-
 import { RoundAnswerService } from "./round-answer.service.js";
-
 import { validateSubmitRoundAnswer } from "./submit-round-answer.dto.js";
+import { emitRoomEvent } from "../realtime/room-events.js";
 
 import {
     RoundAnswerAlreadySubmittedError,
@@ -18,7 +17,7 @@ import {
 export class RoundAnswerController {
     constructor(
         private readonly roundAnswerService = new RoundAnswerService(),
-    ) {}
+    ) { }
 
     async submit(req: Request, res: Response): Promise<void> {
         if (!req.roomPlayer) {
@@ -53,6 +52,14 @@ export class RoundAnswerController {
                 req.roomPlayer.id,
                 validation.data.optionId,
             );
+
+            emitRoomEvent(req.roomPlayer.roomId, "round:answer-submitted", {
+                roundId: answer.roundId,
+                player: {
+                    id: req.roomPlayer.id,
+                    nickname: req.roomPlayer.nickname,
+                },
+            }); 
 
             res.status(201).json({
                 answer: {

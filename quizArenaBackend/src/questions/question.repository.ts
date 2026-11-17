@@ -113,4 +113,29 @@ export class QuestionRepository {
             data: { isActive },
         });
     }
+
+    async findManyByRoomId(roomId: string): Promise<QuestionWithOptions[]> {
+        return prisma.question.findMany({
+            where: {
+                roomId,
+            },
+            include: {
+                options: {
+                    orderBy: {
+                        position: "asc",
+                    },
+                },
+            },
+            orderBy: {
+                createdAt: "asc",
+            },
+        });
+    }
+
+    async delete(id: string): Promise<Question> {
+        return prisma.question.delete({
+            where: { id },
+        });
+    }
+
 }

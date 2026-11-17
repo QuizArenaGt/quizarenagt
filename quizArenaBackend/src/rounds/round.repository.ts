@@ -35,6 +35,153 @@ export type CreateNextRoundResult =
     };
 
 export class RoundRepository {
+
+    async closeRound(
+        roundId: string,
+        hostId: string,
+    ) {
+        return prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT id
+                FROM rounds
+                WHERE id = ${roundId}
+                FOR UPDATE
+            `;
+
+            const round = await tx.round.findUnique({
+                where: { id: roundId },
+                include: {
+                    game: {
+                        include: {
+                            room: {
+                                include: {
+                                    players: {
+                                        select: {
+                                            id: true,
+                                            nickname: true,
+                                            score: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    snapshotQuestion: {
+                        include: {
+                            options: {
+                                orderBy: { position: "asc" },
+                            },
+                        },
+                    },
+                    answers: {
+                        include: {
+                            roomPlayer: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                },
+                            },
+                            option: {
+                                select: {
+                                    id: true,
+                                    text: true,
+                                    isCorrect: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            if (!round) {
+                return { success: false as const, reason: "ROUND_NOT_FOUND" as const };
+            }
+
+            const room = round.game.room;
+
+            if (room.hostId !== hostId) {
+                return { success: false as const, reason: "ACCESS_DENIED" as const };
+            }
+
+            if (
+                room.status !== "IN_PROGRESS" ||
+                round.game.finishedAt !== null
+            ) {
+                return { success: false as const, reason: "GAME_NOT_IN_PROGRESS" as const };
+            }
+
+            // Repetir a chamada não processa a rodada novamente.
+            if (round.status === "CLOSED") {
+                return { success: true as const, round };
+            }
+
+            const elapsedMs = Date.now() - round.openedAt.getTime();
+            const timeExpired = elapsedMs >= round.timeLimit * 1000;
+
+            const allPlayersAnswered =
+                room.players.length > 0 &&
+                round.answers.length >= room.players.length;
+
+            if (!timeExpired && !allPlayersAnswered) {
+                return { success: false as const, reason: "ROUND_NOT_READY" as const };
+            }
+
+            const closedRound = await tx.round.update({
+                where: { id: roundId },
+                data: {
+                    status: "CLOSED",
+                    closedAt: new Date(),
+                },
+                include: {
+                    game: {
+                        include: {
+                            room: {
+                                include: {
+                                    players: {
+                                        select: {
+                                            id: true,
+                                            nickname: true,
+                                            score: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    snapshotQuestion: {
+                        include: {
+                            options: {
+                                orderBy: { position: "asc" },
+                            },
+                        },
+                    },
+                    answers: {
+                        include: {
+                            roomPlayer: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                },
+                            },
+                            option: {
+                                select: {
+                                    id: true,
+                                    text: true,
+                                    isCorrect: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            return {
+                success: true as const,
+                round: closedRound,
+            };
+        });
+    }
+
     async createNextRound(
         roomId: string,
         hostId: string,

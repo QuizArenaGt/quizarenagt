@@ -12,11 +12,13 @@ import {
     RoundGameNotFoundError,
     RoundAlreadyOpenError,
     PreviousRoundNotClosedError,
+    RoundNotFoundError,
+    RoundNotReadyError,
 } from "./round.errors.js";
 
 type RoundRepositoryContract = Pick<
     RoundRepository,
-    "createNextRound"
+    "createNextRound" | "closeRound"
 >;
 
 export type CreateNextRoundResponse =
@@ -32,7 +34,7 @@ export class RoundService {
     constructor(
         private readonly roundRepository: RoundRepositoryContract =
             new RoundRepository(),
-    ) {}
+    ) { }
 
     async createNextRound(
         roomId: string,
@@ -74,6 +76,33 @@ export class RoundService {
                 return {
                     finished: true,
                 };
+        }
+    }
+
+    async closeRound(roundId: string, hostId: string) {
+        const result = await this.roundRepository.closeRound(
+            roundId,
+            hostId,
+        );
+
+        if (result.success) {
+            return {
+                round: result.round,
+            };
+        }
+
+        switch (result.reason) {
+            case "ROUND_NOT_FOUND":
+                throw new RoundNotFoundError();
+
+            case "ACCESS_DENIED":
+                throw new RoundAccessDeniedError();
+
+            case "GAME_NOT_IN_PROGRESS":
+                throw new RoundRoomNotInProgressError();
+
+            case "ROUND_NOT_READY":
+                throw new RoundNotReadyError();
         }
     }
 }

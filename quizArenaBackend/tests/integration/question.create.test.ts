@@ -274,7 +274,7 @@ describe("POST /questions - Integração", () => {
         expect(response.body.errors).toHaveProperty("statement");
     });
 
-    it("deve retornar 400 quando o número de alternativas for diferente de 4", async () => {
+    it("deve retornar 400 quando houver menos de 2 alternativas", async () => {
         const payload = validQuestionPayload(adminRoomId);
 
         const response = await request(app)
@@ -282,7 +282,7 @@ describe("POST /questions - Integração", () => {
             .set("Authorization", `Bearer ${adminToken}`)
             .send({
                 ...payload,
-                options: payload.options.slice(0, 3),
+                options: payload.options.slice(0, 1),
             });
 
         expect(response.status).toBe(400);

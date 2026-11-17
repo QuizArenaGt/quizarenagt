@@ -83,7 +83,10 @@ async function createOtherUser(): Promise<string> {
     return response.body.token;
 }
 
-async function createPlayers(roomId: string, quantity: number): Promise<void> {
+async function createPlayers(
+    roomId: string,
+    quantity: number,
+): Promise<void> {
     await prisma.roomPlayer.createMany({
         data: Array.from({ length: quantity }, (_, index) => ({
             roomId,
@@ -94,31 +97,38 @@ async function createPlayers(roomId: string, quantity: number): Promise<void> {
 
 async function createQuestions(
     roomId: string,
+    token: string,
     quantity: number,
-    isActive = true,
 ): Promise<void> {
-    await Promise.all(
-        Array.from({ length: quantity }, (_, index) =>
-            prisma.question.create({
-                data: {
-                    roomId,
-                    statement: `Pergunta de teste ${index + 1}`,
-                    type: "MULTIPLE_CHOICE",
-                    isActive,
-                    options: {
-                        create: Array.from(
-                            { length: 4 },
-                            (_, optionIndex) => ({
-                                text: `Alternativa ${optionIndex + 1}`,
-                                isCorrect: optionIndex === 0,
-                                position: optionIndex,
-                            }),
-                        ),
-                    },
-                },
-            }),
-        ),
-    );
+    for (let index = 0; index < quantity; index++) {
+        const response = await request(app)
+            .post("/questions")
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+                roomId,
+                statement: `Pergunta de teste ${index + 1}`,
+                type: "MULTIPLE_CHOICE",
+                options: [
+                    { text: "Alternativa 1", isCorrect: true },
+                    { text: "Alternativa 2", isCorrect: false },
+                    { text: "Alternativa 3", isCorrect: false },
+                    { text: "Alternativa 4", isCorrect: false },
+                ],
+            });
+
+        expect(response.status).toBe(201);
+    }
+}
+
+async function deactivateOneQuestion(roomId: string): Promise<void> {
+    const question = await prisma.question.findFirstOrThrow({
+        where: { roomId },
+    });
+
+    await prisma.question.update({
+        where: { id: question.id },
+        data: { isActive: false },
+    });
 }
 
 describe("POST /rooms/:id/start - Integração", () => {
@@ -154,7 +164,7 @@ describe("POST /rooms/:id/start - Integração", () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 2);
-        await createQuestions(room.id, 5);
+        await createQuestions(room.id, token, 5);
 
         const originalQuestions = await prisma.question.findMany({
             where: { roomId: room.id },
@@ -290,7 +300,6 @@ describe("POST /rooms/:id/start - Integração", () => {
         const otherToken = await createOtherUser();
 
         await createPlayers(room.id, 2);
-        await createQuestions(room.id, 5);
 
         const response = await request(app)
             .post(`/rooms/${room.id}/start`)
@@ -309,7 +318,6 @@ describe("POST /rooms/:id/start - Integração", () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 1);
-        await createQuestions(room.id, 5);
 
         const response = await request(app)
             .post(`/rooms/${room.id}/start`)
@@ -328,7 +336,7 @@ describe("POST /rooms/:id/start - Integração", () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 2);
-        await createQuestions(room.id, 4);
+        await createQuestions(room.id, token, 4);
 
         const response = await request(app)
             .post(`/rooms/${room.id}/start`)
@@ -341,6 +349,7 @@ describe("POST /rooms/:id/start - Integração", () => {
         });
 
         expect(snapshot).toBeNull();
+
         const persistedRoom = await prisma.room.findUnique({
             where: { id: room.id },
         });
@@ -352,8 +361,8 @@ describe("POST /rooms/:id/start - Integração", () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 2);
-        await createQuestions(room.id, 4);
-        await createQuestions(room.id, 1, false);
+        await createQuestions(room.id, token, 5);
+        await deactivateOneQuestion(room.id);
 
         const response = await request(app)
             .post(`/rooms/${room.id}/start`)
@@ -372,7 +381,6 @@ describe("POST /rooms/:id/start - Integração", () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 2);
-        await createQuestions(room.id, 5);
 
         await prisma.room.update({
             where: { id: room.id },
@@ -400,7 +408,7 @@ describe("POST /rooms/:id/start - Integração", () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 2);
-        await createQuestions(room.id, 5);
+        await createQuestions(room.id, token, 5);
 
         const startRequests = Array.from({ length: 2 }, () =>
             request(app)

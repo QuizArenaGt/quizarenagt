@@ -1,3 +1,4 @@
+
 import { Router } from "express";
 
 import { RoundController } from "./round.controller.js";
@@ -7,10 +8,18 @@ const roundRoutes = Router();
 const roundController = new RoundController();
 
 roundRoutes.post(
-    "/:id/rounds",
+    "/rooms/:id/rounds",
     authenticateToken,
     (req, res) => {
         void roundController.createNext(req, res);
+    },
+);
+
+roundRoutes.post(
+    "/rounds/:id/close",
+    authenticateToken,
+    (req, res) => {
+        void roundController.close(req, res);
     },
 );
 

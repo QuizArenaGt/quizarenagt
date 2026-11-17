@@ -102,10 +102,10 @@ describe("validateCreateQuestion", () => {
         }
     });
 
-    it("deve rejeitar quando o número de alternativas for menor que 4", () => {
+    it("deve rejeitar quando o número de alternativas for menor que 2", () => {
         const result = validateCreateQuestion({
             statement: "Qual é a capital do Brasil?",
-            options: validOptions.slice(0, 3),
+            options: validOptions.slice(0, 1),
         });
 
         expect(result.success).toBe(false);

@@ -3,9 +3,19 @@ import type {
     Room,
     GameMode,
     RoomStatus,
+    QuestionType,
 } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+
+type CreateRoomQuestionData = {
+    statement: string;
+    type: QuestionType;
+    options: {
+        text: string;
+        isCorrect: boolean;
+    }[];
+};
 
 type CreateRoomData = {
     code: string;
@@ -13,6 +23,7 @@ type CreateRoomData = {
     maxPlayers: number;
     questionTime: number;
     gameMode?: GameMode;
+    questions?: CreateRoomQuestionData[];
 };
 
 type UpdateRoomData = {
@@ -29,11 +40,11 @@ export type StartRoomResult =
     | {
         success: false;
         reason:
-            | "ROOM_NOT_FOUND"
-            | "ACCESS_DENIED"
-            | "ROOM_NOT_WAITING"
-            | "NOT_ENOUGH_PLAYERS"
-            | "NOT_ENOUGH_QUESTIONS";
+        | "ROOM_NOT_FOUND"
+        | "ACCESS_DENIED"
+        | "ROOM_NOT_WAITING"
+        | "NOT_ENOUGH_PLAYERS"
+        | "NOT_ENOUGH_QUESTIONS";
     };
 
 export class RoomRepository {
@@ -82,8 +93,29 @@ export class RoomRepository {
     }
 
     async create(data: CreateRoomData): Promise<Room> {
+        const { questions, ...roomData } = data;
+
         return prisma.room.create({
-            data,
+            data: {
+                ...roomData,
+                ...(questions && {
+                    questions: {
+                        create: questions.map((question) => ({
+                            statement: question.statement,
+                            type: question.type,
+                            options: {
+                                create: question.options.map(
+                                    (option, position) => ({
+                                        text: option.text,
+                                        isCorrect: option.isCorrect,
+                                        position,
+                                    }),
+                                ),
+                            },
+                        })),
+                    },
+                }),
+            },
         });
     }
 

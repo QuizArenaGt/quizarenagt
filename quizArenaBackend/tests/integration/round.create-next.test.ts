@@ -134,8 +134,9 @@ async function startRoom(
 async function createStartedRoom() {
     const context = await createRoom();
 
-    await createPlayers(context.room.id);
     await createQuestions(context.room.id, 5);
+    await createPlayers(context.room.id);
+
     await startRoom(context.room.id, context.token);
 
     return context;

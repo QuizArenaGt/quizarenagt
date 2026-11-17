@@ -1,3 +1,4 @@
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { hash } from "bcryptjs";
@@ -113,6 +114,14 @@ describe("POST /rooms - Integração", () => {
                 id: response.body.id,
             },
         });
+
+        const questions = await prisma.question.findMany({
+            where: {
+                roomId: response.body.id,
+            },
+        });
+
+        expect(questions).toHaveLength(0);
 
         expect(room).not.toBeNull();
         expect(room?.hostId).toBe(user.id);

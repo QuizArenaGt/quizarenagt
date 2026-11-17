@@ -80,8 +80,15 @@ export function validateCreateQuestion(
 
     if (!Array.isArray(options)) {
         errors.options = "As alternativas devem ser informadas em uma lista.";
-    } else if (options.length !== 4) {
-        errors.options = "A pergunta deve possuir exatamente 4 alternativas.";
+    } else if (
+        resolvedType === QuestionType.TRUE_FALSE
+            ? options.length !== 2
+            : options.length < 2 || options.length > 4
+    ) {
+        errors.options =
+            resolvedType === QuestionType.TRUE_FALSE
+                ? "Uma pergunta de verdadeiro ou falso deve possuir exatamente 2 alternativas."
+                : "Uma pergunta de múltipla escolha deve possuir entre 2 e 4 alternativas.";
     } else {
         let hasInvalidOption = false;
 

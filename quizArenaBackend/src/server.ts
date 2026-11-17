@@ -1,4 +1,6 @@
+
 import path from "node:path";
+import { createServer } from "node:http";
 import dotenv from "dotenv";
 
 const rootEnvPath = path.resolve(process.cwd(), "../.env");
@@ -7,9 +9,14 @@ dotenv.config({ path: rootEnvPath });
 dotenv.config();
 
 async function start(): Promise<void> {
-    const [{ app }, { prisma }] = await Promise.all([
+    const [
+        { app },
+        { prisma },
+        { createSocketServer },
+    ] = await Promise.all([
         import("./app.js"),
         import("./database/prisma.js"),
+        import("./realtime/socket.server.js"),
     ]);
 
     const port = Number(process.env.PORT ?? 3000);
@@ -20,12 +27,16 @@ async function start(): Promise<void> {
 
         console.log("Conexão com o PostgreSQL estabelecida com sucesso!");
 
-        const server = app.listen(port, () => {
+        const httpServer = createServer(app);
+        const io = createSocketServer(httpServer);
+
+        httpServer.listen(port, () => {
             console.log(`Servidor rodando em: http://localhost:${port}`);
+            console.log("Socket.IO inicializado com sucesso!");
         });
 
         const shutdown = async () => {
-            server.close(async () => {
+            io.close(async () => {
                 await prisma.$disconnect();
                 process.exit(0);
             });

@@ -11,6 +11,7 @@ import request from "supertest";
 import { hash } from "bcryptjs";
 import { randomUUID } from "node:crypto";
 
+
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
 
@@ -121,6 +122,8 @@ async function createStartedRoom(
 ) {
     const context = await createRoom(gameMode);
 
+    await createQuestions(context.room.id, 5);
+
     const player = await joinPlayer(
         context.room.code,
         "Jogador 1",
@@ -130,8 +133,6 @@ async function createStartedRoom(
         context.room.code,
         "Jogador 2",
     );
-
-    await createQuestions(context.room.id, 5);
 
     const startResponse = await request(app)
         .post(`/rooms/${context.room.id}/start`)

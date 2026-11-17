@@ -58,3 +58,19 @@ export class RoundDeckFinishedError extends Error {
         this.name = "RoundDeckFinishedError";
     }
 }
+
+export class RoundNotFoundError extends Error {
+    constructor(message = "Rodada não encontrada.") {
+        super(message);
+        this.name = "RoundNotFoundError";
+    }
+}
+
+export class RoundNotReadyError extends Error {
+    constructor(
+        message = "A rodada ainda está em andamento.",
+    ) {
+        super(message);
+        this.name = "RoundNotReadyError";
+    }
+}

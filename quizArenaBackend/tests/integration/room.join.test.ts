@@ -5,6 +5,7 @@ import { hash } from "bcryptjs";
 
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
+import { validRoomQuestions } from "../helpers/room-test-data.js";
 
 const password = "12345678";
 const hostEmail = "room.join.host@email.com";
@@ -45,6 +46,7 @@ async function createRoom(maxPlayers = 10) {
         .send({
             maxPlayers,
             questionTime: 30,
+            questions: validRoomQuestions(),
         });
 
     return {

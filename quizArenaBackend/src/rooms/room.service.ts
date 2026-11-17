@@ -53,6 +53,7 @@ type JwtServiceContract = Pick<JwtService, "verify">;
 
 export type CreateRoomInput = CreateRoomDto & {
     hostId: string;
+    questions?: unknown;
 };
 
 export type UpdateRoomInput = {
@@ -114,25 +115,25 @@ export class RoomService {
 
 
     async createRoom(data: CreateRoomInput): Promise<Room> {
-        const validation = validateCreateRoom(data);
+    const validation = validateCreateRoom(data);
 
-        if (!validation.success) {
-            throw new InvalidRoomDataError(
-                "Dados da sala inválidos.",
-                validation.errors,
-            );
-        }
-
-        const code = await this.codeGenerator.generate();
-
-        return this.roomRepository.create({
-            code,
-            hostId: data.hostId,
-            maxPlayers: validation.data.maxPlayers,
-            questionTime: validation.data.questionTime,
-            gameMode: validation.data.gameMode,
-        });
+    if (!validation.success) {
+        throw new InvalidRoomDataError(
+            "Dados da sala inválidos.",
+            validation.errors,
+        );
     }
+
+    const code = await this.codeGenerator.generate();
+
+    return this.roomRepository.create({
+        code,
+        hostId: data.hostId,
+        maxPlayers: validation.data.maxPlayers,
+        questionTime: validation.data.questionTime,
+        gameMode: validation.data.gameMode,
+    });
+}
 
     async updateRoom(data: UpdateRoomInput): Promise<Room> {
         const validation = validateUpdateRoom(data.data);

@@ -22,7 +22,7 @@ export interface Room {
 }
 
 /** Uma sala precisa de pelo menos uma pergunta para ser criada. */
-export const MIN_ROOM_QUESTIONS = 1;
+export const MIN_ROOM_QUESTIONS = 5;
 
 export const ROOM_TIME_OPTIONS = [15, 30, 45, 60] as const;
 

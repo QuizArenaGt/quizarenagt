@@ -173,19 +173,23 @@ describe("Fluxo completo de sala - Integração", () => {
 
         expect(savedRoom?.questions).toHaveLength(1);
 
-        expect(savedRoom?.questions[0]).toMatchObject({
+        const savedQuestion = savedRoom?.questions.find(
+            (question) => question.statement === questionPayload.statement,
+        );
+
+        expect(savedQuestion).toBeDefined();
+
+        expect(savedQuestion).toMatchObject({
             roomId,
             statement: questionPayload.statement,
             type: QuestionType.MULTIPLE_CHOICE,
             isActive: true,
         });
 
-        expect(savedRoom?.questions[0].options).toHaveLength(4);
+        expect(savedQuestion?.options).toHaveLength(4);
 
         expect(
-            savedRoom?.questions[0].options.filter(
-                (option) => option.isCorrect,
-            ),
+            savedQuestion?.options.filter((option) => option.isCorrect),
         ).toHaveLength(1);
     });
 });

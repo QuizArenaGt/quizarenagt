@@ -23,7 +23,7 @@ app.get("/", (_req, res) => {
 app.use("/auth", authRoutes);
 app.use("/questions", questionRoutes);
 app.use("/rooms", roomRoutes);
-app.use("/rooms", roundRoutes);
+app.use("/", roundRoutes);
 app.use("/rounds", roundAnswerRoutes);
 
 export { app };

@@ -12,7 +12,7 @@ import {
     RoomAuthenticationError,
     RoomStartRequirementsError,
 } from "./room.errors.js";
-
+import { emitRoomEvent } from "../realtime/room-events.js";
 
 export class RoomController {
     constructor(
@@ -74,6 +74,13 @@ export class RoomController {
                 roomId,
                 hostId: req.user.id,
                 data: req.body,
+            });
+
+            emitRoomEvent(room.id, "room:updated", {
+                roomId: room.id,
+                maxPlayers: room.maxPlayers,
+                questionTime: room.questionTime,
+                gameMode: room.gameMode,
             });
 
             res.status(200).json(room);
@@ -138,6 +145,11 @@ export class RoomController {
                 req.user.id,
             );
 
+            emitRoomEvent(room.id, "game:started", {
+                roomId: room.id,
+                status: room.status,
+            });
+
             res.status(200).json(room);
         } catch (error: unknown) {
             if (error instanceof RoomNotFoundError) {
@@ -175,6 +187,16 @@ export class RoomController {
     async join(req: Request, res: Response): Promise<void> {
         try {
             const result = await this.roomService.joinRoom(req.body);
+
+            emitRoomEvent(result.player.roomId, "player:joined", {
+                roomId: result.player.roomId,
+                player: {
+                    id: result.player.id,
+                    nickname: result.player.nickname,
+                    score: result.player.score,
+                    joinedAt: result.player.joinedAt,
+                },
+            });
 
             res.status(201).json(result);
         } catch (error: unknown) {

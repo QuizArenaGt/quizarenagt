@@ -25,3 +25,18 @@ export class QuestionRoomAccessDeniedError extends Error {
         this.name = "QuestionRoomAccessDeniedError";
     }
 }
+
+export class QuestionRoomNotEditableError extends Error {
+    constructor(message = "Não é possível alterar perguntas após o início da partida.") {
+        super(message);
+        this.name = "QuestionRoomNotEditableError";
+    }
+}
+
+export class QuestionNotFoundError extends Error {
+    constructor(message = "Pergunta não encontrada.") {
+        super(message);
+        this.name = "QuestionNotFoundError";
+    }
+}
+
