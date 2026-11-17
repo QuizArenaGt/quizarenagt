@@ -39,6 +39,9 @@ const transactionClient = {
     roomQuestionSnapshot: {
         create: vi.fn(),
     },
+    game: {
+        create: vi.fn(),
+    },
 };
 
 type TransactionCallback = (
@@ -111,12 +114,22 @@ describe("RoomRepository", () => {
         });
 
         transactionClient.roomPlayer.count.mockResolvedValue(2);
+
         transactionClient.question.findMany.mockResolvedValue(
             questionsFixture,
         );
+
         transactionClient.roomQuestionSnapshot.create.mockResolvedValue({
             id: "snapshot-test-uuid",
             roomId: roomFixture.id,
+        });
+
+        transactionClient.game.create.mockResolvedValue({
+            id: "game-test-uuid",
+            roomId: roomFixture.id,
+            startedAt: new Date("2026-11-16T12:00:00.000Z"),
+            finishedAt: null,
+            createdAt: new Date("2026-11-16T12:00:00.000Z"),
         });
 
         repository = new RoomRepository();
@@ -259,7 +272,7 @@ describe("RoomRepository", () => {
     });
 
     describe("startIfReady", () => {
-        it("deve criar o snapshot e iniciar a sala quando todos os requisitos forem atendidos", async () => {
+        it("deve criar o snapshot e o game antes de iniciar a sala", async () => {
             const updatedRoom = {
                 ...roomFixture,
                 status: "IN_PROGRESS" as const,
@@ -327,6 +340,12 @@ describe("RoomRepository", () => {
                 },
             });
 
+            expect(transactionClient.game.create).toHaveBeenCalledWith({
+                data: {
+                    roomId: roomFixture.id,
+                },
+            });
+
             expect(transactionClient.room.update).toHaveBeenCalledWith({
                 where: { id: roomFixture.id },
                 data: { status: "IN_PROGRESS" },
@@ -335,6 +354,12 @@ describe("RoomRepository", () => {
             expect(
                 transactionClient.roomQuestionSnapshot.create.mock
                     .invocationCallOrder[0],
+            ).toBeLessThan(
+                transactionClient.game.create.mock.invocationCallOrder[0],
+            );
+
+            expect(
+                transactionClient.game.create.mock.invocationCallOrder[0],
             ).toBeLessThan(
                 transactionClient.room.update.mock.invocationCallOrder[0],
             );
@@ -363,6 +388,7 @@ describe("RoomRepository", () => {
             expect(
                 transactionClient.roomQuestionSnapshot.create,
             ).not.toHaveBeenCalled();
+            expect(transactionClient.game.create).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -382,6 +408,7 @@ describe("RoomRepository", () => {
             expect(
                 transactionClient.roomQuestionSnapshot.create,
             ).not.toHaveBeenCalled();
+            expect(transactionClient.game.create).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -406,6 +433,7 @@ describe("RoomRepository", () => {
             expect(
                 transactionClient.roomQuestionSnapshot.create,
             ).not.toHaveBeenCalled();
+            expect(transactionClient.game.create).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -426,6 +454,7 @@ describe("RoomRepository", () => {
             expect(
                 transactionClient.roomQuestionSnapshot.create,
             ).not.toHaveBeenCalled();
+            expect(transactionClient.game.create).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
 
@@ -447,6 +476,7 @@ describe("RoomRepository", () => {
             expect(
                 transactionClient.roomQuestionSnapshot.create,
             ).not.toHaveBeenCalled();
+            expect(transactionClient.game.create).not.toHaveBeenCalled();
             expect(transactionClient.room.update).not.toHaveBeenCalled();
         });
     });

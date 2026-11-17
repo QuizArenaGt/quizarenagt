@@ -72,6 +72,11 @@ enum RoomStatus {
   CANCELLED
 }
 
+enum RoundStatus {
+  OPEN
+  CLOSED
+}
+
 model Room {
   id               String                @id @default(uuid())
   code             String                @unique
@@ -85,6 +90,7 @@ model Room {
   players          RoomPlayer[]
   questions        Question[]
   questionSnapshot RoomQuestionSnapshot?
+  game             Game?
 
   host User @relation(fields: [hostId], references: [id], onDelete: Restrict)
 
@@ -126,6 +132,7 @@ model RoomQuestionSnapshotQuestion {
   type             QuestionType
   position         Int
   snapshotId       String
+  rounds           Round[]
 
   snapshot RoomQuestionSnapshot         @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
   options  RoomQuestionSnapshotOption[]
@@ -146,4 +153,35 @@ model RoomQuestionSnapshotOption {
 
   @@unique([questionSnapshotId, position])
   @@map("room_question_snapshot_options")
+}
+
+model Game {
+  id         String    @id @default(uuid())
+  roomId     String    @unique
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  room   Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  rounds Round[]
+
+  @@map("games")
+}
+
+model Round {
+  id                 String      @id @default(uuid())
+  gameId             String
+  snapshotQuestionId String
+  roundNumber        Int
+  status             RoundStatus @default(OPEN)
+  openedAt           DateTime    @default(now())
+  closedAt           DateTime?
+  timeLimit          Int
+
+  game             Game                         @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  snapshotQuestion RoomQuestionSnapshotQuestion @relation(fields: [snapshotQuestionId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, roundNumber])
+  @@unique([gameId, snapshotQuestionId])
+  @@map("rounds")
 }

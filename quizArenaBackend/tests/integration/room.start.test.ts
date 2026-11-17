@@ -182,6 +182,14 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(persistedRoom?.status).toBe("IN_PROGRESS");
 
+        const game = await prisma.game.findUnique({
+            where: { roomId: room.id },
+        });
+
+        expect(game).not.toBeNull();
+        expect(game?.roomId).toBe(room.id);
+        expect(game?.finishedAt).toBeNull();
+
         const snapshot = await prisma.roomQuestionSnapshot.findUnique({
             where: { roomId: room.id },
             include: {
@@ -424,5 +432,11 @@ describe("POST /rooms/:id/start - Integração", () => {
         });
 
         expect(snapshotCount).toBe(1);
+
+        const gameCount = await prisma.game.count({
+            where: { roomId: room.id },
+        });
+
+        expect(gameCount).toBe(1);
     });
 });
