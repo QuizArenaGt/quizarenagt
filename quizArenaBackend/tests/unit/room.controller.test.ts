@@ -9,6 +9,7 @@ import {
     RoomAccessDeniedError,
     RoomNotEditableError,
     RoomAuthenticationError,
+    RoomStartRequirementsError,
 } from "../../src/rooms/room.errors.js";
 import type { RoomService } from "../../src/rooms/room.service.js";
 
@@ -17,6 +18,7 @@ describe("RoomController", () => {
         createRoom: ReturnType<typeof vi.fn>;
         updateRoom: ReturnType<typeof vi.fn>;
         getRoomLobby: ReturnType<typeof vi.fn>;
+        startRoom: ReturnType<typeof vi.fn>;
     };
 
     let controller: RoomController;
@@ -58,6 +60,8 @@ describe("RoomController", () => {
             createRoom: vi.fn(),
             updateRoom: vi.fn(),
             getRoomLobby: vi.fn(),
+            startRoom: vi.fn(),
+
         };
 
         controller = new RoomController(
@@ -235,6 +239,141 @@ describe("RoomController", () => {
             expect(consoleSpy).toHaveBeenCalled();
         });
     });
+
+
+    describe("start", () => {
+        it("deve retornar 401 quando não houver usuário autenticado", async () => {
+            req.user = undefined as unknown as AuthenticatedRequest["user"];
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(roomService.startRoom).not.toHaveBeenCalled();
+        });
+
+        it("deve retornar 400 quando o identificador da sala for inválido", async () => {
+            req.params = {} as Request["params"];
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(roomService.startRoom).not.toHaveBeenCalled();
+        });
+
+        it("deve iniciar a partida e retornar 200", async () => {
+            const startedRoom = {
+                ...roomFixture,
+                status: "IN_PROGRESS",
+            };
+
+            roomService.startRoom.mockResolvedValue(startedRoom);
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(roomService.startRoom).toHaveBeenCalledWith(
+                roomFixture.id,
+                authenticatedUser.id,
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith(startedRoom);
+        });
+
+        it("deve retornar 404 quando a sala não existir", async () => {
+            roomService.startRoom.mockRejectedValue(
+                new RoomNotFoundError(),
+            );
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(404);
+        });
+
+        it("deve retornar 403 quando o usuário não for o host", async () => {
+            roomService.startRoom.mockRejectedValue(
+                new RoomAccessDeniedError(),
+            );
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(403);
+        });
+
+        it("deve retornar 409 quando a sala já tiver sido iniciada", async () => {
+            roomService.startRoom.mockRejectedValue(
+                new RoomNotEditableError(),
+            );
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(409);
+        });
+
+        it("deve retornar 409 quando não houver jogadores suficientes", async () => {
+            roomService.startRoom.mockRejectedValue(
+                new RoomStartRequirementsError("NOT_ENOUGH_PLAYERS"),
+            );
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(409);
+        });
+
+        it("deve retornar 409 quando não houver perguntas suficientes", async () => {
+            roomService.startRoom.mockRejectedValue(
+                new RoomStartRequirementsError("NOT_ENOUGH_QUESTIONS"),
+            );
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(409);
+        });
+
+        it("deve retornar 500 quando ocorrer um erro inesperado", async () => {
+            const consoleSpy = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => { });
+
+            roomService.startRoom.mockRejectedValue(
+                new Error("Erro inesperado no banco"),
+            );
+
+            await controller.start(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(500);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Erro interno ao iniciar partida.",
+            });
+            expect(consoleSpy).toHaveBeenCalled();
+        });
+    });
+
 
     describe("getLobby", () => {
         const lobbyFixture = {

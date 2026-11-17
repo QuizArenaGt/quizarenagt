@@ -10,6 +10,7 @@ import {
     RoomFullError,
     DuplicateNicknameError,
     RoomAuthenticationError,
+    RoomStartRequirementsError,
 } from "./room.errors.js";
 
 
@@ -110,6 +111,63 @@ export class RoomController {
 
             res.status(500).json({
                 message: "Erro interno ao atualizar sala.",
+            });
+        }
+    }
+
+    async start(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+
+        if (typeof roomId !== "string") {
+            res.status(400).json({
+                message: "Identificador da sala inválido.",
+            });
+            return;
+        }
+
+        try {
+            const room = await this.roomService.startRoom(
+                roomId,
+                req.user.id,
+            );
+
+            res.status(200).json(room);
+        } catch (error: unknown) {
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (
+                error instanceof RoomNotEditableError ||
+                error instanceof RoomStartRequirementsError
+            ) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao iniciar partida.");
+
+            res.status(500).json({
+                message: "Erro interno ao iniciar partida.",
             });
         }
     }
