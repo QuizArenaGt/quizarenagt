@@ -1,4 +1,5 @@
-import type { Role } from "@prisma/client";
+
+import type { Role, RoomPlayer } from "@prisma/client";
 
 declare global {
     namespace Express {
@@ -7,6 +8,8 @@ declare global {
                 id: string;
                 role: Role;
             };
+
+            roomPlayer?: RoomPlayer;
         }
     }
 }
