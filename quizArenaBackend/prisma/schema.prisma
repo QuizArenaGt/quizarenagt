@@ -14,13 +14,194 @@ enum Role {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(USER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String       @id @default(uuid())
+  name               String
+  email              String       @unique
+  password           String
+  role               Role         @default(USER)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  roomParticipations RoomPlayer[]
+
+  hostedRooms Room[]
 
   @@map("users")
+}
+
+enum QuestionType {
+  TRUE_FALSE
+  MULTIPLE_CHOICE
+}
+
+model Question {
+  id        String       @id @default(uuid())
+  statement String
+  type      QuestionType
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  roomId    String
+  room      Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  options QuestionOption[]
+
+  @@map("questions")
+}
+
+model QuestionOption {
+  id         String   @id @default(uuid())
+  text       String
+  isCorrect  Boolean  @default(false)
+  position   Int
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, position])
+  @@map("question_options")
+}
+
+enum GameMode {
+  CLASSIC
+  HARDCORE
+}
+
+enum RoomStatus {
+  WAITING
+  IN_PROGRESS
+  FINISHED
+  CANCELLED
+}
+
+enum RoundStatus {
+  OPEN
+  CLOSED
+}
+
+model Room {
+  id               String                @id @default(uuid())
+  code             String                @unique
+  hostId           String
+  maxPlayers       Int
+  questionTime     Int
+  gameMode         GameMode              @default(CLASSIC)
+  status           RoomStatus            @default(WAITING)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  players          RoomPlayer[]
+  questions        Question[]
+  questionSnapshot RoomQuestionSnapshot?
+  game             Game?
+
+  host User @relation(fields: [hostId], references: [id], onDelete: Restrict)
+
+  @@map("rooms")
+}
+
+model RoomPlayer {
+  id               String   @id @default(uuid())
+  roomId           String
+  userId           String?
+  nickname         String
+  score            Int      @default(0)
+  joinedAt         DateTime @default(now())
+  sessionTokenHash String?  @unique
+
+  room    Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user    User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  answers RoundAnswer[]
+
+  @@unique([roomId, nickname])
+  @@unique([roomId, userId])
+  @@map("room_players")
+}
+
+model RoomQuestionSnapshot {
+  id        String   @id @default(uuid())
+  roomId    String   @unique
+  createdAt DateTime @default(now())
+
+  room      Room                           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  questions RoomQuestionSnapshotQuestion[]
+
+  @@map("room_question_snapshots")
+}
+
+model RoomQuestionSnapshotQuestion {
+  id               String       @id @default(uuid())
+  sourceQuestionId String
+  statement        String
+  type             QuestionType
+  position         Int
+  snapshotId       String
+  rounds           Round[]
+
+  snapshot RoomQuestionSnapshot         @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  options  RoomQuestionSnapshotOption[]
+
+  @@unique([snapshotId, position])
+  @@map("room_question_snapshot_questions")
+}
+
+model RoomQuestionSnapshotOption {
+  id                 String  @id @default(uuid())
+  sourceOptionId     String
+  text               String
+  isCorrect          Boolean @default(false)
+  position           Int
+  questionSnapshotId String
+
+  questionSnapshot RoomQuestionSnapshotQuestion @relation(fields: [questionSnapshotId], references: [id], onDelete: Cascade)
+  answers          RoundAnswer[]
+
+  @@unique([questionSnapshotId, position])
+  @@map("room_question_snapshot_options")
+}
+
+model Game {
+  id         String    @id @default(uuid())
+  roomId     String    @unique
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  room   Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  rounds Round[]
+
+  @@map("games")
+}
+
+model Round {
+  id                 String      @id @default(uuid())
+  gameId             String
+  snapshotQuestionId String
+  roundNumber        Int
+  status             RoundStatus @default(OPEN)
+  openedAt           DateTime    @default(now())
+  closedAt           DateTime?
+  timeLimit          Int
+
+  game             Game                         @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  snapshotQuestion RoomQuestionSnapshotQuestion @relation(fields: [snapshotQuestionId], references: [id], onDelete: Cascade)
+  answers          RoundAnswer[]
+
+  @@unique([gameId, roundNumber])
+  @@unique([gameId, snapshotQuestionId])
+  @@map("rounds")
+}
+
+model RoundAnswer {
+  id           String   @id @default(uuid())
+  roundId      String
+  roomPlayerId String
+  optionId     String
+  answeredAt   DateTime @default(now())
+  isCorrect    Boolean
+  points       Int      @default(0)
+
+  round      Round                      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  roomPlayer RoomPlayer                 @relation(fields: [roomPlayerId], references: [id], onDelete: Cascade)
+  option     RoomQuestionSnapshotOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, roomPlayerId])
+  @@map("round_answers")
 }

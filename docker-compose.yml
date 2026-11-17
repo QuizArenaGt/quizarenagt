@@ -17,6 +17,20 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build:
+      context: ./quizArenaBackend
+      target: builder
+    image: quizarena_migrations
+    container_name: quizArena_migrations
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build:
       context: ./quizArenaBackend
@@ -39,17 +53,41 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     build:
       context: ./quizArenaFront
-    image: quizArena_frontend
+    image: quizarena_frontend
     container_name: quizArena_frontend
     restart: unless-stopped
     ports:
       - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000
     depends_on:
       - backend
 
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: quizArena_test_postgres
+    profiles:
+      - test
+    environment:
+      POSTGRES_USER: quizarena_test
+      POSTGRES_PASSWORD: test_only_password
+      POSTGRES_DB: quizarena_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quizarena_test -d quizarena_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
+  postgres_test_data:

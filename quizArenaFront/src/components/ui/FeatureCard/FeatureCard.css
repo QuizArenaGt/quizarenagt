@@ -1,0 +1,60 @@
+.ui-feature-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: 100%;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform var(--transition-base),
+    box-shadow var(--transition-base);
+}
+
+.ui-feature-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.ui-feature-card__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-2);
+  border-radius: 12px;
+}
+
+.ui-feature-card__icon--primary {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.ui-feature-card__icon--accent {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+.ui-feature-card__icon--highlight {
+  background: var(--color-highlight-soft);
+  color: var(--color-highlight-strong);
+}
+
+.ui-feature-card__title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  line-height: 1.3;
+}
+
+.ui-feature-card__description {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Empurra o selo para a base do card, alinhando cards de alturas diferentes */
+.ui-feature-card__status {
+  margin-top: auto;
+  padding-top: var(--space-3);
+}

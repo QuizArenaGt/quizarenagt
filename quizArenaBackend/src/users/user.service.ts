@@ -1,18 +1,25 @@
-import { hash } from "bcryptjs"
+
+import { hash } from "bcryptjs";
 import type { User } from "@prisma/client";
+
 import { UserRepository } from "./user.repository.js";
 import { EmailAlreadyExistsError } from "./user.errors.js";
 import type { RegisterUserDto } from "../auth/register.dto.js";
 
+type UserRepositoryContract = Pick<
+    UserRepository,
+    "findByEmail" | "create"
+>;
+
 export class UserService {
     constructor(
-        private readonly userRepository = new UserRepository(),
-    ){}
+        private readonly userRepository: UserRepositoryContract = new UserRepository(),
+    ) {}
 
     async register(data: RegisterUserDto): Promise<User> {
         const existingUser = await this.userRepository.findByEmail(data.email);
 
-        if (existingUser){
+        if (existingUser) {
             throw new EmailAlreadyExistsError();
         }
 
@@ -33,8 +40,8 @@ export class UserService {
         }
     }
 
-    private isEmailUniqueConstraintError (error: unknown): boolean{
-        if(
+    private isEmailUniqueConstraintError(error: unknown): boolean {
+        if (
             typeof error !== "object" ||
             error === null ||
             !("code" in error) ||
@@ -46,13 +53,17 @@ export class UserService {
 
         const meta = error.meta;
 
-        if (typeof meta !== "object" || meta === null || !("target" in meta)) {
+        if (
+            typeof meta !== "object" ||
+            meta === null ||
+            !("target" in meta)
+        ) {
             return false;
         }
 
         const target = meta.target;
 
-        if (Array.isArray(target)){
+        if (Array.isArray(target)) {
             return target.includes("email");
         }
 
