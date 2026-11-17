@@ -106,8 +106,9 @@ model RoomPlayer {
   joinedAt         DateTime @default(now())
   sessionTokenHash String?  @unique
 
-  room Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  room    Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user    User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  answers RoundAnswer[]
 
   @@unique([roomId, nickname])
   @@unique([roomId, userId])
@@ -150,6 +151,7 @@ model RoomQuestionSnapshotOption {
   questionSnapshotId String
 
   questionSnapshot RoomQuestionSnapshotQuestion @relation(fields: [questionSnapshotId], references: [id], onDelete: Cascade)
+  answers          RoundAnswer[]
 
   @@unique([questionSnapshotId, position])
   @@map("room_question_snapshot_options")
@@ -180,8 +182,25 @@ model Round {
 
   game             Game                         @relation(fields: [gameId], references: [id], onDelete: Cascade)
   snapshotQuestion RoomQuestionSnapshotQuestion @relation(fields: [snapshotQuestionId], references: [id], onDelete: Cascade)
+  answers          RoundAnswer[]
 
   @@unique([gameId, roundNumber])
   @@unique([gameId, snapshotQuestionId])
   @@map("rounds")
+}
+
+model RoundAnswer {
+  id           String   @id @default(uuid())
+  roundId      String
+  roomPlayerId String
+  optionId     String
+  answeredAt   DateTime @default(now())
+  isCorrect    Boolean
+
+  round      Round                      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  roomPlayer RoomPlayer                 @relation(fields: [roomPlayerId], references: [id], onDelete: Cascade)
+  option     RoomQuestionSnapshotOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, roomPlayerId])
+  @@map("round_answers")
 }
