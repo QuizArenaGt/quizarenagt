@@ -46,3 +46,10 @@ export class RoundAnswerAlreadySubmittedError extends Error {
         this.name = "RoundAnswerAlreadySubmittedError";
     }
 }
+
+export class RoundAnswerTimeExpiredError extends Error {
+    constructor(message = "O tempo para responder a esta rodada acabou.") {
+        super(message);
+        this.name = "RoundAnswerTimeExpiredError";
+    }
+}

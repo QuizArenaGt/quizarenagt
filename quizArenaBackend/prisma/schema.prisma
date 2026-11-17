@@ -196,6 +196,7 @@ model RoundAnswer {
   optionId     String
   answeredAt   DateTime @default(now())
   isCorrect    Boolean
+  points       Int      @default(0)
 
   round      Round                      @relation(fields: [roundId], references: [id], onDelete: Cascade)
   roomPlayer RoomPlayer                 @relation(fields: [roomPlayerId], references: [id], onDelete: Cascade)

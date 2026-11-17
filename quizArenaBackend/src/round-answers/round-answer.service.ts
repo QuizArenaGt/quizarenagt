@@ -10,6 +10,7 @@ import {
     RoundAnswerPlayerNotInRoomError,
     RoundAnswerRoundNotFoundError,
     RoundAnswerRoundNotOpenError,
+    RoundAnswerTimeExpiredError,
 } from "./round-answer.errors.js";
 
 type RoundAnswerRepositoryContract = Pick<
@@ -63,6 +64,9 @@ export class RoundAnswerService {
 
             case "ALREADY_ANSWERED":
                 throw new RoundAnswerAlreadySubmittedError();
+
+            case "ROUND_TIME_EXPIRED":
+                throw new RoundAnswerTimeExpiredError();
         }
     }
 }
