@@ -26,6 +26,7 @@ const questionModel = prisma.question as unknown as {
 const questionFixture = {
     id: "question-test-uuid",
     statement: "Qual é a capital do Brasil?",
+    roomId: "room-test-uuid",
     type: "MULTIPLE_CHOICE" as const,
     isActive: true,
     createdAt: new Date("2026-11-08T12:00:00.000Z"),
@@ -38,12 +39,28 @@ const optionsFixture = [
         text: "Brasília",
         isCorrect: true,
         questionId: questionFixture.id,
+        position: 0,
     },
     {
         id: "option-2",
         text: "São Paulo",
         isCorrect: false,
         questionId: questionFixture.id,
+        position: 1,
+    },
+    {
+        id: "option-3",
+        text: "Rio de Janeiro",
+        isCorrect: false,
+        questionId: questionFixture.id,
+        position: 2,
+    },
+    {
+        id: "option-4",
+        text: "Salvador",
+        isCorrect: false,
+        questionId: questionFixture.id,
+        position: 3,
     },
 ] satisfies QuestionOption[];
 
@@ -55,10 +72,26 @@ const questionWithOptionsFixture = {
 const createQuestionData = {
     statement: "Qual é a capital do Brasil?",
     type: "MULTIPLE_CHOICE" as const,
+    roomId: "room-test-uuid",
     options: [
         { text: "Brasília", isCorrect: true },
         { text: "São Paulo", isCorrect: false },
+        { text: "Rio de Janeiro", isCorrect: false },
+        { text: "Salvador", isCorrect: false },
     ],
+};
+
+const optionsWithPositions = createQuestionData.options.map(
+    (option, position) => ({
+        ...option,
+        position,
+    }),
+);
+
+const orderedOptionsInclude = {
+    options: {
+        orderBy: { position: "asc" },
+    },
 };
 
 describe("QuestionRepository", () => {
@@ -70,7 +103,7 @@ describe("QuestionRepository", () => {
     });
 
     describe("findById", () => {
-        it("deve encontrar uma pergunta pelo ID com suas alternativas", async () => {
+        it("deve encontrar uma pergunta pelo ID com suas alternativas ordenadas por posição", async () => {
             questionModel.findUnique.mockResolvedValue(
                 questionWithOptionsFixture,
             );
@@ -79,7 +112,7 @@ describe("QuestionRepository", () => {
 
             expect(questionModel.findUnique).toHaveBeenCalledWith({
                 where: { id: questionFixture.id },
-                include: { options: true },
+                include: orderedOptionsInclude,
             });
 
             expect(result).toEqual(questionWithOptionsFixture);
@@ -95,7 +128,7 @@ describe("QuestionRepository", () => {
     });
 
     describe("findMany", () => {
-        it("deve listar perguntas com suas alternativas ordenadas por data", async () => {
+        it("deve listar perguntas com alternativas ordenadas por posição e perguntas por data", async () => {
             questionModel.findMany.mockResolvedValue([
                 questionWithOptionsFixture,
             ]);
@@ -103,7 +136,7 @@ describe("QuestionRepository", () => {
             const result = await repository.findMany();
 
             expect(questionModel.findMany).toHaveBeenCalledWith({
-                include: { options: true },
+                include: orderedOptionsInclude,
                 orderBy: { createdAt: "desc" },
             });
 
@@ -120,7 +153,7 @@ describe("QuestionRepository", () => {
     });
 
     describe("create", () => {
-        it("deve criar uma pergunta com suas alternativas", async () => {
+        it("deve criar uma pergunta com suas alternativas e posições", async () => {
             questionModel.create.mockResolvedValue(
                 questionWithOptionsFixture,
             );
@@ -131,11 +164,12 @@ describe("QuestionRepository", () => {
                 data: {
                     statement: createQuestionData.statement,
                     type: createQuestionData.type,
+                    roomId: createQuestionData.roomId,
                     options: {
-                        create: createQuestionData.options,
+                        create: optionsWithPositions,
                     },
                 },
-                include: { options: true },
+                include: orderedOptionsInclude,
             });
 
             expect(result).toEqual(questionWithOptionsFixture);
@@ -143,12 +177,14 @@ describe("QuestionRepository", () => {
     });
 
     describe("update", () => {
-        it("deve atualizar os dados da pergunta e substituir suas alternativas", async () => {
+        it("deve atualizar os dados da pergunta e substituir suas alternativas com posições", async () => {
             const updateData = {
                 statement: "Qual é a capital da França?",
                 options: [
                     { text: "Paris", isCorrect: true },
                     { text: "Lyon", isCorrect: false },
+                    { text: "Marselha", isCorrect: false },
+                    { text: "Nice", isCorrect: false },
                 ],
             };
 
@@ -167,10 +203,15 @@ describe("QuestionRepository", () => {
                     statement: updateData.statement,
                     options: {
                         deleteMany: {},
-                        create: updateData.options,
+                        create: updateData.options.map(
+                            (option, position) => ({
+                                ...option,
+                                position,
+                            }),
+                        ),
                     },
                 },
-                include: { options: true },
+                include: orderedOptionsInclude,
             });
 
             expect(result).toEqual(questionWithOptionsFixture);
@@ -192,7 +233,7 @@ describe("QuestionRepository", () => {
                 data: {
                     statement: updateData.statement,
                 },
-                include: { options: true },
+                include: orderedOptionsInclude,
             });
         });
     });

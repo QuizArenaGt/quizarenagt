@@ -1,6 +1,7 @@
 /frontend/node_modules
 /quizArenaBackend/node_modules
 .env
+.env.test
 /quizArenaBackend/dist
 /quizArenaBackend/.env.test
 /quizArenaBackend/coverage

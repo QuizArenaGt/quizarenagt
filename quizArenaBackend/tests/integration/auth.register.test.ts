@@ -12,11 +12,32 @@ describe("POST /auth/register - Integração", () => {
     });
 
     beforeEach(async () => {
-        await prisma.user.deleteMany();
+        await prisma.user.deleteMany({
+            where: {
+                email: {
+                    in: [
+                        "teste.repository@email.com",
+                        "joao@email.com",
+                        "maria@email.com",
+                    ],
+                },
+            },
+        });
     });
 
     afterAll(async () => {
-        await prisma.user.deleteMany();
+        await prisma.user.deleteMany({
+            where: {
+                email: {
+                    in: [
+                        "teste.repository@email.com",
+                        "joao@email.com",
+                        "maria@email.com",
+                    ],
+                },
+            },
+        });
+
         await prisma.$disconnect();
     });
 
