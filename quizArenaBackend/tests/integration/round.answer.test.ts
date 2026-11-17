@@ -34,7 +34,9 @@ async function cleanTestData(): Promise<void> {
     });
 }
 
-async function createRoom() {
+async function createRoom(
+    gameMode: "CLASSIC" | "HARDCORE" = "CLASSIC",
+) {
     const user = await prisma.user.create({
         data: {
             name: "Host de Teste",
@@ -55,6 +57,7 @@ async function createRoom() {
         .send({
             maxPlayers: 10,
             questionTime: 30,
+            gameMode,
         });
 
     expect(roomResponse.status).toBe(201);
@@ -113,8 +116,10 @@ async function createQuestions(
     );
 }
 
-async function createStartedRoom() {
-    const context = await createRoom();
+async function createStartedRoom(
+    gameMode: "CLASSIC" | "HARDCORE" = "CLASSIC",
+) {
+    const context = await createRoom(gameMode);
 
     const player = await joinPlayer(
         context.room.code,
@@ -316,20 +321,15 @@ describe("POST /rounds/:id/answer - Integração", () => {
     });
 
     it("deve retornar 403 quando o participante não pertencer à sala da rodada", async () => {
-        const { roundId, sessionToken } = await createStartedRoom();
+        const { roundId } = await createStartedRoom();
+
+        const loginResponse = await request(app)
+            .post("/auth/login")
+            .send({ email: hostEmail, password });
 
         const otherRoomResponse = await request(app)
             .post("/rooms")
-            .set(
-                "Authorization",
-                `Bearer ${(await prisma.user.findUnique({
-                    where: { email: hostEmail },
-                })) ? (
-                    await request(app)
-                        .post("/auth/login")
-                        .send({ email: hostEmail, password })
-                ).body.token : ""}`,
-            )
+            .set("Authorization", `Bearer ${loginResponse.body.token}`)
             .send({
                 maxPlayers: 10,
                 questionTime: 30,
@@ -360,7 +360,7 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(answers).toHaveLength(0);
     });
 
-    it("deve registrar uma resposta correta e persistir seus dados", async () => {
+    it("deve registrar uma resposta correta sem revelar o resultado e persistir a pontuação", async () => {
         const { roundId, player, sessionToken } =
             await createStartedRoom();
 
@@ -382,12 +382,14 @@ describe("POST /rounds/:id/answer - Integração", () => {
 
         expect(response.body.answer).toMatchObject({
             roundId,
-            roomPlayerId: player.id,
-            optionId: correctOption!.id,
-            isCorrect: true,
+            id: expect.any(String),
+            answeredAt: expect.any(String),
         });
 
-        expect(response.body.answer.answeredAt).toBeDefined();
+        expect(response.body.answer).not.toHaveProperty("isCorrect");
+        expect(response.body.answer).not.toHaveProperty("points");
+        expect(response.body.answer).not.toHaveProperty("optionId");
+        expect(response.body.answer).not.toHaveProperty("roomPlayerId");
 
         const persistedAnswer = await prisma.roundAnswer.findUnique({
             where: {
@@ -402,9 +404,18 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedAnswer?.optionId).toBe(correctOption!.id);
         expect(persistedAnswer?.isCorrect).toBe(true);
         expect(persistedAnswer?.answeredAt).toBeInstanceOf(Date);
+
+        expect(persistedAnswer?.points).toBeGreaterThanOrEqual(100);
+        expect(persistedAnswer?.points).toBeLessThanOrEqual(150);
+
+        const persistedPlayer = await prisma.roomPlayer.findUnique({
+            where: { id: player.id },
+        });
+
+        expect(persistedPlayer?.score).toBe(persistedAnswer?.points);
     });
 
-    it("deve registrar uma resposta incorreta com isCorrect igual a false", async () => {
+    it("deve registrar uma resposta incorreta sem revelar o resultado e persistir a pontuação", async () => {
         const { roundId, player, sessionToken } =
             await createStartedRoom();
 
@@ -426,10 +437,84 @@ describe("POST /rounds/:id/answer - Integração", () => {
 
         expect(response.body.answer).toMatchObject({
             roundId,
-            roomPlayerId: player.id,
-            optionId: incorrectOption!.id,
-            isCorrect: false,
+            id: expect.any(String),
+            answeredAt: expect.any(String),
         });
+
+        expect(response.body.answer).not.toHaveProperty("isCorrect");
+        expect(response.body.answer).not.toHaveProperty("points");
+        expect(response.body.answer).not.toHaveProperty("optionId");
+        expect(response.body.answer).not.toHaveProperty("roomPlayerId");
+
+        const persistedAnswer = await prisma.roundAnswer.findUnique({
+            where: {
+                roundId_roomPlayerId: {
+                    roundId,
+                    roomPlayerId: player.id,
+                },
+            },
+        });
+
+        expect(persistedAnswer).not.toBeNull();
+        expect(persistedAnswer?.optionId).toBe(incorrectOption!.id);
+        expect(persistedAnswer?.isCorrect).toBe(false);
+        expect(persistedAnswer?.points).toBe(0);
+
+        const persistedPlayer = await prisma.roomPlayer.findUnique({
+            where: { id: player.id },
+        });
+
+        expect(persistedPlayer?.score).toBe(0);
+    });
+
+    it("deve descontar 30 pontos por resposta incorreta no modo HARDCORE, permitindo pontuação negativa", async () => {
+        const { room, roundId, player, sessionToken } =
+            await createStartedRoom("HARDCORE");
+
+        const persistedRoom = await prisma.room.findUnique({
+            where: { id: room.id },
+        });
+
+        expect(persistedRoom?.gameMode).toBe("HARDCORE");
+
+        const options = await getRoundOptions(roundId);
+        const incorrectOption = options.find(
+            (option) => !option.isCorrect,
+        );
+
+        expect(incorrectOption).toBeDefined();
+
+        const response = await request(app)
+            .post(`/rounds/${roundId}/answer`)
+            .set("Authorization", `Bearer ${sessionToken}`)
+            .send({
+                optionId: incorrectOption!.id,
+            });
+
+        expect(response.status).toBe(201);
+
+        expect(response.body.answer).not.toHaveProperty("isCorrect");
+        expect(response.body.answer).not.toHaveProperty("points");
+
+        const persistedAnswer = await prisma.roundAnswer.findUnique({
+            where: {
+                roundId_roomPlayerId: {
+                    roundId,
+                    roomPlayerId: player.id,
+                },
+            },
+        });
+
+        expect(persistedAnswer).not.toBeNull();
+        expect(persistedAnswer?.isCorrect).toBe(false);
+        expect(persistedAnswer?.points).toBe(-30);
+
+        const persistedPlayer = await prisma.roomPlayer.findUnique({
+            where: { id: player.id },
+        });
+
+        expect(persistedPlayer?.score).toBe(-30);
+        expect(persistedPlayer?.score).toBeLessThan(0);
     });
 
     it("deve retornar 409 quando o participante tentar responder novamente", async () => {

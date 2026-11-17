@@ -1,0 +1,30 @@
+/*
+ * Adaptação do LoginForm existente quando exibido dentro do modal.
+ *
+ * O LoginForm já usa a nova identidade visual (ver LoginForm.css). Aqui
+ * apenas desfazemos o layout de tela cheia: o painel da marca e o título
+ * são escondidos, pois o próprio modal mostra o logotipo e o título.
+ */
+.login-modal .arena-background {
+  min-height: 0;
+  background: none;
+}
+
+.login-modal .login-container {
+  display: block;
+  min-height: 0;
+}
+
+.login-modal .auth-brand,
+.login-modal .auth-form-header {
+  display: none;
+}
+
+.login-modal .login-container > .login-card,
+.login-modal .login-container > .login-footer {
+  width: 100%;
+}
+
+.login-modal .login-footer {
+  margin-top: var(--space-5);
+}

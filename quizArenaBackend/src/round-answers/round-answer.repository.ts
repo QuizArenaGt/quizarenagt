@@ -16,7 +16,8 @@ export type SubmitRoundAnswerResult =
         | "ROUND_NOT_OPEN"
         | "GAME_NOT_IN_PROGRESS"
         | "OPTION_NOT_VALID"
-        | "ALREADY_ANSWERED";
+        | "ALREADY_ANSWERED"
+        | "ROUND_TIME_EXPIRED";
     };
 
 export class RoundAnswerRepository {
@@ -115,12 +116,50 @@ export class RoundAnswerRepository {
                 };
             }
 
+            const answeredAt = new Date();
+            const totalTimeMs = round.timeLimit * 1000;
+            const elapsedTimeMs =
+                answeredAt.getTime() - round.openedAt.getTime();
+
+            if (elapsedTimeMs >= totalTimeMs) {
+                return {
+                    success: false,
+                    reason: "ROUND_TIME_EXPIRED",
+                };
+            }
+
+            const remainingTimeMs = Math.max(
+                0,
+                totalTimeMs - elapsedTimeMs,
+            );
+
+            const speedBonus = Math.round(
+                50 * (remainingTimeMs / totalTimeMs),
+            );
+
+            const points = option.isCorrect
+                ? 100 + speedBonus
+                : round.game.room.gameMode === "HARDCORE"
+                    ? -30
+                    : 0;
+
             const answer = await tx.roundAnswer.create({
                 data: {
                     roundId,
                     roomPlayerId,
                     optionId,
                     isCorrect: option.isCorrect,
+                    answeredAt,
+                    points,
+                },
+            });
+
+            await tx.roomPlayer.update({
+                where: { id: roomPlayerId },
+                data: {
+                    score: {
+                        increment: points,
+                    },
                 },
             });
 

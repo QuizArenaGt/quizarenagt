@@ -12,6 +12,7 @@ import {
     RoundAnswerPlayerNotInRoomError,
     RoundAnswerRoundNotFoundError,
     RoundAnswerRoundNotOpenError,
+    RoundAnswerTimeExpiredError,
 } from "./round-answer.errors.js";
 
 export class RoundAnswerController {
@@ -54,7 +55,11 @@ export class RoundAnswerController {
             );
 
             res.status(201).json({
-                answer,
+                answer: {
+                    id: answer.id,
+                    roundId: answer.roundId,
+                    answeredAt: answer.answeredAt,
+                },
             });
         } catch (error: unknown) {
             if (error instanceof RoundAnswerRoundNotFoundError) {
@@ -75,7 +80,8 @@ export class RoundAnswerController {
                 error instanceof RoundAnswerRoundNotOpenError ||
                 error instanceof RoundAnswerGameNotInProgressError ||
                 error instanceof RoundAnswerOptionNotValidError ||
-                error instanceof RoundAnswerAlreadySubmittedError
+                error instanceof RoundAnswerAlreadySubmittedError ||
+                error instanceof RoundAnswerTimeExpiredError
             ) {
                 res.status(409).json({
                     message: error.message,

@@ -11,6 +11,7 @@ import {
     RoundAnswerPlayerNotInRoomError,
     RoundAnswerRoundNotFoundError,
     RoundAnswerRoundNotOpenError,
+    RoundAnswerTimeExpiredError,
 } from "../../src/round-answers/round-answer.errors.js";
 import type { RoundAnswerService } from "../../src/round-answers/round-answer.service.js";
 
@@ -44,6 +45,7 @@ describe("RoundAnswerController", () => {
         optionId: "44444444-4444-4444-8444-444444444444",
         answeredAt: new Date("2026-11-16T19:00:00.000Z"),
         isCorrect: true,
+        points: 125,
     };
 
     beforeEach(() => {
@@ -114,7 +116,7 @@ describe("RoundAnswerController", () => {
             expect(roundAnswerService.submitAnswer).not.toHaveBeenCalled();
         });
 
-        it("deve registrar a resposta e retornar 201", async () => {
+        it("deve registrar a resposta e retornar somente os dados públicos", async () => {
             roundAnswerService.submitAnswer.mockResolvedValue(
                 answerFixture,
             );
@@ -132,7 +134,11 @@ describe("RoundAnswerController", () => {
 
             expect(res.status).toHaveBeenCalledWith(201);
             expect(res.json).toHaveBeenCalledWith({
-                answer: answerFixture,
+                answer: {
+                    id: answerFixture.id,
+                    roundId: answerFixture.roundId,
+                    answeredAt: answerFixture.answeredAt,
+                },
             });
         });
 
@@ -167,6 +173,7 @@ describe("RoundAnswerController", () => {
             RoundAnswerGameNotInProgressError,
             RoundAnswerOptionNotValidError,
             RoundAnswerAlreadySubmittedError,
+            RoundAnswerTimeExpiredError,
         ])(
             "deve retornar 409 para %s",
             async (ExpectedError) => {
