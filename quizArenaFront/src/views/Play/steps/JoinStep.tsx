@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
-import { PIN_LENGTH } from '../../../models/game';
+import { MAX_ROOM_CODE_INPUT_LENGTH } from '../../../models/game';
 
 interface JoinStepProps {
     pin: string;
@@ -33,7 +33,7 @@ export default function JoinStep({ pin, error, isJoining, onPinChange, onSubmit 
                     type="text"
                     autoComplete="off"
                     placeholder="EX: A1B2C3"
-                    maxLength={PIN_LENGTH}
+                    maxLength={MAX_ROOM_CODE_INPUT_LENGTH}
                     value={pin}
                     onChange={(event) => onPinChange(event.target.value)}
                     aria-invalid={error ? true : undefined}

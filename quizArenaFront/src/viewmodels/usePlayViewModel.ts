@@ -3,8 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     NICKNAME_MAX_LENGTH,
     NICKNAME_MIN_LENGTH,
-    PIN_LENGTH,
-    sanitizePin,
+    normalizeRoomCode,
+    validateRoomCode,
     type GameRoom,
     type PlayPhase,
     type PlayerAnswer,
@@ -28,7 +28,7 @@ export function usePlayViewModel() {
     const [searchParams] = useSearchParams();
 
     const [phase, setPhase] = useState<PlayPhase>('join');
-    const [pin, setPinState] = useState(() => sanitizePin(searchParams.get('codigo') ?? ''));
+    const [pin, setPinState] = useState(() => normalizeRoomCode(searchParams.get('codigo') ?? ''));
     const [nickname, setNickname] = useState('');
     const [room, setRoom] = useState<GameRoom | null>(null);
     const [playerId, setPlayerId] = useState<string | null>(null);
@@ -74,16 +74,19 @@ export function usePlayViewModel() {
     // ===== Entrada na sala (Passo 1: Código -> Passo 2: Apelido + POST /rooms/join) =====
 
     function setPin(value: string) {
-        setPinState(sanitizePin(value));
+        setPinState(normalizeRoomCode(value));
         setError(null);
     }
 
     function submitPin(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        if (pin.length !== PIN_LENGTH) {
-            setError(`O código da sala deve possuir ${PIN_LENGTH} caracteres.`);
+        const normalizedPin = normalizeRoomCode(pin);
+        const validationError = validateRoomCode(normalizedPin);
+        if (validationError) {
+            setError(validationError);
             return;
         }
+        setPinState(normalizedPin);
         setError(null);
         setPhase('nickname');
     }

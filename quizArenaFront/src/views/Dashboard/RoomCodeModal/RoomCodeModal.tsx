@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ClipboardEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
 import Modal from '../../../components/ui/Modal/Modal';
-import { formatRoomCode, type Room } from '../../../models/room';
+import { formatRoomCode, getClipboardRoomCode, type Room } from '../../../models/room';
 import './RoomCodeModal.css';
 
 interface RoomCodeModalProps {
@@ -34,11 +34,17 @@ function RoomCodeContent({ room, onClose }: { room: Room; onClose: () => void })
 
     async function copyCode() {
         try {
-            await navigator.clipboard.writeText(room.code);
+            await navigator.clipboard.writeText(getClipboardRoomCode(room.code));
             setCopied(true);
         } catch {
             setCopied(false);
         }
+    }
+
+    function handleNativeCopy(event: ClipboardEvent<HTMLParagraphElement>) {
+        event.clipboardData.setData('text/plain', getClipboardRoomCode(room.code));
+        event.preventDefault();
+        setCopied(true);
     }
 
     return (
@@ -47,7 +53,11 @@ function RoomCodeContent({ room, onClose }: { room: Room; onClose: () => void })
                 Acesse <strong>{joinAddress}</strong> e digite o código:
             </p>
 
-            <p className="room-code__value" aria-label={`Código da sala: ${room.code.split('').join(' ')}`}>
+            <p
+                className="room-code__value"
+                onCopy={handleNativeCopy}
+                aria-label={`Código da sala: ${getClipboardRoomCode(room.code).split('').join(' ')}`}
+            >
                 {formatRoomCode(room.code)}
             </p>
 

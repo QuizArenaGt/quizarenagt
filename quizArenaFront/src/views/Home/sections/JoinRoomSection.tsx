@@ -1,6 +1,6 @@
-import type { FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
-import { PIN_LENGTH } from '../../../models/game';
+import { MAX_ROOM_CODE_INPUT_LENGTH, normalizeRoomCode } from '../../../models/game';
 
 interface JoinRoomSectionProps {
     id: string;
@@ -10,17 +10,16 @@ interface JoinRoomSectionProps {
 /*
  * Entrada rápida em sala pela landing page.
  * O código digitado é repassado ao ViewModel, que leva o aluno para a
- * tela /jogar. Enquanto o backend não possui salas, apenas a sala de
- * demonstração (123456) existe, e isso é informado ao usuário.
+ * tela /jogar.
  */
 export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps) {
     const titleId = `${id}-titulo`;
     const hintId = `${id}-aviso`;
+    const [pin, setPin] = useState('');
 
     function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        const pin = new FormData(event.currentTarget).get('room-pin');
-        onJoinRoom(typeof pin === 'string' ? pin : '');
+        onJoinRoom(normalizeRoomCode(pin));
     }
 
     return (
@@ -49,8 +48,10 @@ export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps
                                 className="home-join__input"
                                 type="text"
                                 autoComplete="off"
-                                maxLength={PIN_LENGTH}
+                                maxLength={MAX_ROOM_CODE_INPUT_LENGTH}
                                 placeholder="EX: A1B2C3"
+                                value={pin}
+                                onChange={(event) => setPin(normalizeRoomCode(event.target.value))}
                                 aria-describedby={hintId}
                             />
                             <Button type="submit" size="lg" fullWidth>

@@ -1,12 +1,13 @@
-import { apiRequest } from './api';
-import { mapBackendRoomStatus, type Room } from '../models/room';
+import { apiRequest } from './api.ts';
+import { normalizeRoomCode } from '../models/game.ts';
+import { mapBackendRoomStatus, type Room } from '../models/room.ts';
 import type {
     BackendRoomStatus,
     GameMode,
     LobbyPlayerDto,
     RoundClosedPayload,
     RoundStartedPayload,
-} from './socket';
+} from './socket.ts';
 
 export interface ApiRoom {
     id: string;
@@ -83,15 +84,35 @@ export function mapApiRoomToModel(
     };
 }
 
+export function isValidApiRoom(value: unknown): value is ApiRoom {
+    if (typeof value !== 'object' || value === null) return false;
+    const room = value as Record<string, unknown>;
+    return (
+        typeof room.id === 'string' &&
+        room.id.trim().length > 0 &&
+        typeof room.code === 'string' &&
+        /^[A-Z0-9]{6}$/i.test(room.code.trim()) &&
+        typeof room.maxPlayers === 'number' &&
+        typeof room.questionTime === 'number' &&
+        typeof room.status === 'string'
+    );
+}
+
 export async function createRoomApi(input: {
     maxPlayers: number;
     questionTime: number;
     gameMode: GameMode;
 }): Promise<ApiRoom> {
-    return apiRequest<ApiRoom>('/rooms', {
+    const response = await apiRequest<ApiRoom>('/rooms', {
         method: 'POST',
         body: JSON.stringify(input),
     });
+
+    if (!isValidApiRoom(response)) {
+        throw new Error('Resposta inválida ao criar sala.');
+    }
+
+    return response;
 }
 
 export async function updateRoomApi(
@@ -102,17 +123,23 @@ export async function updateRoomApi(
         gameMode?: GameMode;
     },
 ): Promise<ApiRoom> {
-    return apiRequest<ApiRoom>(`/rooms/${roomId}`, {
+    const response = await apiRequest<ApiRoom>(`/rooms/${roomId}`, {
         method: 'PATCH',
         body: JSON.stringify(input),
     });
+
+    if (!isValidApiRoom(response)) {
+        throw new Error('Resposta inválida ao atualizar sala.');
+    }
+
+    return response;
 }
 
 export async function getRoomLobbyApi(
     code: string,
     token?: string,
 ): Promise<ApiRoomLobby> {
-    const cleanCode = code.trim().toUpperCase();
+    const cleanCode = normalizeRoomCode(code);
     const response = await apiRequest<{ room: ApiRoomLobby }>(`/rooms/${cleanCode}`, {
         method: 'GET',
         ...(token ? { token } : {}),
@@ -128,7 +155,7 @@ export async function joinRoomApi(input: {
         method: 'POST',
         auth: false,
         body: JSON.stringify({
-            code: input.code.trim().toUpperCase(),
+            code: normalizeRoomCode(input.code),
             nickname: input.nickname.trim(),
         }),
     });

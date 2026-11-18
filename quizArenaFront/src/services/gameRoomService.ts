@@ -1,3 +1,4 @@
+import { normalizeRoomCode } from '../models/game';
 import {
     getRoomLobbyApi,
     joinRoomApi,
@@ -17,7 +18,7 @@ export async function joinRoomWithNickname(
     code: string,
     nickname: string,
 ): Promise<JoinedRoomSession> {
-    const cleanCode = code.trim().toUpperCase();
+    const cleanCode = normalizeRoomCode(code);
     const cleanNickname = nickname.trim();
 
     const joinResult = await joinRoomApi({

@@ -10,6 +10,7 @@ import type { Question } from './question';
 /** Código da sala de demonstração, usado enquanto não há salas reais. */
 export const DEMO_ROOM_PIN = '123456';
 export const PIN_LENGTH = 6;
+export const MAX_ROOM_CODE_INPUT_LENGTH = 15;
 export const NICKNAME_MIN_LENGTH = 2;
 export const NICKNAME_MAX_LENGTH = 20;
 
@@ -100,7 +101,55 @@ export function calculatePoints(isCorrect: boolean, timeLeftMs: number, timeLimi
     return Math.round(MIN_POINTS + SPEED_BONUS * speedRatio);
 }
 
-/** Mantém apenas caracteres alfanuméricos em maiúsculas e limita ao tamanho do código. */
+export const ROOM_CODE_REGEX = /^[A-Z0-9]{6}$/;
+
+/**
+ * Normaliza o código da sala removendo espaços antes, depois e no meio,
+ * e padronizando letras para maiúsculas.
+ */
+export function normalizeRoomCode(value: string): string {
+    return value.replace(/\s+/g, '').toUpperCase();
+}
+
+/**
+ * Verifica se o código normalizado possui exatamente 6 caracteres alfanuméricos.
+ */
+export function isValidRoomCode(value: string): boolean {
+    return ROOM_CODE_REGEX.test(normalizeRoomCode(value));
+}
+
+/**
+ * Valida o código da sala e retorna uma mensagem clara de erro, ou null quando válido.
+ */
+export function validateRoomCode(value: string): string | null {
+    const normalized = normalizeRoomCode(value);
+
+    if (!normalized) {
+        return 'Informe o código da sala.';
+    }
+
+    if (!/^[A-Z0-9]+$/.test(normalized)) {
+        return 'O código da sala deve conter apenas letras e números.';
+    }
+
+    if (normalized.length !== PIN_LENGTH) {
+        return `O código da sala deve possuir ${PIN_LENGTH} caracteres.`;
+    }
+
+    return null;
+}
+
+/** Normaliza o código informado mantendo compatibilidade com os consumidores existentes. */
 export function sanitizePin(value: string): string {
-    return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, PIN_LENGTH);
+    return normalizeRoomCode(value);
+}
+
+/**
+ * Monta a rota de entrada do jogador com o código normalizado e validado na query string.
+ */
+export function buildPlayRouteWithPin(pin: string, playRoute = '/jogar'): string {
+    const cleanPin = normalizeRoomCode(pin);
+    return isValidRoomCode(cleanPin)
+        ? `${playRoute}?codigo=${encodeURIComponent(cleanPin)}`
+        : playRoute;
 }

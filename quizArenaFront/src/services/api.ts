@@ -1,6 +1,6 @@
 
 const API_URL = (
-    import.meta.env.VITE_API_URL ?? "http://localhost:3000"
+    import.meta.env?.VITE_API_URL ?? "http://localhost:3000"
 ).replace(/\/$/, "");
 
 interface ApiRequestOptions extends RequestInit {
@@ -49,7 +49,9 @@ export async function apiRequest<T>(
     }
 
     const accessToken = token ??
-        (auth ? localStorage.getItem("token") : null);
+        (auth && typeof localStorage !== "undefined"
+            ? localStorage.getItem("token")
+            : null);
 
     if (accessToken) {
         requestHeaders.set("Authorization", `Bearer ${accessToken}`);

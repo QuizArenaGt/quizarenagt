@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { normalizeRoomCode, validateRoomCode } from '../models/game';
 import type { Question } from '../models/question';
 import {
     MIN_ROOM_PLAYERS,
     MIN_ROOM_QUESTIONS,
+    executeLoadRoomByCode,
+    executeSubmitRoom,
     mapBackendRoomStatus,
     type Room,
 } from '../models/room';
@@ -41,7 +44,7 @@ const DEFAULT_GAME_MODE: GameMode = 'CLASSIC';
 
 export function useRoomsViewModel() {
     const [searchParams, setSearchParams] = useSearchParams();
-    const initialCodeFromUrl = searchParams.get('sala')?.trim().toUpperCase() || null;
+    const initialCodeFromUrl = normalizeRoomCode(searchParams.get('sala') ?? '') || null;
 
     const [rooms, setRooms] = useState<Room[]>([]);
     const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -81,6 +84,7 @@ export function useRoomsViewModel() {
 
     const closingRoundIdRef = useRef<string | null>(null);
     const hasLoadedInitialUrlRef = useRef(false);
+    const isSubmittingRoomRef = useRef(false);
 
     const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? rooms[0] ?? null;
     const currentRoomId = activeRoom?.id ?? null;
@@ -102,53 +106,50 @@ export function useRoomsViewModel() {
 
     const loadRoomByCode = useCallback(
         async (code: string, meta?: { name?: string; theme?: string }) => {
-            const cleanCode = code.trim().toUpperCase();
-            if (!cleanCode) return null;
+            return executeLoadRoomByCode({
+                code,
+                fetchLobby: (cleanCode) => getRoomLobbyApi(cleanCode),
+                onLoadingChange: setIsLoadingRoom,
+                onError: setRoomActionError,
+                onSuccess: (lobby) => {
+                    let mappedRoom: Room | null = null;
 
-            setIsLoadingRoom(true);
-            setRoomActionError(null);
-            try {
-                const lobby = await getRoomLobbyApi(cleanCode);
-                let mappedRoom: Room | null = null;
-
-                setRooms((current) => {
-                    const existing = current.find((r) => r.id === lobby.id);
-                    mappedRoom = mapApiRoomToModel(lobby, {
-                        name: meta?.name ?? existing?.name,
-                        theme: meta?.theme ?? existing?.theme,
-                        questionIds: existing?.questionIds ?? [],
+                    setRooms((current) => {
+                        const existing = current.find((r) => r.id === lobby.id);
+                        mappedRoom = mapApiRoomToModel(lobby, {
+                            name: meta?.name ?? existing?.name,
+                            theme: meta?.theme ?? existing?.theme,
+                            questionIds: existing?.questionIds ?? [],
+                        });
+                        const exists = current.some((r) => r.id === lobby.id);
+                        return exists
+                            ? current.map((r) => (r.id === lobby.id ? mappedRoom! : r))
+                            : [mappedRoom, ...current];
                     });
-                    const exists = current.some((r) => r.id === lobby.id);
-                    return exists
-                        ? current.map((r) => (r.id === lobby.id ? mappedRoom! : r))
-                        : [mappedRoom, ...current];
-                });
 
-                setActiveRoomId(lobby.id);
-                setSearchParams((prev) => {
-                    const next = new URLSearchParams(prev);
-                    next.set('sala', lobby.code);
-                    return next;
-                }, { replace: true });
+                    setActiveRoomId(lobby.id);
+                    setSearchParams((prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.set('sala', lobby.code);
+                        return next;
+                    }, { replace: true });
 
-                return mappedRoom;
-            } catch (err) {
-                setRoomActionError(
-                    err instanceof Error
-                        ? err.message
-                        : 'Não foi possível carregar a sala informada.',
-                );
-                return null;
-            } finally {
-                setIsLoadingRoom(false);
-            }
+                    return mappedRoom!;
+                },
+            });
         },
         [setSearchParams],
     );
 
     // Carrega automaticamente a sala se o código estiver na URL (?sala=XXXXXX)
     useEffect(() => {
-        if (!initialCodeFromUrl || hasLoadedInitialUrlRef.current) return;
+        if (
+            !initialCodeFromUrl ||
+            validateRoomCode(initialCodeFromUrl) !== null ||
+            hasLoadedInitialUrlRef.current
+        ) {
+            return;
+        }
         hasLoadedInitialUrlRef.current = true;
 
         let active = true;
@@ -477,80 +478,78 @@ export function useRoomsViewModel() {
         setIsCreateOpen(true);
     }
 
-    const closeCreate = useCallback(() => setIsCreateOpen(false), []);
+    const closeCreate = useCallback(() => {
+        if (isSubmittingRoomRef.current) return;
+        setFormError(null);
+        setIsCreateOpen(false);
+    }, []);
 
     async function submitRoom(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
-        if (!name.trim()) {
-            setFormError('Dê um nome de identificação para a sala.');
-            return;
-        }
+        await executeSubmitRoom({
+            input: {
+                name,
+                theme,
+                maxPlayers,
+                timeLimit,
+                gameMode,
+            },
+            lockRef: isSubmittingRoomRef,
+            onSubmittingChange: setIsSubmittingRoom,
+            onError: setFormError,
+            executeRequest: (validInput) =>
+                editingRoom
+                    ? updateRoomApi(editingRoom.id, {
+                          maxPlayers: validInput.maxPlayers,
+                          questionTime: validInput.timeLimit,
+                          gameMode: validInput.gameMode,
+                      })
+                    : createRoomApi({
+                          maxPlayers: validInput.maxPlayers,
+                          questionTime: validInput.timeLimit,
+                          gameMode: validInput.gameMode,
+                      }),
+            onSuccess: (apiRoom, validInput) => {
+                if (editingRoom) {
+                    setRooms((current) =>
+                        current.map((room) =>
+                            room.id === editingRoom.id
+                                ? {
+                                      ...room,
+                                      name: validInput.name.trim(),
+                                      theme: validInput.theme.trim() || DEFAULT_THEME,
+                                      timeLimit: apiRoom.questionTime,
+                                      maxPlayers: apiRoom.maxPlayers,
+                                      gameMode: apiRoom.gameMode,
+                                  }
+                                : room,
+                        ),
+                    );
+                    setIsCreateOpen(false);
+                    return;
+                }
 
-        if (maxPlayers < 2 || maxPlayers > 50) {
-            setFormError('A capacidade deve ser entre 2 e 50 jogadores.');
-            return;
-        }
-
-        setIsSubmittingRoom(true);
-        setFormError(null);
-
-        try {
-            if (editingRoom) {
-                const updatedApi = await updateRoomApi(editingRoom.id, {
-                    maxPlayers,
-                    questionTime: timeLimit,
-                    gameMode,
+                const newRoom = mapApiRoomToModel(apiRoom, {
+                    name: validInput.name.trim(),
+                    theme: validInput.theme.trim() || DEFAULT_THEME,
+                    questionIds: [],
                 });
 
-                setRooms((current) =>
-                    current.map((room) =>
-                        room.id === editingRoom.id
-                            ? {
-                                  ...room,
-                                  name: name.trim(),
-                                  theme: theme.trim() || DEFAULT_THEME,
-                                  timeLimit: updatedApi.questionTime,
-                                  maxPlayers: updatedApi.maxPlayers,
-                                  gameMode: updatedApi.gameMode,
-                              }
-                            : room,
-                    ),
-                );
+                // A navegação e fechamento do modal só ocorrem após confirmação válida do backend
+                setRooms((current) => [newRoom, ...current]);
+                setActiveRoomId(newRoom.id);
+                setActiveRound(null);
+                setClosedRound(null);
+                setAnsweredPlayers([]);
+                setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    next.set('sala', newRoom.code);
+                    return next;
+                }, { replace: true });
                 setIsCreateOpen(false);
-                return;
-            }
-
-            const createdApi = await createRoomApi({
-                maxPlayers,
-                questionTime: timeLimit,
-                gameMode,
-            });
-
-            const newRoom = mapApiRoomToModel(createdApi, {
-                name: name.trim(),
-                theme: theme.trim() || DEFAULT_THEME,
-                questionIds: [],
-            });
-
-            setRooms((current) => [newRoom, ...current]);
-            setActiveRoomId(newRoom.id);
-            setActiveRound(null);
-            setClosedRound(null);
-            setAnsweredPlayers([]);
-            setSearchParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.set('sala', newRoom.code);
-                return next;
-            }, { replace: true });
-            setIsCreateOpen(false);
-        } catch (err) {
-            setFormError(
-                err instanceof Error ? err.message : 'Erro ao salvar sala no servidor.',
-            );
-        } finally {
-            setIsSubmittingRoom(false);
-        }
+            },
+        });
     }
 
     async function handleLookupRoom(event: FormEvent<HTMLFormElement>) {
@@ -597,8 +596,7 @@ export function useRoomsViewModel() {
                 ? loadRoomByCode(activeRoom.code, { name: activeRoom.name, theme: activeRoom.theme })
                 : Promise.resolve(null),
         lookupCode,
-        setLookupCode: (val: string) =>
-            setLookupCode(val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)),
+        setLookupCode: (val: string) => setLookupCode(normalizeRoomCode(val)),
         handleLookupRoom,
         activeRound,
         closedRound,
@@ -619,10 +617,22 @@ export function useRoomsViewModel() {
             setName(value);
             setFormError(null);
         },
-        setTheme,
-        setTimeLimit,
-        setMaxPlayers,
-        setGameMode,
+        setTheme: (value: string) => {
+            setTheme(value);
+            setFormError(null);
+        },
+        setTimeLimit: (value: number) => {
+            setTimeLimit(value);
+            setFormError(null);
+        },
+        setMaxPlayers: (value: number) => {
+            setMaxPlayers(value);
+            setFormError(null);
+        },
+        setGameMode: (value: GameMode) => {
+            setGameMode(value);
+            setFormError(null);
+        },
         openCreate,
         openEdit,
         closeCreate,

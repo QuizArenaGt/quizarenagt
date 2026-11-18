@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import { API_URL } from './api';
+import { normalizeRoomCode } from '../models/game';
 import type { QuestionType } from '../models/question';
 
 export type GameMode = 'CLASSIC' | 'HARDCORE';
@@ -125,7 +126,7 @@ export function createHostSocket(token: string, roomCode: string): Socket {
     return io(API_URL, {
         auth: {
             token,
-            roomCode: roomCode.toUpperCase(),
+            roomCode: normalizeRoomCode(roomCode),
         },
         transports: ['websocket', 'polling'],
     });

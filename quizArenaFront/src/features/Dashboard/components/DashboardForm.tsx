@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, type ClipboardEvent } from 'react';
 import './DashboardForm.css';
 import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog/ConfirmDialog';
 import Logo from '../../../components/ui/Logo/Logo';
+import { MAX_ROOM_CODE_INPUT_LENGTH } from '../../../models/game';
 import { CHOICE_LETTERS, QUESTION_TYPE_LABEL } from '../../../models/question';
 import {
     GAME_MODE_LABEL,
@@ -10,6 +11,7 @@ import {
     MIN_ROOM_QUESTIONS,
     ROOM_TIME_OPTIONS,
     formatRoomCode,
+    getClipboardRoomCode,
 } from '../../../models/room';
 import { useQuestionBankViewModel } from '../../../viewmodels/useQuestionBankViewModel';
 import { useRoomsViewModel } from '../../../viewmodels/useRoomsViewModel';
@@ -33,6 +35,11 @@ export default function DashboardForm() {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         navigate('/login');
+    }
+
+    function handleCopyRoomCode(event: ClipboardEvent<HTMLElement>, code: string) {
+        event.clipboardData.setData('text/plain', getClipboardRoomCode(code));
+        event.preventDefault();
     }
 
     const activeRoom = roomsVm.activeRoom;
@@ -149,7 +156,7 @@ export default function DashboardForm() {
                                             value={roomsVm.lookupCode}
                                             onChange={(e) => roomsVm.setLookupCode(e.target.value)}
                                             placeholder="Abrir por código (ex: A1B2C3)"
-                                            maxLength={6}
+                                            maxLength={MAX_ROOM_CODE_INPUT_LENGTH}
                                             style={{
                                                 padding: '8px 12px',
                                                 borderRadius: '8px',
@@ -249,6 +256,7 @@ export default function DashboardForm() {
                                                 <button
                                                     type="button"
                                                     className="room-code-chip"
+                                                    onCopy={(e) => handleCopyRoomCode(e, room.code)}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         roomsVm.showCode(room);
@@ -351,6 +359,7 @@ export default function DashboardForm() {
                                             <button
                                                 type="button"
                                                 className="secondary-btn"
+                                                onCopy={(e) => handleCopyRoomCode(e, activeRoom.code)}
                                                 onClick={() => roomsVm.showCode(activeRoom)}
                                             >
                                                 Projetar Código ({formatRoomCode(activeRoom.code)})
@@ -854,6 +863,7 @@ export default function DashboardForm() {
                                     value={roomsVm.form.name}
                                     onChange={(e) => roomsVm.setName(e.target.value)}
                                     placeholder="Ex: Arena de Programação"
+                                    disabled={roomsVm.isSubmittingRoom}
                                     required
                                 />
                             </div>
@@ -865,6 +875,7 @@ export default function DashboardForm() {
                                     value={roomsVm.form.theme}
                                     onChange={(e) => roomsVm.setTheme(e.target.value)}
                                     placeholder="Ex: React & TypeScript"
+                                    disabled={roomsVm.isSubmittingRoom}
                                     required
                                 />
                             </div>
@@ -877,6 +888,7 @@ export default function DashboardForm() {
                                     max={50}
                                     value={roomsVm.form.maxPlayers}
                                     onChange={(e) => roomsVm.setMaxPlayers(Number(e.target.value))}
+                                    disabled={roomsVm.isSubmittingRoom}
                                     required
                                 />
                             </div>
@@ -886,6 +898,7 @@ export default function DashboardForm() {
                                     id="room-time"
                                     value={roomsVm.form.timeLimit}
                                     onChange={(e) => roomsVm.setTimeLimit(Number(e.target.value))}
+                                    disabled={roomsVm.isSubmittingRoom}
                                 >
                                     {ROOM_TIME_OPTIONS.map((seconds) => (
                                         <option key={seconds} value={seconds}>
@@ -900,6 +913,7 @@ export default function DashboardForm() {
                                     id="room-mode"
                                     value={roomsVm.form.gameMode}
                                     onChange={(e) => roomsVm.setGameMode(e.target.value as GameMode)}
+                                    disabled={roomsVm.isSubmittingRoom}
                                 >
                                     {(Object.keys(GAME_MODE_LABEL) as GameMode[]).map((mode) => (
                                         <option key={mode} value={mode}>

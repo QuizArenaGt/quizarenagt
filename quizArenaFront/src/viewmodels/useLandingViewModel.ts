@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActiveSection } from '../hooks/useActiveSection';
-import { sanitizePin } from '../models/game';
+import { buildPlayRouteWithPin } from '../models/game';
 import {
     AUDIENCES,
     HOW_IT_WORKS_STEPS,
@@ -44,11 +44,10 @@ export function useLandingViewModel() {
         navigate(AFTER_LOGIN_ROUTE);
     }, [navigate]);
 
-    /** Leva o aluno à tela de jogo já com o código preenchido. */
+    /** Leva o aluno à tela de jogo já com o código normalizado e validado. */
     const handleJoinRoom = useCallback(
         (pin: string) => {
-            const cleanPin = sanitizePin(pin);
-            navigate(cleanPin ? `${PLAY_ROUTE}?codigo=${cleanPin}` : PLAY_ROUTE);
+            navigate(buildPlayRouteWithPin(pin, PLAY_ROUTE));
         },
         [navigate],
     );
