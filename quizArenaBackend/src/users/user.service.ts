@@ -8,13 +8,17 @@ import type { RegisterUserDto } from "../auth/register.dto.js";
 
 type UserRepositoryContract = Pick<
     UserRepository,
-    "findByEmail" | "create"
+    "findByEmail" | "create" | "updatePassword"
 >;
 
 export class UserService {
     constructor(
         private readonly userRepository: UserRepositoryContract = new UserRepository(),
     ) {}
+
+    async findByEmail(email: string): Promise<User | null> {
+        return this.userRepository.findByEmail(email);
+    }
 
     async register(data: RegisterUserDto): Promise<User> {
         const existingUser = await this.userRepository.findByEmail(data.email);
@@ -38,6 +42,18 @@ export class UserService {
 
             throw error;
         }
+    }
+
+    async updatePassword(
+        userId: string,
+        newPassword: string
+    ): Promise<void> {
+        const passwordHash = await hash(newPassword, 12);
+
+        await this.userRepository.updatePassword(
+            userId,
+            passwordHash
+        );
     }
 
     private isEmailUniqueConstraintError(error: unknown): boolean {

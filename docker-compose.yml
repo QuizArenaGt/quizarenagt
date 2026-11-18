@@ -32,24 +32,36 @@ services:
         condition: service_healthy
 
   backend:
-    build:
-      context: ./quizArenaBackend
+    build: ./quizArenaBackend
     image: quizarena_backend
     container_name: quizArena_backend
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
+    env_file:
+      - ./.env
     environment:
       PORT: ${PORT:-3000}
+
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+
       JWT_SECRET: ${JWT_SECRET}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
+
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy

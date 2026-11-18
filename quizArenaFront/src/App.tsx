@@ -1,6 +1,4 @@
-
 import { useEffect, useState } from "react";
-
 import {
     BrowserRouter,
     Routes,
@@ -8,14 +6,15 @@ import {
     useNavigate,
     Navigate,
 } from "react-router-dom";
-
 import HomeView from "./views/Home/HomeView";
 import PlayView from "./views/Play/PlayView";
+import HomePage from "./pages/HomePage";
 import LoginForm from "./features/auth/components/LoginForm/LoginForm";
+
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
 import DashboardForm from "./features/Dashboard/components/DashboardForm";
 import RecoverPasswordForm from "./features/auth/components/RecoverPasswordForm/RecoverPasswordForm";
-
+import ResetPasswordForm from "./features/auth/components/ResetPasswordForm/ResetPasswordForm";
 import { apiRequest, ApiError } from "./services/api";
 
 interface AuthenticatedUser {
@@ -23,10 +22,15 @@ interface AuthenticatedUser {
     role: "USER" | "ADMIN" | "HOST";
 }
 
-function ProtectedRoute() {
+function ProtectedRoute({
+    children
+}: {
+    children: React.ReactNode
+}) {
     const [status, setStatus] = useState<
         "checking" | "authenticated" | "unauthorized" | "error"
     >("checking");
+    const token = localStorage.getItem("token");
 
     useEffect(() => {
         let active = true;
@@ -92,7 +96,9 @@ function ProtectedRoute() {
     return <DashboardForm />;
 }
 
+
 function AppRoutes() {
+
     const navigate = useNavigate();
 
     const handleLoginSuccess = (): void => {
@@ -109,18 +115,24 @@ function AppRoutes() {
 
     return (
         <Routes>
+
             <Route
                 path="/dashboard"
-                element={<ProtectedRoute />}
+                element={
+                    <ProtectedRoute>
+                        <DashboardForm />
+                    </ProtectedRoute>
+                }
             />
 
             <Route
                 path="/recover-password"
-                element={
-                    <RecoverPasswordForm
-                        onSuccess={handleRecoverPasswordSuccess}
-                    />
-                }
+                element={<RecoverPasswordForm />}
+            />
+
+            <Route
+                path="/reset-password"
+                element={<ResetPasswordForm />}
             />
 
             <Route
@@ -148,13 +160,16 @@ function AppRoutes() {
 
             <Route
                 path="/"
-                element={<HomeView />}
+                element={<Navigate to="/login" replace />}
             />
+
         </Routes>
     );
 }
 
+
 export default function App() {
+
     return (
         <BrowserRouter>
             <AppRoutes />

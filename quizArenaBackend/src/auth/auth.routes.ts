@@ -14,6 +14,15 @@ authRoutes.post("/login", (req, res) => {
     void authController.login(req, res);
 });
 
+authRoutes.post(
+    "/recover-password",
+    authController.recoverPassword.bind(authController),
+);
+
+authRoutes.post("/reset-password", (req, res) => {
+    void authController.resetPassword(req, res);
+});
+
 authRoutes.get("/me", authenticateToken, (req, res) => {
     if (!req.user) {
         res.status(401).json({
