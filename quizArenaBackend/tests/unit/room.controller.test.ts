@@ -84,6 +84,80 @@ describe("RoomController", () => {
         vi.restoreAllMocks();
     });
 
+    describe("create", () => {
+        it("deve retornar 401 quando não houver usuário autenticado", async () => {
+            req.user = undefined as unknown as AuthenticatedRequest["user"];
+
+            await controller.create(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(roomService.createRoom).not.toHaveBeenCalled();
+        });
+
+        it("deve criar uma sala e retornar 201 com os dados da sala", async () => {
+            roomService.createRoom.mockResolvedValue(roomFixture);
+
+            await controller.create(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(roomService.createRoom).toHaveBeenCalledWith({
+                ...validBody,
+                hostId: authenticatedUser.id,
+            });
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith(roomFixture);
+        });
+
+        it("deve retornar 400 imediatamente quando houver erro de validação", async () => {
+            roomService.createRoom.mockRejectedValue(
+                new InvalidRoomDataError("Dados inválidos.", {
+                    maxPlayers:
+                        "A quantidade de jogadores deve ser um número inteiro entre 2 e 50.",
+                }),
+            );
+
+            await controller.create(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Dados inválidos.",
+                errors: {
+                    maxPlayers:
+                        "A quantidade de jogadores deve ser um número inteiro entre 2 e 50.",
+                },
+            });
+        });
+
+        it("deve retornar 500 com mensagem amigável sem expor detalhes internos quando ocorrer erro no servidor", async () => {
+            const consoleSpy = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => { });
+
+            roomService.createRoom.mockRejectedValue(
+                new Error("FATAL: database connection refused on port 5432"),
+            );
+
+            await controller.create(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(500);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Erro interno ao criar sala.",
+            });
+            expect(consoleSpy).toHaveBeenCalled();
+        });
+    });
+
     describe("update", () => {
         it("deve retornar 401 quando não houver usuário autenticado", async () => {
             req.user = undefined as unknown as AuthenticatedRequest["user"];
@@ -405,8 +479,14 @@ describe("RoomController", () => {
             } as Request["headers"];
         });
 
-        it("deve retornar 400 quando o código da sala for inválido", async () => {
-            req.params = { code: "ABC" };
+        it.each([
+            { code: "ABC" },
+            { code: "ABC12" },
+            { code: "ABC1234" },
+            { code: "ABC@23" },
+            { code: "   " },
+        ])("deve retornar 400 quando o código da sala for inválido ('$code')", async ({ code }) => {
+            req.params = { code };
 
             await controller.getLobby(
                 req as Request,
@@ -415,6 +495,22 @@ describe("RoomController", () => {
 
             expect(res.status).toHaveBeenCalledWith(400);
             expect(roomService.getRoomLobby).not.toHaveBeenCalled();
+        });
+
+        it("deve normalizar código com espaços e letras minúsculas ao consultar o lobby", async () => {
+            req.params = { code: " abc 123 " };
+            roomService.getRoomLobby.mockResolvedValue(lobbyFixture);
+
+            await controller.getLobby(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(roomService.getRoomLobby).toHaveBeenCalledWith(
+                "ABC123",
+                "token-de-teste",
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
         });
 
         it("deve retornar 401 quando não houver credencial", async () => {

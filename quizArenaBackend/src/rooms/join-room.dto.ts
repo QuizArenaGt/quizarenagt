@@ -14,6 +14,17 @@ export type JoinRoomValidationResult =
         errors: Record<string, string>;
     };
 
+const ROOM_CODE_LENGTH = 6;
+const ROOM_CODE_REGEX = /^[A-Z0-9]{6}$/;
+
+export function normalizeRoomCode(code: string): string {
+    return code.replace(/\s+/g, "").toUpperCase();
+}
+
+export function isValidRoomCode(code: string): boolean {
+    return ROOM_CODE_REGEX.test(code);
+}
+
 export function validateJoinRoom(
     body: unknown,
 ): JoinRoomValidationResult {
@@ -38,13 +49,16 @@ export function validateJoinRoom(
     let normalizedCode = "";
     let normalizedNickname = "";
 
-    if (typeof code !== "string" || code.trim().length === 0) {
+    if (typeof code !== "string" || normalizeRoomCode(code).length === 0) {
         errors.code = "O código da sala é obrigatório.";
     } else {
-        normalizedCode = code.trim().toUpperCase();
+        normalizedCode = normalizeRoomCode(code);
 
-        if (normalizedCode.length !== 6) {
+        if (normalizedCode.length !== ROOM_CODE_LENGTH) {
             errors.code = "O código da sala deve possuir 6 caracteres.";
+        } else if (!isValidRoomCode(normalizedCode)) {
+            errors.code =
+                "O código da sala deve conter apenas letras e números.";
         }
     }
 

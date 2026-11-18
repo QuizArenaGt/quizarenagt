@@ -3,6 +3,7 @@ import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 
 import { JwtService } from "../auth/jwt.service.js";
+import { isValidRoomCode, normalizeRoomCode } from "../rooms/join-room.dto.js";
 import { hashRoomPlayerSessionToken } from "../rooms/room-player-session-token.js";
 import { prisma } from "../database/prisma.js";
 import { setSocketServer } from "./room-events.js";
@@ -59,16 +60,18 @@ export function createSocketServer(httpServer: HttpServer): Server {
             }
 
             if (payload) {
-                if (
-                    typeof auth.roomCode !== "string" ||
-                    !/^[A-Z0-9]{6}$/i.test(auth.roomCode)
-                ) {
+                const normalizedRoomCode =
+                    typeof auth.roomCode === "string"
+                        ? normalizeRoomCode(auth.roomCode)
+                        : "";
+
+                if (!isValidRoomCode(normalizedRoomCode)) {
                     return next(new Error("Código da sala inválido."));
                 }
 
                 const room = await prisma.room.findUnique({
                     where: {
-                        code: auth.roomCode.toUpperCase(),
+                        code: normalizedRoomCode,
                     },
                     select: {
                         id: true,

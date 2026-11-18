@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { RoomService } from "./room.service.js";
+import { isValidRoomCode, normalizeRoomCode } from "./join-room.dto.js";
 import {
     InvalidRoomDataError,
     RoomNotFoundError,
@@ -238,8 +239,10 @@ export class RoomController {
     async getLobby(req: Request, res: Response): Promise<void> {
         const code = req.params.code;
         const authorization = req.headers.authorization;
+        const normalizedCode =
+            typeof code === "string" ? normalizeRoomCode(code) : "";
 
-        if (typeof code !== "string" || !/^[A-Z0-9]{6}$/i.test(code)) {
+        if (!isValidRoomCode(normalizedCode)) {
             res.status(400).json({
                 message: "Código da sala inválido.",
             });
@@ -264,7 +267,7 @@ export class RoomController {
 
         try {
             const room = await this.roomService.getRoomLobby(
-                code.toUpperCase(),
+                normalizedCode,
                 token,
             );
 
