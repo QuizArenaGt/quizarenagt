@@ -685,4 +685,114 @@ describe("RoomService", () => {
             expect(repository.update).not.toHaveBeenCalled();
         });
     });
+
+    describe("checkRoomAvailability", () => {
+        const lobbyFixture = {
+            ...roomFixture,
+            host: {
+                id: roomFixture.hostId,
+                name: "HostTeste",
+            },
+            players: [
+                {
+                    id: "player-1",
+                    nickname: "Jogador1",
+                    score: 0,
+                    joinedAt: new Date("2026-11-16T00:00:00.000Z"),
+                },
+            ],
+        };
+
+        it("deve confirmar disponibilidade de sala WAITING com vagas e retornar apenas dados públicos seguros", async () => {
+            repository.findByCodeWithLobby.mockResolvedValue(lobbyFixture);
+
+            const result = await service.checkRoomAvailability(" abc 123 ");
+
+            expect(repository.findByCodeWithLobby).toHaveBeenCalledWith("ABC123");
+            expect(result).toEqual({
+                code: "ABC123",
+                status: RoomStatus.WAITING,
+                available: true,
+            });
+            expect(result).not.toHaveProperty("players");
+            expect(result).not.toHaveProperty("host");
+            expect(result).not.toHaveProperty("hostId");
+        });
+
+        it("deve rejeitar código com formato inválido sem consultar o banco", async () => {
+            await expect(
+                service.checkRoomAvailability("AB@12"),
+            ).rejects.toBeInstanceOf(InvalidRoomDataError);
+
+            expect(repository.findByCodeWithLobby).not.toHaveBeenCalled();
+        });
+
+        it("deve rejeitar sala inexistente com RoomNotFoundError", async () => {
+            repository.findByCodeWithLobby.mockResolvedValue(null);
+
+            await expect(
+                service.checkRoomAvailability("ABC123"),
+            ).rejects.toBeInstanceOf(RoomNotFoundError);
+        });
+
+        it("deve rejeitar sala encerrada (FINISHED) com mensagem específica", async () => {
+            repository.findByCodeWithLobby.mockResolvedValue({
+                ...lobbyFixture,
+                status: RoomStatus.FINISHED,
+            });
+
+            await expect(
+                service.checkRoomAvailability("ABC123"),
+            ).rejects.toThrow("Esta sala já foi encerrada.");
+        });
+
+        it("deve rejeitar sala cancelada (CANCELLED) com mensagem específica", async () => {
+            repository.findByCodeWithLobby.mockResolvedValue({
+                ...lobbyFixture,
+                status: RoomStatus.CANCELLED,
+            });
+
+            await expect(
+                service.checkRoomAvailability("ABC123"),
+            ).rejects.toThrow("Esta sala foi cancelada.");
+        });
+
+        it("deve rejeitar sala em andamento (IN_PROGRESS) com mensagem específica", async () => {
+            repository.findByCodeWithLobby.mockResolvedValue({
+                ...lobbyFixture,
+                status: RoomStatus.IN_PROGRESS,
+            });
+
+            await expect(
+                service.checkRoomAvailability("ABC123"),
+            ).rejects.toThrow(
+                "Esta partida já está em andamento e não aceita novos jogadores.",
+            );
+        });
+
+        it("deve rejeitar sala lotada com RoomFullError", async () => {
+            repository.findByCodeWithLobby.mockResolvedValue({
+                ...lobbyFixture,
+                maxPlayers: 2,
+                players: [
+                    {
+                        id: "player-1",
+                        nickname: "Jogador1",
+                        score: 0,
+                        joinedAt: new Date("2026-11-16T00:00:00.000Z"),
+                    },
+                    {
+                        id: "player-2",
+                        nickname: "Jogador2",
+                        score: 0,
+                        joinedAt: new Date("2026-11-16T00:01:00.000Z"),
+                    },
+                ],
+            });
+
+            await expect(
+                service.checkRoomAvailability("ABC123"),
+            ).rejects.toBeInstanceOf(RoomFullError);
+        });
+    });
 });

@@ -1,7 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActiveSection } from '../hooks/useActiveSection';
-import { buildPlayRouteWithPin } from '../models/game';
+import { buildPlayRouteWithPin, executeVerifyRoomCode } from '../models/game';
 import {
     AUDIENCES,
     HOW_IT_WORKS_STEPS,
@@ -9,6 +9,7 @@ import {
     PLATFORM_FEATURES,
     SECTION_IDS,
 } from '../models/landingContent';
+import { verifyRoomAvailability } from '../services/gameRoomService';
 
 // Constante de módulo: referência estável exigida por useActiveSection.
 const OBSERVED_SECTION_IDS = NAV_ITEMS.map((item) => item.sectionId);
@@ -25,15 +26,15 @@ const PLAY_ROUTE = '/jogar';
  *  - expor à View o conteúdo vindo do Model;
  *  - controlar a abertura do modal de login;
  *  - decidir a navegação após o login bem-sucedido;
- *  - informar a seção ativa para o Header.
- *
- * A autenticação em si NÃO acontece aqui: ela continua dentro do
- * LoginForm existente, que chama o authService. Este ViewModel apenas
- * reage ao callback onSuccess que o próprio LoginForm já oferece.
+ *  - informar a seção ativa para o Header;
+ *  - validar formato e existência/disponibilidade da sala antes de levar o aluno para /jogar.
  */
 export function useLandingViewModel() {
     const navigate = useNavigate();
     const [isLoginOpen, setIsLoginOpen] = useState(false);
+    const [joinError, setJoinError] = useState<string | null>(null);
+    const [isCheckingRoom, setIsCheckingRoom] = useState(false);
+    const isCheckingRoomRef = useRef(false);
     const activeSectionId = useActiveSection(OBSERVED_SECTION_IDS);
 
     const openLogin = useCallback(() => setIsLoginOpen(true), []);
@@ -44,10 +45,26 @@ export function useLandingViewModel() {
         navigate(AFTER_LOGIN_ROUTE);
     }, [navigate]);
 
-    /** Leva o aluno à tela de jogo já com o código normalizado e validado. */
+    const clearJoinError = useCallback(() => {
+        setJoinError(null);
+    }, []);
+
+    /**
+     * Valida o formato e consulta o backend sobre a existência/disponibilidade da sala
+     * antes de navegar para /jogar.
+     */
     const handleJoinRoom = useCallback(
-        (pin: string) => {
-            navigate(buildPlayRouteWithPin(pin, PLAY_ROUTE));
+        async (pin: string) => {
+            await executeVerifyRoomCode({
+                rawCode: pin,
+                lockRef: isCheckingRoomRef,
+                checkAvailability: verifyRoomAvailability,
+                setIsLoading: setIsCheckingRoom,
+                setError: setJoinError,
+                onSuccess: (cleanPin) => {
+                    navigate(buildPlayRouteWithPin(cleanPin, PLAY_ROUTE));
+                },
+            });
         },
         [navigate],
     );
@@ -60,8 +77,11 @@ export function useLandingViewModel() {
         features: PLATFORM_FEATURES,
         activeSectionId,
         isLoginOpen,
+        joinError,
+        isCheckingRoom,
         openLogin,
         closeLogin,
+        clearJoinError,
         handleLoginSuccess,
         handleJoinRoom,
     };

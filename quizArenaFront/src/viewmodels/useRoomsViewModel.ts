@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { normalizeRoomCode, validateRoomCode } from '../models/game';
+import {
+    normalizeRoomCode,
+    normalizeRoomCodeInput,
+    validateRoomCode,
+} from '../models/game';
 import type { Question } from '../models/question';
 import {
     MIN_ROOM_PLAYERS,
@@ -596,7 +600,7 @@ export function useRoomsViewModel() {
                 ? loadRoomByCode(activeRoom.code, { name: activeRoom.name, theme: activeRoom.theme })
                 : Promise.resolve(null),
         lookupCode,
-        setLookupCode: (val: string) => setLookupCode(normalizeRoomCode(val)),
+        setLookupCode: (val: string) => setLookupCode(normalizeRoomCodeInput(val)),
         handleLookupRoom,
         activeRound,
         closedRound,

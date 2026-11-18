@@ -497,6 +497,20 @@
   cursor: not-allowed;
 }
 
+.home-join__input[aria-invalid='true'] {
+  border-color: #f87171;
+}
+
+.home-join__error {
+  padding: var(--space-3);
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-md);
+  background: #fef2f2;
+  font-size: var(--text-sm);
+  text-align: center;
+  color: #b91c1c;
+}
+
 .home-join__hint {
   margin-top: var(--space-3);
   font-size: var(--text-xs);

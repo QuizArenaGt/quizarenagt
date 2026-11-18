@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+    executeVerifyRoomCode,
+    formatRoomAvailabilityError,
     NICKNAME_MAX_LENGTH,
     NICKNAME_MIN_LENGTH,
-    normalizeRoomCode,
-    validateRoomCode,
+    normalizeRoomCodeInput,
     type GameRoom,
     type PlayPhase,
     type PlayerAnswer,
     type RankingEntry,
 } from '../models/game';
 import type { Question } from '../models/question';
-import { joinRoomWithNickname, submitPlayerRoundAnswer } from '../services/gameRoomService';
+import {
+    joinRoomWithNickname,
+    submitPlayerRoundAnswer,
+    verifyRoomAvailability,
+} from '../services/gameRoomService';
 import {
     createPlayerSocket,
     type LobbyPlayerDto,
@@ -28,7 +33,7 @@ export function usePlayViewModel() {
     const [searchParams] = useSearchParams();
 
     const [phase, setPhase] = useState<PlayPhase>('join');
-    const [pin, setPinState] = useState(() => normalizeRoomCode(searchParams.get('codigo') ?? ''));
+    const [pin, setPinState] = useState(() => normalizeRoomCodeInput(searchParams.get('codigo') ?? ''));
     const [nickname, setNickname] = useState('');
     const [room, setRoom] = useState<GameRoom | null>(null);
     const [playerId, setPlayerId] = useState<string | null>(null);
@@ -60,6 +65,7 @@ export function usePlayViewModel() {
     const deadlineRef = useRef(0);
     const hasAnsweredRef = useRef(false);
     const currentQuestionTypeRef = useRef<Question['type']>('MULTIPLE_CHOICE');
+    const isCheckingPinRef = useRef(false);
 
     const lastAnswer = answers.length > 0 ? answers[answers.length - 1] : null;
     const correctCount = useMemo(
@@ -71,24 +77,26 @@ export function usePlayViewModel() {
         [serverRanking],
     );
 
-    // ===== Entrada na sala (Passo 1: Código -> Passo 2: Apelido + POST /rooms/join) =====
+    // ===== Entrada na sala (Passo 1: Código + Disponibilidade -> Passo 2: Apelido + POST /rooms/join) =====
 
     function setPin(value: string) {
-        setPinState(normalizeRoomCode(value));
+        setPinState(normalizeRoomCodeInput(value));
         setError(null);
     }
 
-    function submitPin(event: FormEvent<HTMLFormElement>) {
+    async function submitPin(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        const normalizedPin = normalizeRoomCode(pin);
-        const validationError = validateRoomCode(normalizedPin);
-        if (validationError) {
-            setError(validationError);
-            return;
-        }
-        setPinState(normalizedPin);
-        setError(null);
-        setPhase('nickname');
+        await executeVerifyRoomCode({
+            rawCode: pin,
+            lockRef: isCheckingPinRef,
+            checkAvailability: verifyRoomAvailability,
+            setIsLoading: setIsJoining,
+            setError,
+            onNormalizedCode: setPinState,
+            onSuccess: () => {
+                setPhase('nickname');
+            },
+        });
     }
 
     function changeNickname(value: string) {
@@ -98,12 +106,15 @@ export function usePlayViewModel() {
 
     async function submitNickname(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        if (isCheckingPinRef.current) return;
+
         const trimmedNickname = nickname.trim();
         if (trimmedNickname.length < NICKNAME_MIN_LENGTH) {
             setError(`O apelido precisa ter pelo menos ${NICKNAME_MIN_LENGTH} caracteres.`);
             return;
         }
 
+        isCheckingPinRef.current = true;
         setIsJoining(true);
         setError(null);
 
@@ -125,12 +136,9 @@ export function usePlayViewModel() {
             });
             setPhase('lobby');
         } catch (joinErr) {
-            setError(
-                joinErr instanceof Error
-                    ? joinErr.message
-                    : 'Não foi possível entrar na sala. Verifique o código e tente novamente.',
-            );
+            setError(formatRoomAvailabilityError(joinErr));
         } finally {
+            isCheckingPinRef.current = false;
             setIsJoining(false);
         }
     }

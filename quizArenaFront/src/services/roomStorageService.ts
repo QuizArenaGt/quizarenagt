@@ -37,6 +37,12 @@ export interface ApiRoomLobby {
     playerCount: number;
 }
 
+export interface ApiRoomAvailability {
+    code: string;
+    status: BackendRoomStatus;
+    available: boolean;
+}
+
 export interface JoinRoomApiResponse {
     player: {
         id: string;
@@ -144,6 +150,31 @@ export async function getRoomLobbyApi(
         method: 'GET',
         ...(token ? { token } : {}),
     });
+    return response.room;
+}
+
+export async function checkRoomAvailabilityApi(
+    code: string,
+): Promise<ApiRoomAvailability> {
+    const cleanCode = normalizeRoomCode(code);
+    const response = await apiRequest<{ room: ApiRoomAvailability }>(
+        `/rooms/${encodeURIComponent(cleanCode)}/availability`,
+        {
+            method: 'GET',
+            auth: false,
+        },
+    );
+
+    if (
+        !response ||
+        typeof response !== 'object' ||
+        !response.room ||
+        typeof response.room.code !== 'string' ||
+        typeof response.room.available !== 'boolean'
+    ) {
+        throw new Error('Não foi possível verificar a disponibilidade da sala.');
+    }
+
     return response.room;
 }
 

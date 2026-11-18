@@ -9,7 +9,11 @@ import {
     type CreateRoomDto,
 } from "./create-room.dto.js";
 import { validateUpdateRoom } from "./update-room.dto.js";
-import { validateJoinRoom } from "./join-room.dto.js";
+import {
+    isValidRoomCode,
+    normalizeRoomCode,
+    validateJoinRoom,
+} from "./join-room.dto.js";
 import {
     InvalidRoomDataError,
     RoomNotFoundError,
@@ -65,6 +69,12 @@ export type UpdateRoomInput = {
 export type JoinRoomResult = {
     player: Omit<RoomPlayer, "sessionTokenHash">;
     sessionToken: string;
+};
+
+export type RoomAvailabilityResult = {
+    code: string;
+    status: Room["status"];
+    available: true;
 };
 
 type RoomLobby = NonNullable<
@@ -260,6 +270,51 @@ export class RoomService {
         return {
             player,
             sessionToken,
+        };
+    }
+
+    async checkRoomAvailability(code: string): Promise<RoomAvailabilityResult> {
+        const normalizedCode = normalizeRoomCode(code);
+
+        if (!isValidRoomCode(normalizedCode)) {
+            throw new InvalidRoomDataError(
+                "Código da sala inválido.",
+                {
+                    code: "O código da sala deve conter 6 caracteres alfanuméricos.",
+                },
+            );
+        }
+
+        const room = await this.roomRepository.findByCodeWithLobby(normalizedCode);
+
+        if (!room) {
+            throw new RoomNotFoundError(
+                "Sala não encontrada. Verifique o código informado.",
+            );
+        }
+
+        if (room.status === "FINISHED") {
+            throw new RoomNotJoinableError("Esta sala já foi encerrada.");
+        }
+
+        if (room.status === "CANCELLED") {
+            throw new RoomNotJoinableError("Esta sala foi cancelada.");
+        }
+
+        if (room.status !== "WAITING") {
+            throw new RoomNotJoinableError(
+                "Esta partida já está em andamento e não aceita novos jogadores.",
+            );
+        }
+
+        if (room.players.length >= room.maxPlayers) {
+            throw new RoomFullError();
+        }
+
+        return {
+            code: room.code,
+            status: room.status,
+            available: true,
         };
     }
 

@@ -2,11 +2,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     MAX_ROOM_CODE_INPUT_LENGTH,
+    PIN_LENGTH,
     buildPlayRouteWithPin,
+    executeVerifyRoomCode,
+    formatRoomAvailabilityError,
     isValidRoomCode,
     normalizeRoomCode,
+    normalizeRoomCodeInput,
     sanitizePin,
     validateRoomCode,
+    type PlayPhase,
 } from '../src/models/game.ts';
 import {
     executeLoadRoomByCode,
@@ -16,6 +21,10 @@ import {
     type Room,
 } from '../src/models/room.ts';
 import { ApiError } from '../src/services/api.ts';
+import {
+    joinRoomWithNickname,
+    verifyRoomAvailability,
+} from '../src/services/gameRoomService.ts';
 import {
     createRoomApi,
     isValidApiRoom,
@@ -125,6 +134,36 @@ describe('BUG 06 — Normalização, cópia e validação do código da sala', (
         assert.equal(receivedCode, 'ABC123');
         assert.equal(capturedError, null);
         assert.equal(result?.code, 'ABC123');
+    });
+
+    it('campos de código devem aceitar no máximo 6 caracteres úteis após normalizar espaços e maiúsculas', () => {
+        assert.equal(PIN_LENGTH, 6);
+
+        // 1. Digitação normal de 6 caracteres e conversão de minúsculas
+        let inputState = '';
+        for (const char of ['a', 'b', 'c', '1', '2', '3']) {
+            inputState = normalizeRoomCodeInput(inputState + char);
+        }
+        assert.equal(inputState, 'ABC123');
+        assert.equal(inputState.length, 6);
+
+        // 2. Tentativa de digitar um sétimo caractere não altera o estado de 6 caracteres
+        inputState = normalizeRoomCodeInput(inputState + 'X');
+        assert.equal(inputState, 'ABC123');
+        assert.equal(inputState.length, 6);
+
+        // 3. Digitação de espaços durante o preenchimento é ignorada sem exigir espaços
+        assert.equal(normalizeRoomCodeInput('ab c '), 'ABC');
+
+        // 4. Colagem de 'ABC 123' resulta em 'ABC123'
+        assert.equal(normalizeRoomCodeInput('ABC 123'), 'ABC123');
+
+        // 5. Colagem de 'ABC123EXTRA' resulta em 'ABC123' sem ultrapassar 6 caracteres
+        assert.equal(normalizeRoomCodeInput('ABC123EXTRA'), 'ABC123');
+
+        // 6. Colagem de texto com espaços no início, meio e fim e letras minúsculas
+        assert.equal(normalizeRoomCodeInput('   ab c 123   '), 'ABC123');
+        assert.equal(normalizeRoomCodeInput('   ab c 123 extra  '), 'ABC123');
     });
 });
 
@@ -316,6 +355,323 @@ describe('BUG 08 — Criação de sala, tratamento imediato de erros e proteçã
                         gameMode: 'CLASSIC',
                     }),
                 /Resposta inválida ao criar sala/,
+            );
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
+describe('Melhoria UX — Validar existência e disponibilidade da sala antes de solicitar o apelido', () => {
+    it('1. Código válido e sala existente: deve normalizar, consultar backend e avançar/navegar', async () => {
+        let navigatedRoute: string | null = null;
+        let phase: PlayPhase = 'join';
+        let error: string | null = 'erro-anterior';
+        let normalizedPin = '';
+        const loadingStates: boolean[] = [];
+
+        // Fluxo Landing Page
+        const landingSuccess = await executeVerifyRoomCode({
+            rawCode: ' abc 123 ',
+            lockRef: { current: false },
+            checkAvailability: async (code) => ({
+                code,
+                available: true,
+            }),
+            setIsLoading: (loading) => loadingStates.push(loading),
+            setError: (err) => {
+                error = err;
+            },
+            onSuccess: (cleanPin) => {
+                navigatedRoute = buildPlayRouteWithPin(cleanPin, '/jogar');
+            },
+        });
+
+        assert.equal(landingSuccess, true);
+        assert.equal(error, null);
+        assert.equal(navigatedRoute, '/jogar?codigo=ABC123');
+        assert.deepEqual(loadingStates, [true, false]);
+
+        // Fluxo /jogar -> avança para 'nickname' apenas após confirmação
+        const playSuccess = await executeVerifyRoomCode({
+            rawCode: ' abc 123 ',
+            lockRef: { current: false },
+            checkAvailability: async (code) => ({
+                code,
+                available: true,
+            }),
+            setIsLoading: () => {},
+            setError: (err) => {
+                error = err;
+            },
+            onNormalizedCode: (code) => {
+                normalizedPin = code;
+            },
+            onSuccess: () => {
+                phase = 'nickname';
+            },
+        });
+
+        assert.equal(playSuccess, true);
+        assert.equal(normalizedPin, 'ABC123');
+        assert.equal(phase, 'nickname');
+    });
+
+    it('2, 7 e 8. Código válido e sala inexistente (Landing Page e acesso direto a /jogar): deve exibir erro imediato sem navegar nem pedir apelido', async () => {
+        let navigatedToPlay = false;
+        let landingError: string | null = null;
+
+        // 8. Entrada pela Landing Page com código inexistente
+        const landingResult = await executeVerifyRoomCode({
+            rawCode: 'XYZ999',
+            lockRef: { current: false },
+            checkAvailability: async () => {
+                throw new ApiError(
+                    'Sala não encontrada. Verifique o código informado.',
+                    404,
+                );
+            },
+            setIsLoading: () => {},
+            setError: (err) => {
+                landingError = err;
+            },
+            onSuccess: () => {
+                navigatedToPlay = true;
+            },
+        });
+
+        assert.equal(landingResult, false);
+        assert.equal(navigatedToPlay, false);
+        assert.equal(
+            landingError,
+            'Sala não encontrada. Verifique o código informado.',
+        );
+
+        // 7. Acesso direto a /jogar com código inexistente
+        let playPhase: PlayPhase = 'join';
+        let playError: string | null = null;
+
+        const playResult = await executeVerifyRoomCode({
+            rawCode: 'XYZ999',
+            lockRef: { current: false },
+            checkAvailability: async () => {
+                throw new ApiError('Sala não encontrada.', 404);
+            },
+            setIsLoading: () => {},
+            setError: (err) => {
+                playError = err;
+            },
+            onSuccess: () => {
+                playPhase = 'nickname';
+            },
+        });
+
+        assert.equal(playResult, false);
+        assert.equal(playPhase, 'join');
+        assert.equal(
+            playError,
+            'Sala não encontrada. Verifique o código informado.',
+        );
+    });
+
+    it('3. Código com formato inválido: deve exibir erro imediato e não fazer requisição HTTP', async () => {
+        let apiCalls = 0;
+        let phase: PlayPhase = 'join';
+        let error = null as string | null;
+
+        for (const invalidCode of ['', '   ', 'AB12', 'ABC@23', 'ABC1234']) {
+            const result = await executeVerifyRoomCode({
+                rawCode: invalidCode,
+                lockRef: { current: false },
+                checkAvailability: async (code) => {
+                    apiCalls += 1;
+                    return { code, available: true };
+                },
+                setIsLoading: () => {},
+                setError: (err) => {
+                    error = err;
+                },
+                onSuccess: () => {
+                    phase = 'nickname';
+                },
+            });
+
+            assert.equal(result, false);
+            assert.equal(phase, 'join');
+            assert.notEqual(error, null);
+        }
+
+        assert.equal(apiCalls, 0);
+    });
+
+    it('4 e 5. Sala lotada, encerrada, cancelada ou em andamento: deve diferenciar cenários e impedir avanço para apelido', async () => {
+        const scenarios = [
+            {
+                error: new ApiError('Esta sala atingiu o limite de jogadores.', 409),
+                expected: 'Esta sala atingiu o limite de jogadores.',
+            },
+            {
+                error: new ApiError('Esta sala já foi encerrada.', 409),
+                expected: 'Esta sala já foi encerrada.',
+            },
+            {
+                error: new ApiError('Esta sala foi cancelada.', 409),
+                expected: 'Esta sala foi cancelada.',
+            },
+            {
+                error: new ApiError(
+                    'Esta partida já está em andamento e não aceita novos jogadores.',
+                    409,
+                ),
+                expected:
+                    'Esta partida já está em andamento e não aceita novos jogadores.',
+            },
+        ];
+
+        for (const scenario of scenarios) {
+            let phase: PlayPhase = 'join';
+            let capturedError: string | null = null;
+
+            const result = await executeVerifyRoomCode({
+                rawCode: 'ABC123',
+                lockRef: { current: false },
+                checkAvailability: async () => {
+                    throw scenario.error;
+                },
+                setIsLoading: () => {},
+                setError: (err) => {
+                    capturedError = err;
+                },
+                onSuccess: () => {
+                    phase = 'nickname';
+                },
+            });
+
+            assert.equal(result, false);
+            assert.equal(phase, 'join');
+            assert.equal(capturedError, scenario.expected);
+        }
+    });
+
+    it('6. Falha de conexão: não deve confundir erro de rede com sala inexistente', async () => {
+        let phase: PlayPhase = 'join';
+        let capturedError = null as string | null;
+
+        const result = await executeVerifyRoomCode({
+            rawCode: 'ABC123',
+            lockRef: { current: false },
+            checkAvailability: async () => {
+                throw new Error('TypeError: Failed to fetch');
+            },
+            setIsLoading: () => {},
+            setError: (err) => {
+                capturedError = err;
+            },
+            onSuccess: () => {
+                phase = 'nickname';
+            },
+        });
+
+        assert.equal(result, false);
+        assert.equal(phase, 'join');
+        assert.equal(
+            capturedError,
+            'Não foi possível conectar ao servidor. Verifique sua conexão.',
+        );
+        assert.equal(String(capturedError).includes('Sala não encontrada'), false);
+    });
+
+    it('9. Confirmação de que o apelido não é solicitado enquanto a validação estiver pendente e bloqueio contra consultas simultâneas', async () => {
+        const lockRef = { current: false };
+        let apiCalls = 0;
+        let phase: PlayPhase = 'join';
+        let resolveCheck!: (value: { code: string; available: boolean }) => void;
+
+        const checkPromise = new Promise<{ code: string; available: boolean }>(
+            (resolve) => {
+                resolveCheck = resolve;
+            },
+        );
+
+        const triggerVerify = () =>
+            executeVerifyRoomCode({
+                rawCode: 'ABC123',
+                lockRef,
+                checkAvailability: () => {
+                    apiCalls += 1;
+                    return checkPromise;
+                },
+                setIsLoading: () => {},
+                setError: () => {},
+                onSuccess: () => {
+                    phase = 'nickname';
+                },
+            });
+
+        const firstAttempt = triggerVerify();
+        const secondAttempt = triggerVerify();
+
+        // Enquanto a validação estiver pendente, a etapa permanece em 'join' (apelido não é solicitado)
+        assert.equal(phase, 'join');
+        assert.equal(await secondAttempt, false);
+        assert.equal(apiCalls, 1);
+
+        resolveCheck({ code: 'ABC123', available: true });
+        assert.equal(await firstAttempt, true);
+        assert.equal(phase, 'nickname');
+        assert.equal(lockRef.current, false);
+    });
+
+    it('10. Integração com endpoints: verifyRoomAvailability e validação definitiva em joinRoomWithNickname', async () => {
+        const originalFetch = globalThis.fetch;
+        const calledUrls: string[] = [];
+
+        try {
+            // 10a. Consulta pública GET /rooms/:code/availability
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+                calledUrls.push(String(input));
+                return new Response(
+                    JSON.stringify({
+                        room: {
+                            code: 'ABC123',
+                            status: 'WAITING',
+                            available: true,
+                        },
+                    }),
+                    {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' },
+                    },
+                );
+            }) as typeof fetch;
+
+            const availability = await verifyRoomAvailability(' abc 123 ');
+            assert.equal(availability.available, true);
+            assert.equal(availability.code, 'ABC123');
+            assert.ok(calledUrls[0].endsWith('/rooms/ABC123/availability'));
+
+            // 10b. Se a sala lotar ou encerrar entre a consulta inicial e o envio do apelido,
+            // POST /rooms/join rejeita definitivamente no backend
+            globalThis.fetch = (async () =>
+                new Response(
+                    JSON.stringify({
+                        message: 'Esta sala atingiu o limite de jogadores.',
+                    }),
+                    {
+                        status: 409,
+                        headers: { 'Content-Type': 'application/json' },
+                    },
+                )) as typeof fetch;
+
+            await assert.rejects(
+                () => joinRoomWithNickname('ABC123', 'Jogador1'),
+                (err: unknown) => {
+                    assert.equal(
+                        formatRoomAvailabilityError(err),
+                        'Esta sala atingiu o limite de jogadores.',
+                    );
+                    return true;
+                },
             );
         } finally {
             globalThis.fetch = originalFetch;

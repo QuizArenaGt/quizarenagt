@@ -1,25 +1,35 @@
 import { useState, type FormEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
-import { MAX_ROOM_CODE_INPUT_LENGTH, normalizeRoomCode } from '../../../models/game';
+import { normalizeRoomCodeInput } from '../../../models/game';
 
 interface JoinRoomSectionProps {
     id: string;
-    onJoinRoom: (pin: string) => void;
+    error?: string | null;
+    isChecking?: boolean;
+    onClearError?: () => void;
+    onJoinRoom: (pin: string) => void | Promise<void>;
 }
 
 /*
  * Entrada rápida em sala pela landing page.
- * O código digitado é repassado ao ViewModel, que leva o aluno para a
+ * O código digitado é repassado ao ViewModel, que valida a sala antes de levar o aluno para a
  * tela /jogar.
  */
-export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps) {
+export default function JoinRoomSection({
+    id,
+    error = null,
+    isChecking = false,
+    onClearError,
+    onJoinRoom,
+}: JoinRoomSectionProps) {
     const titleId = `${id}-titulo`;
     const hintId = `${id}-aviso`;
+    const errorId = `${id}-erro`;
     const [pin, setPin] = useState('');
 
     function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        onJoinRoom(normalizeRoomCode(pin));
+        void onJoinRoom(normalizeRoomCodeInput(pin));
     }
 
     return (
@@ -37,7 +47,12 @@ export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps
                         </p>
                     </div>
 
-                    <form className="home-join__form" aria-labelledby={titleId} onSubmit={handleSubmit}>
+                    <form
+                        className="home-join__form"
+                        aria-labelledby={titleId}
+                        onSubmit={handleSubmit}
+                        noValidate
+                    >
                         <div className="home-join__fieldset">
                             <label htmlFor="room-pin" className="home-join__label">
                                 Código da sala
@@ -48,14 +63,23 @@ export default function JoinRoomSection({ id, onJoinRoom }: JoinRoomSectionProps
                                 className="home-join__input"
                                 type="text"
                                 autoComplete="off"
-                                maxLength={MAX_ROOM_CODE_INPUT_LENGTH}
                                 placeholder="EX: A1B2C3"
                                 value={pin}
-                                onChange={(event) => setPin(normalizeRoomCode(event.target.value))}
-                                aria-describedby={hintId}
+                                disabled={isChecking}
+                                onChange={(event) => {
+                                    setPin(normalizeRoomCodeInput(event.target.value));
+                                    onClearError?.();
+                                }}
+                                aria-invalid={error ? true : undefined}
+                                aria-describedby={error ? errorId : hintId}
                             />
-                            <Button type="submit" size="lg" fullWidth>
-                                Entrar na sala
+                            {error && (
+                                <p id={errorId} className="home-join__error" role="alert">
+                                    {error}
+                                </p>
+                            )}
+                            <Button type="submit" size="lg" fullWidth disabled={isChecking}>
+                                {isChecking ? 'Verificando sala…' : 'Entrar na sala'}
                             </Button>
                         </div>
                         <p id={hintId} className="home-join__hint">

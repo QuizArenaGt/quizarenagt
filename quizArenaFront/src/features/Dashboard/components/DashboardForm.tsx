@@ -3,7 +3,7 @@ import './DashboardForm.css';
 import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog/ConfirmDialog';
 import Logo from '../../../components/ui/Logo/Logo';
-import { MAX_ROOM_CODE_INPUT_LENGTH } from '../../../models/game';
+import { normalizeRoomCodeInput } from '../../../models/game';
 import { CHOICE_LETTERS, QUESTION_TYPE_LABEL } from '../../../models/question';
 import {
     GAME_MODE_LABEL,
@@ -154,9 +154,12 @@ export default function DashboardForm() {
                                         <input
                                             type="text"
                                             value={roomsVm.lookupCode}
-                                            onChange={(e) => roomsVm.setLookupCode(e.target.value)}
+                                            onChange={(e) =>
+                                                roomsVm.setLookupCode(
+                                                    normalizeRoomCodeInput(e.target.value),
+                                                )
+                                            }
                                             placeholder="Abrir por código (ex: A1B2C3)"
-                                            maxLength={MAX_ROOM_CODE_INPUT_LENGTH}
                                             style={{
                                                 padding: '8px 12px',
                                                 borderRadius: '8px',

@@ -23,6 +23,13 @@ roomRoutes.post(
 );
 
 roomRoutes.get(
+    "/:code/availability",
+    (req, res) => {
+        void roomController.checkAvailability(req, res);
+    },
+);
+
+roomRoutes.get(
     "/:code",
     (req, res) => {
         void roomController.getLobby(req, res);

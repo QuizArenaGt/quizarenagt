@@ -1,17 +1,26 @@
-import { normalizeRoomCode } from '../models/game';
+import { normalizeRoomCode } from '../models/game.ts';
 import {
+    checkRoomAvailabilityApi,
     getRoomLobbyApi,
     joinRoomApi,
     submitRoundAnswerApi,
+    type ApiRoomAvailability,
     type ApiRoomLobby,
     type JoinRoomApiResponse,
     type SubmitAnswerApiResponse,
-} from './roomStorageService';
+} from './roomStorageService.ts';
 
 export interface JoinedRoomSession {
     player: JoinRoomApiResponse['player'];
     sessionToken: string;
     lobby: ApiRoomLobby;
+}
+
+export async function verifyRoomAvailability(
+    code: string,
+): Promise<ApiRoomAvailability> {
+    const cleanCode = normalizeRoomCode(code);
+    return checkRoomAvailabilityApi(cleanCode);
 }
 
 export async function joinRoomWithNickname(

@@ -40,7 +40,13 @@ export default function HomeView() {
                 <HowItWorksSection id={viewModel.sectionIds.howItWorks} steps={viewModel.steps} />
                 <AudienceSection id={viewModel.sectionIds.audiences} audiences={viewModel.audiences} />
                 <FeaturesSection id={viewModel.sectionIds.features} features={viewModel.features} />
-                <JoinRoomSection id={viewModel.sectionIds.joinRoom} onJoinRoom={viewModel.handleJoinRoom} />
+                <JoinRoomSection
+                    id={viewModel.sectionIds.joinRoom}
+                    error={viewModel.joinError}
+                    isChecking={viewModel.isCheckingRoom}
+                    onClearError={viewModel.clearJoinError}
+                    onJoinRoom={viewModel.handleJoinRoom}
+                />
             </main>
 
             <Footer />

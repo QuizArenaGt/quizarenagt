@@ -235,6 +235,59 @@ export class RoomController {
         }
     }
 
+    async checkAvailability(req: Request, res: Response): Promise<void> {
+        const code = req.params.code;
+        const normalizedCode =
+            typeof code === "string" ? normalizeRoomCode(code) : "";
+
+        if (!isValidRoomCode(normalizedCode)) {
+            res.status(400).json({
+                message: "Código da sala inválido.",
+            });
+            return;
+        }
+
+        try {
+            const availability =
+                await this.roomService.checkRoomAvailability(normalizedCode);
+
+            res.status(200).json({
+                room: availability,
+            });
+        } catch (error: unknown) {
+            if (error instanceof InvalidRoomDataError) {
+                res.status(400).json({
+                    message: error.message,
+                    errors: error.errors,
+                });
+                return;
+            }
+
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (
+                error instanceof RoomNotJoinableError ||
+                error instanceof RoomFullError
+            ) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao verificar disponibilidade da sala.");
+
+            res.status(500).json({
+                message: "Erro interno ao verificar disponibilidade da sala.",
+            });
+        }
+    }
+
 
     async getLobby(req: Request, res: Response): Promise<void> {
         const code = req.params.code;

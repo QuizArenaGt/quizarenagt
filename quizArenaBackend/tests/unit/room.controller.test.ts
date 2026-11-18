@@ -8,6 +8,8 @@ import {
     RoomNotFoundError,
     RoomAccessDeniedError,
     RoomNotEditableError,
+    RoomNotJoinableError,
+    RoomFullError,
     RoomAuthenticationError,
     RoomStartRequirementsError,
 } from "../../src/rooms/room.errors.js";
@@ -19,6 +21,7 @@ describe("RoomController", () => {
         updateRoom: ReturnType<typeof vi.fn>;
         getRoomLobby: ReturnType<typeof vi.fn>;
         startRoom: ReturnType<typeof vi.fn>;
+        checkRoomAvailability: ReturnType<typeof vi.fn>;
     };
 
     let controller: RoomController;
@@ -61,7 +64,7 @@ describe("RoomController", () => {
             updateRoom: vi.fn(),
             getRoomLobby: vi.fn(),
             startRoom: vi.fn(),
-
+            checkRoomAvailability: vi.fn(),
         };
 
         controller = new RoomController(
@@ -599,6 +602,122 @@ describe("RoomController", () => {
             );
 
             expect(res.status).toHaveBeenCalledWith(404);
+        });
+    });
+
+    describe("checkAvailability", () => {
+        beforeEach(() => {
+            req.params = { code: "ABC123" };
+        });
+
+        it("deve retornar 200 quando a sala existir e estiver disponível", async () => {
+            roomService.checkRoomAvailability.mockResolvedValue({
+                code: "ABC123",
+                status: "WAITING",
+                available: true,
+            });
+
+            req.params = { code: " abc 123 " };
+
+            await controller.checkAvailability(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(roomService.checkRoomAvailability).toHaveBeenCalledWith(
+                "ABC123",
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({
+                room: {
+                    code: "ABC123",
+                    status: "WAITING",
+                    available: true,
+                },
+            });
+        });
+
+        it("deve retornar 400 quando o código tiver formato inválido sem consultar o serviço", async () => {
+            req.params = { code: "ABC" };
+
+            await controller.checkAvailability(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(roomService.checkRoomAvailability).not.toHaveBeenCalled();
+        });
+
+        it("deve retornar 404 quando a sala não existir", async () => {
+            roomService.checkRoomAvailability.mockRejectedValue(
+                new RoomNotFoundError(
+                    "Sala não encontrada. Verifique o código informado.",
+                ),
+            );
+
+            await controller.checkAvailability(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(404);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Sala não encontrada. Verifique o código informado.",
+            });
+        });
+
+        it("deve retornar 409 quando a sala estiver encerrada, em andamento ou lotada", async () => {
+            roomService.checkRoomAvailability.mockRejectedValue(
+                new RoomFullError(),
+            );
+
+            await controller.checkAvailability(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(409);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Esta sala atingiu o limite de jogadores.",
+            });
+        });
+
+        it("deve retornar 409 quando a sala estiver encerrada (RoomNotJoinableError)", async () => {
+            roomService.checkRoomAvailability.mockRejectedValue(
+                new RoomNotJoinableError("Esta sala já foi encerrada."),
+            );
+
+            await controller.checkAvailability(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(409);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Esta sala já foi encerrada.",
+            });
+        });
+
+        it("deve retornar 500 quando ocorrer erro interno inesperado", async () => {
+            const consoleSpy = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => { });
+
+            roomService.checkRoomAvailability.mockRejectedValue(
+                new Error("Database error"),
+            );
+
+            await controller.checkAvailability(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(res.status).toHaveBeenCalledWith(500);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Erro interno ao verificar disponibilidade da sala.",
+            });
+            expect(consoleSpy).toHaveBeenCalled();
         });
     });
 });

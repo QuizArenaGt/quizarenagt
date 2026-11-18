@@ -112,6 +112,15 @@ export function normalizeRoomCode(value: string): string {
 }
 
 /**
+ * Normaliza a entrada de um campo de código de sala (digitação ou colagem):
+ * remove todos os espaços, converte letras para maiúsculas e aplica o limite
+ * de 6 caracteres úteis (PIN_LENGTH) ao valor já normalizado.
+ */
+export function normalizeRoomCodeInput(value: string): string {
+    return normalizeRoomCode(value).slice(0, PIN_LENGTH);
+}
+
+/**
  * Verifica se o código normalizado possui exatamente 6 caracteres alfanuméricos.
  */
 export function isValidRoomCode(value: string): boolean {
@@ -139,9 +148,9 @@ export function validateRoomCode(value: string): string | null {
     return null;
 }
 
-/** Normaliza o código informado mantendo compatibilidade com os consumidores existentes. */
+/** Normaliza o código informado para exibição/estado em campos de entrada (máx. 6 caracteres úteis). */
 export function sanitizePin(value: string): string {
-    return normalizeRoomCode(value);
+    return normalizeRoomCodeInput(value);
 }
 
 /**
@@ -152,4 +161,139 @@ export function buildPlayRouteWithPin(pin: string, playRoute = '/jogar'): string
     return isValidRoomCode(cleanPin)
         ? `${playRoute}?codigo=${encodeURIComponent(cleanPin)}`
         : playRoute;
+}
+
+interface HttpErrorLike {
+    status: number;
+    message?: string;
+}
+
+function isHttpErrorLike(error: unknown): error is HttpErrorLike {
+    return (
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        typeof (error as { status: unknown }).status === 'number'
+    );
+}
+
+/**
+ * Formata erros de verificação/entrada de sala em mensagens amigáveis e claras,
+ * diferenciando formato inválido, sala inexistente, encerrada, em andamento,
+ * lotada e falha de conexão com o servidor.
+ */
+export function formatRoomAvailabilityError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 404) {
+            return 'Sala não encontrada. Verifique o código informado.';
+        }
+
+        if (error.status === 409) {
+            const msg = error.message?.trim();
+            if (msg) {
+                return msg;
+            }
+            return 'Esta sala não está disponível para entrada no momento.';
+        }
+
+        if (error.status === 400) {
+            const msg = error.message?.trim();
+            if (msg && !msg.startsWith('Erro na requisição')) {
+                return msg;
+            }
+            return `O código da sala deve possuir ${PIN_LENGTH} caracteres.`;
+        }
+
+        if (error.status >= 500) {
+            return 'Não foi possível verificar a sala no momento. Tente novamente em instantes.';
+        }
+    }
+
+    if (error instanceof Error) {
+        const message = error.message.trim();
+        const lower = message.toLowerCase();
+
+        if (
+            lower.includes('conectar ao servidor') ||
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror') ||
+            lower.includes('network request failed') ||
+            lower.includes('load failed')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão.';
+        }
+
+        if (
+            message &&
+            !lower.startsWith('typeerror') &&
+            !lower.startsWith('syntaxerror') &&
+            !lower.startsWith('referenceerror') &&
+            !lower.includes('unexpected token')
+        ) {
+            return message;
+        }
+    }
+
+    return 'Não foi possível verificar a sala. Verifique sua conexão e tente novamente.';
+}
+
+export interface ExecuteVerifyRoomCodeParams {
+    rawCode: string;
+    lockRef: { current: boolean };
+    checkAvailability: (cleanCode: string) => Promise<{ code: string; available: boolean }>;
+    setIsLoading: (loading: boolean) => void;
+    setError: (error: string | null) => void;
+    onNormalizedCode?: (cleanCode: string) => void;
+    onSuccess: (cleanCode: string) => void;
+}
+
+/**
+ * Fluxo compartilhado entre a Landing Page e a tela /jogar para validar o formato
+ * e consultar a existência/disponibilidade da sala no backend antes de avançar.
+ */
+export async function executeVerifyRoomCode({
+    rawCode,
+    lockRef,
+    checkAvailability,
+    setIsLoading,
+    setError,
+    onNormalizedCode,
+    onSuccess,
+}: ExecuteVerifyRoomCodeParams): Promise<boolean> {
+    if (lockRef.current) {
+        return false;
+    }
+
+    const cleanCode = normalizeRoomCode(rawCode);
+    onNormalizedCode?.(cleanCode);
+
+    const validationError = validateRoomCode(cleanCode);
+    if (validationError) {
+        setError(validationError);
+        return false;
+    }
+
+    lockRef.current = true;
+    setIsLoading(true);
+    setError(null);
+
+    try {
+        const availability = await checkAvailability(cleanCode);
+
+        if (!availability || availability.available !== true) {
+            setError('Esta sala não está disponível para entrada no momento.');
+            return false;
+        }
+
+        const verifiedCode = normalizeRoomCode(availability.code || cleanCode);
+        onNormalizedCode?.(verifiedCode);
+        onSuccess(verifiedCode);
+        return true;
+    } catch (error) {
+        setError(formatRoomAvailabilityError(error));
+        return false;
+    } finally {
+        lockRef.current = false;
+        setIsLoading(false);
+    }
 }

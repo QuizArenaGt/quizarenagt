@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react';
 import Button from '../../../components/ui/Button/Button';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
-import { MAX_ROOM_CODE_INPUT_LENGTH } from '../../../models/game';
+import { normalizeRoomCodeInput } from '../../../models/game';
 
 interface JoinStepProps {
     pin: string;
@@ -33,9 +33,9 @@ export default function JoinStep({ pin, error, isJoining, onPinChange, onSubmit 
                     type="text"
                     autoComplete="off"
                     placeholder="EX: A1B2C3"
-                    maxLength={MAX_ROOM_CODE_INPUT_LENGTH}
                     value={pin}
-                    onChange={(event) => onPinChange(event.target.value)}
+                    disabled={isJoining}
+                    onChange={(event) => onPinChange(normalizeRoomCodeInput(event.target.value))}
                     aria-invalid={error ? true : undefined}
                     aria-describedby={error ? 'play-join-error' : 'play-join-hint'}
                 />
@@ -47,7 +47,7 @@ export default function JoinStep({ pin, error, isJoining, onPinChange, onSubmit 
                 )}
 
                 <Button type="submit" size="lg" fullWidth disabled={isJoining}>
-                    {isJoining ? 'Continuando…' : 'Continuar'}
+                    {isJoining ? 'Verificando sala…' : 'Continuar'}
                 </Button>
             </form>
 
