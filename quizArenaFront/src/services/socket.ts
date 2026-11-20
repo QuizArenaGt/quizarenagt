@@ -59,6 +59,7 @@ export interface RoundStartedPayload {
         roundNumber: number;
         status: 'OPEN' | 'CLOSED';
         openedAt: string;
+        expiresAt?: string;
         timeLimit: number;
         question: RoundStartedQuestionDto;
     };
@@ -91,6 +92,7 @@ export interface RoundClosedPayload {
         roundNumber: number;
         status: 'OPEN' | 'CLOSED';
         openedAt: string;
+        expiresAt?: string;
         closedAt: string | null;
         question: {
             id: string;
@@ -120,6 +122,21 @@ export interface RoundAnswerSubmittedPayload {
 
 export interface GameFinishedPayload {
     roomId: string;
+}
+
+export interface GameCreatedPayload {
+    roomId: string;
+    status: BackendRoomStatus;
+    maxPlayers: number;
+    questionTime: number;
+    gameMode: GameMode;
+    currentGame?: {
+        id: string;
+        status: BackendRoomStatus;
+        maxPlayers: number;
+        questionTime: number;
+        gameMode: GameMode;
+    } | null;
 }
 
 export function createHostSocket(token: string, roomCode: string): Socket {

@@ -6,7 +6,10 @@ import {
 } from "@prisma/client";
 
 import { QuestionRepository } from "./question.repository.js";
-import { RoomRepository } from "../rooms/room.repository.js";
+import {
+    RoomRepository,
+    selectCurrentGame,
+} from "../rooms/room.repository.js";
 
 import {
     validateCreateQuestion,
@@ -36,7 +39,7 @@ type QuestionRepositoryContract = Pick<
 
 type RoomRepositoryContract = Pick<
     RoomRepository,
-    "findById"
+    "findById" | "findByIdWithCurrentGame"
 >;
 
 export type CreateQuestionInput = {
@@ -93,7 +96,7 @@ export class QuestionService {
             );
         }
 
-        const room = await this.roomRepository.findById(
+        const room = await this.roomRepository.findByIdWithCurrentGame(
             validation.data.roomId,
         );
 
@@ -105,7 +108,12 @@ export class QuestionService {
             throw new QuestionRoomAccessDeniedError();
         }
 
-        if (room.status !== "WAITING") {
+        const currentGame = selectCurrentGame(room.games);
+
+        if (
+            room.status !== "ACTIVE" ||
+            currentGame?.status === "IN_PROGRESS"
+        ) {
             throw new QuestionRoomNotEditableError();
         }
 
@@ -172,7 +180,9 @@ export class QuestionService {
             throw new QuestionNotFoundError();
         }
 
-        const room = await this.roomRepository.findById(question.roomId);
+        const room = await this.roomRepository.findByIdWithCurrentGame(
+            question.roomId,
+        );
 
         if (!room) {
             throw new QuestionRoomNotFoundError();
@@ -184,7 +194,12 @@ export class QuestionService {
             );
         }
 
-        if (room.status !== "WAITING") {
+        const currentGame = selectCurrentGame(room.games);
+
+        if (
+            room.status !== "ACTIVE" ||
+            currentGame?.status === "IN_PROGRESS"
+        ) {
             throw new QuestionRoomNotEditableError();
         }
 

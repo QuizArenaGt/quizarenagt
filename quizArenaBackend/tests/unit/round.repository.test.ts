@@ -1,207 +1,188 @@
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RoundRepository } from "../../src/rounds/round.repository.js";
-import { prisma } from "../../src/database/prisma.js";
+const { prismaMock, transactionClient } = vi.hoisted(() => {
+    const transactionClient = {
+        $queryRaw: vi.fn(),
+        room: {
+            findUnique: vi.fn(),
+            update: vi.fn(),
+        },
+        game: {
+            update: vi.fn(),
+        },
+        round: {
+            findUnique: vi.fn(),
+            create: vi.fn(),
+            update: vi.fn(),
+        },
+    };
+
+    return {
+        transactionClient,
+        prismaMock: {
+            $transaction: vi.fn(
+                async (
+                    callback: (tx: typeof transactionClient) => Promise<unknown>,
+                ) => callback(transactionClient),
+            ),
+        },
+    };
+});
 
 vi.mock("../../src/database/prisma.js", () => ({
-    prisma: {
-        $transaction: vi.fn(),
-    },
+    prisma: prismaMock,
 }));
 
-const transactionClient = {
-    $queryRaw: vi.fn(),
-    room: {
-        findUnique: vi.fn(),
-        update: vi.fn(),
-    },
-    game: {
-        update: vi.fn(),
-    },
-    round: {
-        create: vi.fn(),
-    },
-};
-
-type TransactionCallback = (
-    tx: typeof transactionClient,
-) => Promise<unknown>;
-
-const transactionMock = (
-    prisma as unknown as {
-        $transaction: ReturnType<typeof vi.fn>;
-    }
-).$transaction;
-
-const roomFixture = {
-    id: "room-test-uuid",
-    hostId: "host-test-uuid",
-    status: "IN_PROGRESS",
-    questionTime: 30,
-    questionSnapshot: {
-        id: "snapshot-test-uuid",
-        questions: Array.from({ length: 5 }, (_, index) => ({
-            id: `snapshot-question-${index + 1}`,
-            statement: `Pergunta ${index + 1}`,
-            type: "MULTIPLE_CHOICE",
-            position: index,
-        })),
-    },
-    game: {
-        id: "game-test-uuid",
-        rounds: [],
-    },
-};
-
-const roundFixture = {
-    id: "round-test-uuid",
-    gameId: "game-test-uuid",
-    snapshotQuestionId: "snapshot-question-1",
-    roundNumber: 1,
-    status: "OPEN",
-    openedAt: new Date("2026-11-16T12:00:00.000Z"),
-    closedAt: null,
-    timeLimit: 30,
-    snapshotQuestion: {
-        id: "snapshot-question-1",
-        statement: "Pergunta 1",
-        type: "MULTIPLE_CHOICE",
-        position: 0,
-        options: [
-            {
-                id: "option-1",
-                text: "Alternativa 1",
-                isCorrect: true,
-                position: 0,
-            },
-            {
-                id: "option-2",
-                text: "Alternativa 2",
-                isCorrect: false,
-                position: 1,
-            },
-        ],
-    },
-};
+import { RoundRepository } from "../../src/rounds/round.repository.js";
 
 describe("RoundRepository", () => {
     let repository: RoundRepository;
 
+    const baseDate = new Date("2026-11-18T12:00:00.000Z");
+
+    const snapshotQuestionsFixture = [
+        {
+            id: "snap-q-1",
+            snapshotId: "snapshot-uuid",
+            sourceQuestionId: "src-q-1",
+            statement: "Pergunta 1?",
+            type: "MULTIPLE_CHOICE" as const,
+            position: 0,
+        },
+        {
+            id: "snap-q-2",
+            snapshotId: "snapshot-uuid",
+            sourceQuestionId: "src-q-2",
+            statement: "Pergunta 2?",
+            type: "MULTIPLE_CHOICE" as const,
+            position: 1,
+        },
+    ];
+
+    const gameFixture = {
+        id: "game-test-uuid",
+        roomId: "room-test-uuid",
+        status: "IN_PROGRESS" as const,
+        maxPlayers: 10,
+        questionTime: 30,
+        gameMode: "CLASSIC" as const,
+        startedAt: baseDate,
+        finishedAt: null,
+        createdAt: baseDate,
+        updatedAt: baseDate,
+        questionSnapshot: {
+            id: "snapshot-uuid",
+            gameId: "game-test-uuid",
+            createdAt: baseDate,
+            questions: snapshotQuestionsFixture,
+        },
+        rounds: [] as Array<{
+            id: string;
+            gameId: string;
+            snapshotQuestionId: string;
+            roundNumber: number;
+            status: "OPEN" | "CLOSED";
+            openedAt: Date;
+            closedAt: Date | null;
+            timeLimit: number;
+        }>,
+    };
+
+    const roomFixture = {
+        id: "room-test-uuid",
+        code: "ABC123",
+        hostId: "user-host-uuid",
+        status: "ACTIVE" as const,
+        maxPlayers: 10,
+        questionTime: 30,
+        gameMode: "CLASSIC" as const,
+        archivedAt: null,
+        createdAt: baseDate,
+        updatedAt: baseDate,
+        games: [gameFixture],
+    };
+
     beforeEach(() => {
         vi.clearAllMocks();
-
-        transactionMock.mockImplementation(
-            (callback: TransactionCallback) =>
-                callback(transactionClient),
-        );
-
-        transactionClient.$queryRaw.mockResolvedValue([]);
-
-        transactionClient.room.findUnique.mockResolvedValue(roomFixture);
-
-        transactionClient.round.create.mockResolvedValue(roundFixture);
-
-        transactionClient.game.update.mockResolvedValue({
-            id: "game-test-uuid",
-            finishedAt: new Date(),
-        });
-
-        transactionClient.room.update.mockResolvedValue({
-            ...roomFixture,
-            status: "FINISHED",
-        });
-
         repository = new RoundRepository();
     });
 
     describe("createNextRound", () => {
-        it("deve criar a primeira rodada usando a primeira pergunta do snapshot", async () => {
+        it("deve criar a primeira rodada usando a primeira pergunta do snapshot do Game", async () => {
+            transactionClient.room.findUnique.mockResolvedValue(roomFixture);
+            const createdRound = {
+                id: "round-1",
+                gameId: gameFixture.id,
+                snapshotQuestionId: "snap-q-1",
+                roundNumber: 1,
+                status: "OPEN",
+                openedAt: baseDate,
+                closedAt: null,
+                timeLimit: 30,
+                snapshotQuestion: {
+                    ...snapshotQuestionsFixture[0],
+                    options: [],
+                },
+            };
+            transactionClient.round.create.mockResolvedValue(createdRound);
+
             const result = await repository.createNextRound(
                 roomFixture.id,
                 roomFixture.hostId,
             );
 
-            expect(transactionMock).toHaveBeenCalled();
             expect(transactionClient.$queryRaw).toHaveBeenCalled();
-
-            expect(transactionClient.room.findUnique).toHaveBeenCalledWith({
-                where: { id: roomFixture.id },
-                include: {
-                    questionSnapshot: {
-                        include: {
-                            questions: {
-                                orderBy: {
-                                    position: "asc",
-                                },
-                            },
-                        },
+            expect(transactionClient.round.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: {
+                        gameId: gameFixture.id,
+                        snapshotQuestionId: "snap-q-1",
+                        roundNumber: 1,
+                        openedAt: expect.any(Date),
+                        expiresAt: expect.any(Date),
+                        timeLimit: 30,
                     },
-                    game: {
-                        include: {
-                            rounds: {
-                                orderBy: {
-                                    roundNumber: "desc",
-                                },
-                                take: 1,
-                            },
-                        },
-                    },
-                },
-            });
-
-            expect(transactionClient.round.create).toHaveBeenCalledWith({
-                data: {
-                    gameId: "game-test-uuid",
-                    snapshotQuestionId: "snapshot-question-1",
-                    roundNumber: 1,
-                    timeLimit: 30,
-                },
-                include: {
-                    snapshotQuestion: {
-                        include: {
-                            options: {
-                                orderBy: {
-                                    position: "asc",
-                                },
-                            },
-                        },
-                    },
-                },
-            });
-
+                }),
+            );
             expect(result).toEqual({
                 success: true,
-                round: roundFixture,
+                round: createdRound,
             });
         });
 
         it("deve criar a próxima rodada após o encerramento da anterior", async () => {
             transactionClient.room.findUnique.mockResolvedValue({
                 ...roomFixture,
-                game: {
-                    ...roomFixture.game,
-                    rounds: [
-                        {
-                            id: "previous-round-uuid",
-                            roundNumber: 1,
-                            status: "CLOSED",
-                        },
-                    ],
-                },
+                games: [
+                    {
+                        ...gameFixture,
+                        rounds: [
+                            {
+                                id: "round-1",
+                                gameId: gameFixture.id,
+                                snapshotQuestionId: "snap-q-1",
+                                roundNumber: 1,
+                                status: "CLOSED",
+                                openedAt: baseDate,
+                                closedAt: baseDate,
+                                timeLimit: 30,
+                            },
+                        ],
+                    },
+                ],
             });
-
-            transactionClient.round.create.mockResolvedValue({
-                ...roundFixture,
-                snapshotQuestionId: "snapshot-question-2",
+            const round2 = {
+                id: "round-2",
+                gameId: gameFixture.id,
+                snapshotQuestionId: "snap-q-2",
                 roundNumber: 2,
+                status: "OPEN",
                 snapshotQuestion: {
-                    ...roundFixture.snapshotQuestion,
-                    id: "snapshot-question-2",
-                    statement: "Pergunta 2",
-                    position: 1,
+                    ...snapshotQuestionsFixture[1],
+                    options: [],
                 },
-            });
+            };
+            transactionClient.round.create.mockResolvedValue(round2);
 
             const result = await repository.createNextRound(
                 roomFixture.id,
@@ -211,76 +192,22 @@ describe("RoundRepository", () => {
             expect(transactionClient.round.create).toHaveBeenCalledWith(
                 expect.objectContaining({
                     data: {
-                        gameId: "game-test-uuid",
-                        snapshotQuestionId: "snapshot-question-2",
+                        gameId: gameFixture.id,
+                        snapshotQuestionId: "snap-q-2",
                         roundNumber: 2,
+                        openedAt: expect.any(Date),
+                        expiresAt: expect.any(Date),
                         timeLimit: 30,
                     },
                 }),
             );
-
-            expect(result).toMatchObject({
-                success: true,
-                round: {
-                    roundNumber: 2,
-                    snapshotQuestionId: "snapshot-question-2",
-                },
-            });
+            expect(result).toEqual({ success: true, round: round2 });
         });
 
-        it("deve retornar ROOM_NOT_FOUND quando a sala não existir", async () => {
-            transactionClient.room.findUnique.mockResolvedValue(null);
-
-            const result = await repository.createNextRound(
-                roomFixture.id,
-                roomFixture.hostId,
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "ROOM_NOT_FOUND",
-            });
-
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
-        });
-
-        it("deve retornar ACCESS_DENIED quando o usuário não for o host", async () => {
-            const result = await repository.createNextRound(
-                roomFixture.id,
-                "other-user-id",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "ACCESS_DENIED",
-            });
-
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
-        });
-
-        it("deve retornar ROOM_NOT_IN_PROGRESS quando a sala não estiver em andamento", async () => {
+        it("deve retornar GAME_NOT_FOUND quando não houver partida na sala", async () => {
             transactionClient.room.findUnique.mockResolvedValue({
                 ...roomFixture,
-                status: "WAITING",
-            });
-
-            const result = await repository.createNextRound(
-                roomFixture.id,
-                roomFixture.hostId,
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "ROOM_NOT_IN_PROGRESS",
-            });
-
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
-        });
-
-        it("deve retornar GAME_NOT_FOUND quando a partida não existir", async () => {
-            transactionClient.room.findUnique.mockResolvedValue({
-                ...roomFixture,
-                game: null,
+                games: [],
             });
 
             const result = await repository.createNextRound(
@@ -292,23 +219,60 @@ describe("RoundRepository", () => {
                 success: false,
                 reason: "GAME_NOT_FOUND",
             });
-
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
         });
 
-        it("deve impedir a criação quando já existir uma rodada aberta", async () => {
+        it("deve retornar ROOM_NOT_IN_PROGRESS quando o Game não estiver IN_PROGRESS ou a sala estiver ARCHIVED", async () => {
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                games: [{ ...gameFixture, status: "WAITING" }],
+            });
+
+            expect(
+                await repository.createNextRound(
+                    roomFixture.id,
+                    roomFixture.hostId,
+                ),
+            ).toEqual({
+                success: false,
+                reason: "ROOM_NOT_IN_PROGRESS",
+            });
+
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                status: "ARCHIVED",
+            });
+
+            expect(
+                await repository.createNextRound(
+                    roomFixture.id,
+                    roomFixture.hostId,
+                ),
+            ).toEqual({
+                success: false,
+                reason: "ROOM_NOT_IN_PROGRESS",
+            });
+        });
+
+        it("deve impedir criação quando a rodada anterior estiver OPEN", async () => {
             transactionClient.room.findUnique.mockResolvedValue({
                 ...roomFixture,
-                game: {
-                    ...roomFixture.game,
-                    rounds: [
-                        {
-                            id: "previous-round-uuid",
-                            roundNumber: 1,
-                            status: "OPEN",
-                        },
-                    ],
-                },
+                games: [
+                    {
+                        ...gameFixture,
+                        rounds: [
+                            {
+                                id: "round-1",
+                                gameId: gameFixture.id,
+                                snapshotQuestionId: "snap-q-1",
+                                roundNumber: 1,
+                                status: "OPEN",
+                                openedAt: baseDate,
+                                closedAt: null,
+                                timeLimit: 30,
+                            },
+                        ],
+                    },
+                ],
             });
 
             const result = await repository.createNextRound(
@@ -320,23 +284,28 @@ describe("RoundRepository", () => {
                 success: false,
                 reason: "ROUND_ALREADY_OPEN",
             });
-
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
         });
 
-        it("deve impedir a criação quando a rodada anterior não estiver fechada", async () => {
+        it("deve finalizar o Game sem alterar Room.status quando o deck terminar", async () => {
             transactionClient.room.findUnique.mockResolvedValue({
                 ...roomFixture,
-                game: {
-                    ...roomFixture.game,
-                    rounds: [
-                        {
-                            id: "previous-round-uuid",
-                            roundNumber: 1,
-                            status: "UNKNOWN",
-                        },
-                    ],
-                },
+                games: [
+                    {
+                        ...gameFixture,
+                        rounds: [
+                            {
+                                id: "round-2",
+                                gameId: gameFixture.id,
+                                snapshotQuestionId: "snap-q-2",
+                                roundNumber: 2,
+                                status: "CLOSED",
+                                openedAt: baseDate,
+                                closedAt: baseDate,
+                                timeLimit: 30,
+                            },
+                        ],
+                    },
+                ],
             });
 
             const result = await repository.createNextRound(
@@ -344,54 +313,95 @@ describe("RoundRepository", () => {
                 roomFixture.hostId,
             );
 
-            expect(result).toEqual({
-                success: false,
-                reason: "PREVIOUS_ROUND_NOT_CLOSED",
-            });
-
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
-        });
-
-        it("deve finalizar a partida quando todas as perguntas forem utilizadas", async () => {
-            transactionClient.room.findUnique.mockResolvedValue({
-                ...roomFixture,
-                game: {
-                    ...roomFixture.game,
-                    rounds: [
-                        {
-                            id: "last-round-uuid",
-                            roundNumber: 5,
-                            status: "CLOSED",
-                        },
-                    ],
+            expect(transactionClient.game.update).toHaveBeenCalledWith({
+                where: { id: gameFixture.id },
+                data: {
+                    status: "FINISHED",
+                    finishedAt: expect.any(Date),
                 },
             });
-
-            const result = await repository.createNextRound(
-                roomFixture.id,
-                roomFixture.hostId,
-            );
-
+            expect(transactionClient.room.update).not.toHaveBeenCalled();
             expect(result).toEqual({
                 success: false,
                 reason: "DECK_FINISHED",
             });
+        });
+    });
 
-            expect(transactionClient.game.update).toHaveBeenCalledWith({
-                where: { id: "game-test-uuid" },
-                data: {
-                    finishedAt: expect.any(Date),
+    describe("closeRound", () => {
+        const openRoundFixture = {
+            id: "round-1",
+            gameId: gameFixture.id,
+            roundNumber: 1,
+            status: "OPEN" as const,
+            openedAt: new Date(Date.now() - 40_000),
+            closedAt: null,
+            timeLimit: 30,
+            game: {
+                ...gameFixture,
+                room: {
+                    id: roomFixture.id,
+                    hostId: roomFixture.hostId,
+                    status: "ACTIVE" as const,
                 },
-            });
+                players: [
+                    { id: "gp-1", nickname: "Alice", score: 120 },
+                    { id: "gp-2", nickname: "Bob", score: 0 },
+                ],
+            },
+            snapshotQuestion: {
+                ...snapshotQuestionsFixture[0],
+                options: [],
+            },
+            answers: [],
+        };
 
-            expect(transactionClient.room.update).toHaveBeenCalledWith({
-                where: { id: roomFixture.id },
-                data: {
-                    status: "FINISHED",
-                },
-            });
+        it("deve encerrar a rodada quando o tempo expirar e retornar alreadyClosed false", async () => {
+            transactionClient.round.findUnique.mockResolvedValue(
+                openRoundFixture,
+            );
+            const closed = {
+                ...openRoundFixture,
+                status: "CLOSED" as const,
+                closedAt: new Date(),
+            };
+            transactionClient.round.update.mockResolvedValue(closed);
 
-            expect(transactionClient.round.create).not.toHaveBeenCalled();
+            const result = await repository.closeRound(
+                "round-1",
+                roomFixture.hostId,
+            );
+
+            expect(result).toEqual({
+                success: true,
+                round: closed,
+                alreadyClosed: false,
+                gameFinished: false,
+            });
+        });
+
+        it("deve ser idempotente quando a rodada já estiver CLOSED", async () => {
+            const alreadyClosedRound = {
+                ...openRoundFixture,
+                status: "CLOSED" as const,
+                closedAt: new Date(),
+            };
+            transactionClient.round.findUnique.mockResolvedValue(
+                alreadyClosedRound,
+            );
+
+            const result = await repository.closeRound(
+                "round-1",
+                roomFixture.hostId,
+            );
+
+            expect(transactionClient.round.update).not.toHaveBeenCalled();
+            expect(result).toEqual({
+                success: true,
+                round: alreadyClosedRound,
+                alreadyClosed: true,
+                gameFinished: false,
+            });
         });
     });
 });

@@ -1,10 +1,16 @@
 
-import type { RoomPlayer } from "@prisma/client";
-import { Prisma } from "@prisma/client";
+import type { GamePlayer } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
 
-type CreateRoomPlayerData = {
+type CreateGamePlayerData = {
+    gameId: string;
+    userId?: string | null;
+    nickname: string;
+    sessionTokenHash: string;
+};
+
+type CreateRoomGamePlayerInput = {
     roomId: string;
     userId?: string | null;
     nickname: string;
@@ -12,76 +18,101 @@ type CreateRoomPlayerData = {
 };
 
 export class RoomPlayerRepository {
-    async findById(id: string): Promise<RoomPlayer | null> {
-        return prisma.roomPlayer.findUnique({
+    async findById(id: string): Promise<GamePlayer | null> {
+        return prisma.gamePlayer.findUnique({
             where: { id },
         });
     }
 
-    async findManyByRoomId(roomId: string): Promise<RoomPlayer[]> {
-        return prisma.roomPlayer.findMany({
-            where: { roomId },
+    async findManyByGameId(gameId: string): Promise<GamePlayer[]> {
+        return prisma.gamePlayer.findMany({
+            where: { gameId },
             orderBy: { joinedAt: "asc" },
         });
     }
 
-    async countByRoomId(roomId: string): Promise<number> {
-        return prisma.roomPlayer.count({
-            where: { roomId },
+    async countByGameId(gameId: string): Promise<number> {
+        return prisma.gamePlayer.count({
+            where: { gameId },
         });
     }
 
-    async findByRoomAndUser(
-        roomId: string,
+    async findByGameAndUser(
+        gameId: string,
         userId: string,
-    ): Promise<RoomPlayer | null> {
-        return prisma.roomPlayer.findUnique({
+    ): Promise<GamePlayer | null> {
+        return prisma.gamePlayer.findUnique({
             where: {
-                roomId_userId: {
-                    roomId,
+                gameId_userId: {
+                    gameId,
                     userId,
                 },
             },
         });
     }
 
-    async findByRoomAndNickname(
-        roomId: string,
+    async findByGameAndNickname(
+        gameId: string,
         nickname: string,
-    ): Promise<RoomPlayer | null> {
-        return prisma.roomPlayer.findUnique({
+    ): Promise<GamePlayer | null> {
+        return prisma.gamePlayer.findUnique({
             where: {
-                roomId_nickname: {
-                    roomId,
+                gameId_nickname: {
+                    gameId,
                     nickname,
                 },
             },
         });
     }
 
-    async create(data: CreateRoomPlayerData): Promise<RoomPlayer> {
-        return prisma.roomPlayer.create({
+    async create(data: CreateGamePlayerData): Promise<GamePlayer> {
+        return prisma.gamePlayer.create({
             data,
         });
     }
 
-    async delete(id: string): Promise<RoomPlayer> {
-        return prisma.roomPlayer.delete({
+    async delete(id: string): Promise<GamePlayer> {
+        return prisma.gamePlayer.delete({
             where: { id },
         });
     }
 
     async findBySessionTokenHash(
         sessionTokenHash: string,
-    ): Promise<RoomPlayer | null> {
-        return prisma.roomPlayer.findUnique({
+    ) {
+        return prisma.gamePlayer.findUnique({
             where: { sessionTokenHash },
+            include: {
+                game: {
+                    select: {
+                        id: true,
+                        roomId: true,
+                        status: true,
+                        room: {
+                            select: {
+                                id: true,
+                                status: true,
+                                games: {
+                                    orderBy: [
+                                        { createdAt: "desc" },
+                                        { id: "desc" },
+                                    ],
+                                    select: {
+                                        id: true,
+                                        status: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         });
     }
 
     async createIfRoomHasCapacity(
-        data: CreateRoomPlayerData,
-    ): Promise<RoomPlayer> {
+        data: CreateRoomGamePlayerInput,
+    ): Promise<GamePlayer & { roomId: string }> {
         return prisma.$transaction(async (tx) => {
             await tx.$queryRaw`
                 SELECT id
@@ -92,20 +123,39 @@ export class RoomPlayerRepository {
 
             const room = await tx.room.findUnique({
                 where: { id: data.roomId },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                    },
+                },
             });
 
             if (!room) {
                 throw new Error("ROOM_NOT_FOUND");
             }
 
-            if (room.status !== "WAITING") {
+            if (room.status !== "ACTIVE") {
                 throw new Error("ROOM_NOT_JOINABLE");
             }
 
-            const existingPlayer = await tx.roomPlayer.findUnique({
+            const currentGame =
+                room.games.find(
+                    (game) =>
+                        game.status === "WAITING" ||
+                        game.status === "IN_PROGRESS",
+                ) ?? room.games[0];
+
+            if (!currentGame || currentGame.status !== "WAITING") {
+                throw new Error("ROOM_NOT_JOINABLE");
+            }
+
+            const existingPlayer = await tx.gamePlayer.findUnique({
                 where: {
-                    roomId_nickname: {
-                        roomId: data.roomId,
+                    gameId_nickname: {
+                        gameId: currentGame.id,
                         nickname: data.nickname,
                     },
                 },
@@ -115,17 +165,29 @@ export class RoomPlayerRepository {
                 throw new Error("DUPLICATE_NICKNAME");
             }
 
-            const playerCount = await tx.roomPlayer.count({
-                where: { roomId: data.roomId },
+            const playerCount = await tx.gamePlayer.count({
+                where: { gameId: currentGame.id },
             });
 
-            if (playerCount >= room.maxPlayers) {
+            if (playerCount >= currentGame.maxPlayers) {
                 throw new Error("ROOM_FULL");
             }
 
-            return tx.roomPlayer.create({
-                data,
+            const createdPlayer = await tx.gamePlayer.create({
+                data: {
+                    gameId: currentGame.id,
+                    userId: data.userId ?? null,
+                    nickname: data.nickname,
+                    sessionTokenHash: data.sessionTokenHash,
+                },
             });
+
+            return {
+                ...createdPlayer,
+                roomId: room.id,
+            };
         });
     }
 }
+
+export { RoomPlayerRepository as GamePlayerRepository };

@@ -8,7 +8,7 @@ import {
     it,
 } from "vitest";
 import request from "supertest";
-import { Role, RoomStatus } from "@prisma/client";
+import { GameStatus, Role, RoomStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import { app } from "../../src/app.js";
@@ -79,6 +79,13 @@ describe("DELETE /questions/:id - Integração", () => {
                     hostId,
                     maxPlayers: 10,
                     questionTime: 20,
+                    games: {
+                        create: {
+                            status: GameStatus.WAITING,
+                            maxPlayers: 10,
+                            questionTime: 20,
+                        },
+                    },
                 },
             });
 
@@ -126,7 +133,18 @@ describe("DELETE /questions/:id - Integração", () => {
                 },
             },
             data: {
-                status: RoomStatus.WAITING,
+                status: RoomStatus.ACTIVE,
+            },
+        });
+
+        await prisma.game.updateMany({
+            where: {
+                roomId: {
+                    in: roomIds,
+                },
+            },
+            data: {
+                status: GameStatus.WAITING,
             },
         });
     });
@@ -228,12 +246,12 @@ describe("DELETE /questions/:id - Integração", () => {
         expect(response.status).toBe(404);
     });
 
-    it("deve retornar 409 quando a sala estiver em andamento", async () => {
+    it("deve retornar 409 quando a partida estiver em andamento", async () => {
         const created = await createQuestion(adminRoomId);
 
-        await prisma.room.update({
-            where: { id: adminRoomId },
-            data: { status: RoomStatus.IN_PROGRESS },
+        await prisma.game.updateMany({
+            where: { roomId: adminRoomId },
+            data: { status: GameStatus.IN_PROGRESS },
         });
 
         const response = await deleteQuestion(
@@ -250,12 +268,12 @@ describe("DELETE /questions/:id - Integração", () => {
         expect(savedQuestion).not.toBeNull();
     });
 
-    it("deve retornar 409 quando a sala estiver finalizada", async () => {
+    it("deve retornar 409 quando a sala estiver arquivada", async () => {
         const created = await createQuestion(adminRoomId);
 
         await prisma.room.update({
             where: { id: adminRoomId },
-            data: { status: RoomStatus.FINISHED },
+            data: { status: RoomStatus.ARCHIVED },
         });
 
         const response = await deleteQuestion(

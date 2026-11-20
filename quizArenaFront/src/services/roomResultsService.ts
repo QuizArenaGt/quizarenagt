@@ -97,3 +97,9 @@ export function savePlayerResult(roomId: string, result: PlayerResult): void {
 export function deleteRoomResults(roomId: string): void {
     delete memoryStore[roomId];
 }
+
+export function clearAllRoomResults(): void {
+    for (const key of Object.keys(memoryStore)) {
+        delete memoryStore[key];
+    }
+}

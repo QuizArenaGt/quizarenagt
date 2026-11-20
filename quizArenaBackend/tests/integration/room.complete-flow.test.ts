@@ -152,6 +152,7 @@ describe("Fluxo completo de sala - Integração", () => {
         const savedRoom = await prisma.room.findUnique({
             where: { id: roomId },
             include: {
+                games: true,
                 questions: {
                     include: {
                         options: true,
@@ -168,7 +169,15 @@ describe("Fluxo completo de sala - Integração", () => {
             maxPlayers: 20,
             questionTime: 60,
             gameMode: "HARDCORE",
+            status: "ACTIVE",
+        });
+
+        expect(savedRoom?.games).toHaveLength(1);
+        expect(savedRoom?.games[0]).toMatchObject({
             status: "WAITING",
+            maxPlayers: 20,
+            questionTime: 60,
+            gameMode: "HARDCORE",
         });
 
         expect(savedRoom?.questions).toHaveLength(1);

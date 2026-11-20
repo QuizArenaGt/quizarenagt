@@ -1,7 +1,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
-import type { RoomPlayer } from "@prisma/client";
+import type { AuthenticatedGamePlayer } from "../../src/types/express.js";
 
 import { RoundAnswerController } from "../../src/round-answers/round-answer.controller.js";
 import {
@@ -23,7 +23,7 @@ describe("RoundAnswerController", () => {
     let controller: RoundAnswerController;
 
     type AuthenticatedRequest = Request & {
-        roomPlayer?: RoomPlayer;
+        roomPlayer?: AuthenticatedGamePlayer;
     };
 
     let req: Partial<AuthenticatedRequest>;
@@ -35,13 +35,14 @@ describe("RoundAnswerController", () => {
 
     const roomPlayer = {
         id: "11111111-1111-4111-8111-111111111111",
+        gameId: "66666666-6666-4666-8666-666666666666",
         roomId: "22222222-2222-4222-8222-222222222222",
-    } as RoomPlayer;
+    } as AuthenticatedGamePlayer;
 
     const answerFixture = {
         id: "55555555-5555-4555-8555-555555555555",
         roundId: "33333333-3333-4333-8333-333333333333",
-        roomPlayerId: roomPlayer.id,
+        gamePlayerId: roomPlayer.id,
         optionId: "44444444-4444-4444-8444-444444444444",
         answeredAt: new Date("2026-11-16T19:00:00.000Z"),
         isCorrect: true,

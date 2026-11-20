@@ -23,7 +23,7 @@ export type SubmitRoundAnswerResult =
 export class RoundAnswerRepository {
     async submitAnswer(
         roundId: string,
-        roomPlayerId: string,
+        gamePlayerId: string,
         optionId: string,
     ): Promise<SubmitRoundAnswerResult> {
         return prisma.$transaction(async (tx) => {
@@ -40,7 +40,12 @@ export class RoundAnswerRepository {
                 include: {
                     game: {
                         include: {
-                            room: true,
+                            room: {
+                                select: {
+                                    id: true,
+                                    status: true,
+                                },
+                            },
                         },
                     },
                     snapshotQuestion: {
@@ -58,14 +63,14 @@ export class RoundAnswerRepository {
                 };
             }
 
-            const player = await tx.roomPlayer.findUnique({
-                where: { id: roomPlayerId },
+            const player = await tx.gamePlayer.findUnique({
+                where: { id: gamePlayerId },
                 select: {
-                    roomId: true,
+                    gameId: true,
                 },
             });
 
-            if (!player || player.roomId !== round.game.roomId) {
+            if (!player || player.gameId !== round.gameId) {
                 return {
                     success: false,
                     reason: "PLAYER_NOT_IN_ROOM",
@@ -81,7 +86,8 @@ export class RoundAnswerRepository {
 
             if (
                 round.game.finishedAt !== null ||
-                round.game.room.status !== "IN_PROGRESS"
+                round.game.status !== "IN_PROGRESS" ||
+                round.game.room.status !== "ACTIVE"
             ) {
                 return {
                     success: false,
@@ -102,9 +108,9 @@ export class RoundAnswerRepository {
 
             const existingAnswer = await tx.roundAnswer.findUnique({
                 where: {
-                    roundId_roomPlayerId: {
+                    roundId_gamePlayerId: {
                         roundId,
-                        roomPlayerId,
+                        gamePlayerId,
                     },
                 },
             });
@@ -116,21 +122,32 @@ export class RoundAnswerRepository {
                 };
             }
 
-            const answeredAt = new Date();
-            const totalTimeMs = round.timeLimit * 1000;
-            const elapsedTimeMs =
-                answeredAt.getTime() - round.openedAt.getTime();
+            const nowRows = await tx.$queryRaw<{ now: Date }[]>`
+                SELECT NOW() AS now
+            `;
+            const answeredAt =
+                Array.isArray(nowRows) && nowRows[0]?.now instanceof Date
+                    ? nowRows[0].now
+                    : new Date();
 
-            if (elapsedTimeMs >= totalTimeMs) {
+            const expiresAt =
+                round.expiresAt ??
+                new Date(round.openedAt.getTime() + round.timeLimit * 1000);
+
+            if (answeredAt.getTime() >= expiresAt.getTime()) {
                 return {
                     success: false,
                     reason: "ROUND_TIME_EXPIRED",
                 };
             }
 
+            const totalTimeMs = Math.max(
+                1,
+                expiresAt.getTime() - round.openedAt.getTime(),
+            );
             const remainingTimeMs = Math.max(
                 0,
-                totalTimeMs - elapsedTimeMs,
+                expiresAt.getTime() - answeredAt.getTime(),
             );
 
             const speedBonus = Math.round(
@@ -139,14 +156,14 @@ export class RoundAnswerRepository {
 
             const points = option.isCorrect
                 ? 100 + speedBonus
-                : round.game.room.gameMode === "HARDCORE"
+                : round.game.gameMode === "HARDCORE"
                     ? -30
                     : 0;
 
             const answer = await tx.roundAnswer.create({
                 data: {
                     roundId,
-                    roomPlayerId,
+                    gamePlayerId,
                     optionId,
                     isCorrect: option.isCorrect,
                     answeredAt,
@@ -154,8 +171,8 @@ export class RoundAnswerRepository {
                 },
             });
 
-            await tx.roomPlayer.update({
-                where: { id: roomPlayerId },
+            await tx.gamePlayer.update({
+                where: { id: gamePlayerId },
                 data: {
                     score: {
                         increment: points,

@@ -1,7 +1,9 @@
-
 import type { Request, Response } from "express";
 
-import { RoundService } from "./round.service.js";
+import {
+    RoundService,
+    buildRoundStartedPayload,
+} from "./round.service.js";
 
 import {
     RoundRoomNotFoundError,
@@ -56,34 +58,11 @@ export class RoundController {
                 return;
             }
 
-            const { round } = result;
-
-            const roundPayload = {
-                finished: false,
-                round: {
-                    id: round.id,
-                    roundNumber: round.roundNumber,
-                    status: round.status,
-                    openedAt: round.openedAt,
-                    timeLimit: round.timeLimit,
-                    question: {
-                        id: round.snapshotQuestion.id,
-                        statement: round.snapshotQuestion.statement,
-                        type: round.snapshotQuestion.type,
-                        position: round.snapshotQuestion.position,
-                        options: round.snapshotQuestion.options.map((option) => ({
-                            id: option.id,
-                            text: option.text,
-                            position: option.position,
-                        })),
-                    },
-                },
-            };
+            const roundPayload = buildRoundStartedPayload(result.round);
 
             emitRoomEvent(roomId, "round:started", roundPayload);
 
             res.status(201).json(roundPayload);
-
         } catch (error: unknown) {
             if (error instanceof RoundRoomNotFoundError) {
                 res.status(404).json({
@@ -142,64 +121,7 @@ export class RoundController {
                 req.user.id,
             );
 
-            const round = result.round;
-
-            const answeredPlayerIds = new Set(
-                round.answers.map((answer) => answer.roomPlayer.id),
-            );
-
-            const ranking = [...round.game.room.players]
-                .sort((a, b) => b.score - a.score)
-                .map((player) => ({
-                    id: player.id,
-                    nickname: player.nickname,
-                    score: player.score,
-                }));
-
-            const response = {
-                round: {
-                    id: round.id,
-                    roundNumber: round.roundNumber,
-                    status: round.status,
-                    openedAt: round.openedAt,
-                    closedAt: round.closedAt,
-                    question: {
-                        id: round.snapshotQuestion.id,
-                        statement: round.snapshotQuestion.statement,
-                        options: round.snapshotQuestion.options.map((option) => ({
-                            id: option.id,
-                            text: option.text,
-                            isCorrect: option.isCorrect,
-                        })),
-                    },
-                    answers: round.answers.map((answer) => ({
-                        id: answer.id,
-                        player: {
-                            id: answer.roomPlayer.id,
-                            nickname: answer.roomPlayer.nickname,
-                        },
-                        option: {
-                            id: answer.option.id,
-                            text: answer.option.text,
-                        },
-                        isCorrect: answer.isCorrect,
-                        points: answer.points,
-                        answeredAt: answer.answeredAt,
-                    })),
-                    unansweredPlayers: round.game.room.players
-                        .filter((player) => !answeredPlayerIds.has(player.id))
-                        .map((player) => ({
-                            id: player.id,
-                            nickname: player.nickname,
-                        })),
-                    ranking,
-                },
-            };
-
-            emitRoomEvent(round.game.room.id, "round:closed", response);
-
-            res.status(200).json(response);
-            
+            res.status(200).json(result.payload);
         } catch (error: unknown) {
             if (error instanceof RoundNotFoundError) {
                 res.status(404).json({

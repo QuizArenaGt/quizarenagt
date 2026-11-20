@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+    createCleanPlayerMatchState,
     executeVerifyRoomCode,
     formatRoomAvailabilityError,
     NICKNAME_MAX_LENGTH,
@@ -13,10 +14,12 @@ import {
 } from '../models/game';
 import type { Question } from '../models/question';
 import {
+    fetchPlayerLobby,
     joinRoomWithNickname,
     submitPlayerRoundAnswer,
     verifyRoomAvailability,
 } from '../services/gameRoomService';
+import { computeRemainingSecondsFromDeadline } from '../models/room';
 import {
     createPlayerSocket,
     type LobbyPlayerDto,
@@ -64,6 +67,7 @@ export function usePlayViewModel() {
 
     const deadlineRef = useRef(0);
     const hasAnsweredRef = useRef(false);
+    const currentRoundIdRef = useRef<string | null>(null);
     const currentQuestionTypeRef = useRef<Question['type']>('MULTIPLE_CHOICE');
     const isCheckingPinRef = useRef(false);
 
@@ -148,67 +152,11 @@ export function usePlayViewModel() {
     useEffect(() => {
         if (!sessionToken || !playerId) return;
 
+        const roomCode = room?.pin ?? pin;
         const socket = createPlayerSocket(sessionToken);
+        let hasConnectedOnce = false;
 
-        socket.on('player:joined', (payload: PlayerJoinedPayload) => {
-            setLobbyPlayers((current) => {
-                const exists = current.some((p) => p.id === payload.player.id);
-                return exists
-                    ? current.map((p) => (p.id === payload.player.id ? payload.player : p))
-                    : [...current, payload.player];
-            });
-        });
-
-        socket.on('room:updated', (payload: RoomUpdatedPayload) => {
-            setCurrentTimeLimit(payload.questionTime);
-            setRoom((current) =>
-                current
-                    ? {
-                          ...current,
-                          timePerQuestion: payload.questionTime,
-                      }
-                    : current,
-            );
-        });
-
-        socket.on('round:started', (payload: RoundStartedPayload) => {
-            const { round } = payload;
-            hasAnsweredRef.current = false;
-            currentQuestionTypeRef.current = round.question.type;
-
-            const openedAtMs = new Date(round.openedAt).getTime();
-            const deadlineMs = openedAtMs + round.timeLimit * 1000;
-            deadlineRef.current = deadlineMs;
-
-            const initialRemaining = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
-
-            setCurrentRoundId(round.id);
-            setQuestionNumber(round.roundNumber);
-            setCurrentTimeLimit(round.timeLimit);
-            setRemainingSeconds(initialRemaining);
-            setSelectedOptionId(null);
-            setHasSubmittedAnswer(false);
-            setIsSubmittingAnswer(false);
-            setAnswerError(null);
-
-            // As alternativas enviadas em round:started não possuem gabarito (isCorrect)
-            setCurrentQuestion({
-                id: round.question.id,
-                statement: round.question.statement,
-                type: round.question.type,
-                isActive: true,
-                theme: 'Geral',
-                options: round.question.options.map((opt) => ({
-                    id: opt.id,
-                    text: opt.text,
-                    isCorrect: false,
-                })),
-            });
-
-            setPhase('question');
-        });
-
-        socket.on('round:closed', (payload: RoundClosedPayload) => {
+        const applyRoundClosed = (payload: RoundClosedPayload) => {
             const { round } = payload;
 
             const revealedQuestion: Question = {
@@ -263,6 +211,128 @@ export function usePlayViewModel() {
             }
             setRemainingSeconds(0);
             setPhase('feedback');
+        };
+
+        const applyRoundStarted = (round: RoundStartedPayload['round']) => {
+            const parsedExpires = round.expiresAt ? Date.parse(round.expiresAt) : Number.NaN;
+            const openedAtMs = new Date(round.openedAt).getTime();
+            const deadlineMs = !Number.isNaN(parsedExpires)
+                ? parsedExpires
+                : openedAtMs + round.timeLimit * 1000;
+            deadlineRef.current = deadlineMs;
+
+            if (currentRoundIdRef.current === round.id) {
+                setRemainingSeconds(
+                    computeRemainingSecondsFromDeadline(
+                        round.expiresAt,
+                        round.openedAt,
+                        round.timeLimit,
+                    ),
+                );
+                return;
+            }
+
+            currentRoundIdRef.current = round.id;
+            hasAnsweredRef.current = false;
+            currentQuestionTypeRef.current = round.question.type;
+
+            setCurrentRoundId(round.id);
+            setQuestionNumber(round.roundNumber);
+            setCurrentTimeLimit(round.timeLimit);
+            setRemainingSeconds(
+                computeRemainingSecondsFromDeadline(
+                    round.expiresAt,
+                    round.openedAt,
+                    round.timeLimit,
+                ),
+            );
+            setSelectedOptionId(null);
+            setHasSubmittedAnswer(false);
+            setIsSubmittingAnswer(false);
+            setAnswerError(null);
+
+            // As alternativas enviadas em round:started não possuem gabarito (isCorrect)
+            setCurrentQuestion({
+                id: round.question.id,
+                statement: round.question.statement,
+                type: round.question.type,
+                isActive: true,
+                theme: 'Geral',
+                options: round.question.options.map((opt) => ({
+                    id: opt.id,
+                    text: opt.text,
+                    isCorrect: false,
+                })),
+            });
+
+            setPhase('question');
+        };
+
+        socket.on('connect', () => {
+            if (!hasConnectedOnce) {
+                hasConnectedOnce = true;
+                return;
+            }
+
+            if (!roomCode) return;
+
+            void fetchPlayerLobby(roomCode, sessionToken)
+                .then((lobby) => {
+                    setLobbyPlayers(lobby.players);
+                    const cg = lobby.currentGame;
+                    if (!cg) return;
+
+                    if (cg.activeRound && cg.activeRound.status === 'OPEN') {
+                        applyRoundStarted({
+                            id: cg.activeRound.id,
+                            roundNumber: cg.activeRound.roundNumber,
+                            status: cg.activeRound.status,
+                            openedAt: cg.activeRound.openedAt,
+                            expiresAt: cg.activeRound.expiresAt,
+                            timeLimit: cg.activeRound.timeLimit,
+                            question: cg.activeRound.question,
+                        });
+                    } else if (cg.lastClosedRound) {
+                        applyRoundClosed({ round: cg.lastClosedRound });
+                    }
+
+                    if (cg.status === 'FINISHED') {
+                        setRemainingSeconds(0);
+                        setPhase('finished');
+                    }
+                })
+                .catch(() => {
+                    // Reconexão silenciosa: mantém estado corrente caso a partida já tenha encerrado
+                });
+        });
+
+        socket.on('player:joined', (payload: PlayerJoinedPayload) => {
+            setLobbyPlayers((current) => {
+                const exists = current.some((p) => p.id === payload.player.id);
+                return exists
+                    ? current.map((p) => (p.id === payload.player.id ? payload.player : p))
+                    : [...current, payload.player];
+            });
+        });
+
+        socket.on('room:updated', (payload: RoomUpdatedPayload) => {
+            setCurrentTimeLimit(payload.questionTime);
+            setRoom((current) =>
+                current
+                    ? {
+                          ...current,
+                          timePerQuestion: payload.questionTime,
+                      }
+                    : current,
+            );
+        });
+
+        socket.on('round:started', (payload: RoundStartedPayload) => {
+            applyRoundStarted(payload.round);
+        });
+
+        socket.on('round:closed', (payload: RoundClosedPayload) => {
+            applyRoundClosed(payload);
         });
 
         socket.on('game:finished', () => {
@@ -273,7 +343,7 @@ export function usePlayViewModel() {
         return () => {
             socket.disconnect();
         };
-    }, [sessionToken, playerId]);
+    }, [sessionToken, playerId, room?.pin, pin]);
 
     // ===== Submissão de resposta ao Servidor (POST /rounds/:id/answer) =====
 
@@ -328,23 +398,36 @@ export function usePlayViewModel() {
         return () => window.clearInterval(intervalId);
     }, [phase, currentRoundId]);
 
-    function resetToJoin() {
-        setSessionToken(null);
-        setPlayerId(null);
-        setRoom(null);
-        setLobbyPlayers([]);
-        setPlayedQuestions([]);
-        setAnswers([]);
-        setServerRanking([]);
-        setServerTotalScore(0);
-        setPinState('');
-        setError(null);
-        setPhase('join');
-    }
+    const resetToJoin = useCallback(() => {
+        const clean = createCleanPlayerMatchState();
+        deadlineRef.current = 0;
+        hasAnsweredRef.current = false;
+        currentRoundIdRef.current = null;
+        setSessionToken(clean.sessionToken);
+        setPlayerId(clean.playerId);
+        setNickname(clean.nickname);
+        setRoom(clean.room);
+        setLobbyPlayers(clean.lobbyPlayers);
+        setCurrentRoundId(clean.currentRoundId);
+        setCurrentQuestion(clean.currentQuestion);
+        setQuestionNumber(clean.questionNumber);
+        setSelectedOptionId(clean.selectedOptionId);
+        setHasSubmittedAnswer(clean.hasSubmittedAnswer);
+        setIsSubmittingAnswer(clean.isSubmittingAnswer);
+        setAnswerError(clean.answerError);
+        setPlayedQuestions(clean.playedQuestions);
+        setAnswers(clean.answers);
+        setServerRanking(clean.serverRanking);
+        setServerTotalScore(clean.serverTotalScore);
+        setPinState(clean.pin);
+        setError(clean.error);
+        setPhase(clean.phase);
+    }, []);
 
-    function leaveRoom() {
+    const leaveRoom = useCallback(() => {
+        resetToJoin();
         navigate('/');
-    }
+    }, [navigate, resetToJoin]);
 
     return {
         phase,

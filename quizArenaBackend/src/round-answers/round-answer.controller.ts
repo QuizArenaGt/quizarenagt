@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { RoundAnswerService } from "./round-answer.service.js";
 import { validateSubmitRoundAnswer } from "./submit-round-answer.dto.js";
 import { emitRoomEvent } from "../realtime/room-events.js";
+import { RoundService } from "../rounds/round.service.js";
 
 import {
     RoundAnswerAlreadySubmittedError,
@@ -14,9 +15,13 @@ import {
     RoundAnswerTimeExpiredError,
 } from "./round-answer.errors.js";
 
+type RoundAutoCloseContract = Pick<RoundService, "tryCloseRoundIfReady">;
+
 export class RoundAnswerController {
     constructor(
         private readonly roundAnswerService = new RoundAnswerService(),
+        private readonly roundService: RoundAutoCloseContract =
+            new RoundService(),
     ) { }
 
     async submit(req: Request, res: Response): Promise<void> {
@@ -59,7 +64,17 @@ export class RoundAnswerController {
                     id: req.roomPlayer.id,
                     nickname: req.roomPlayer.nickname,
                 },
-            }); 
+            });
+
+            // Encerra antecipadamente de forma centralizada se todos os jogadores elegíveis responderam.
+            try {
+                await this.roundService.tryCloseRoundIfReady(roundId);
+            } catch (closeError: unknown) {
+                console.error(
+                    "Falha não crítica ao verificar encerramento antecipado da rodada:",
+                    closeError,
+                );
+            }
 
             res.status(201).json({
                 answer: {

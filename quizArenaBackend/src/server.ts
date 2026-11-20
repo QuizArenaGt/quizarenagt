@@ -13,10 +13,12 @@ async function start(): Promise<void> {
         { app },
         { prisma },
         { createSocketServer },
+        { RoundExpirationWorker },
     ] = await Promise.all([
         import("./app.js"),
         import("./database/prisma.js"),
         import("./realtime/socket.server.js"),
+        import("./rounds/round-expiration.worker.js"),
     ]);
 
     const port = Number(process.env.PORT ?? 3000);
@@ -29,13 +31,17 @@ async function start(): Promise<void> {
 
         const httpServer = createServer(app);
         const io = createSocketServer(httpServer);
+        const roundExpirationWorker = new RoundExpirationWorker();
 
         httpServer.listen(port, () => {
             console.log(`Servidor rodando em: http://localhost:${port}`);
             console.log("Socket.IO inicializado com sucesso!");
+            roundExpirationWorker.start();
+            console.log("Worker de expiração de rodadas iniciado com sucesso!");
         });
 
         const shutdown = async () => {
+            await roundExpirationWorker.stop();
             io.close(async () => {
                 await prisma.$disconnect();
                 process.exit(0);

@@ -18,7 +18,7 @@ describe("RoundAnswerService", () => {
     const answer = {
         id: "answer-id",
         roundId: "round-id",
-        roomPlayerId: "player-id",
+        gamePlayerId: "player-id",
         optionId: "option-id",
         answeredAt: new Date("2026-11-16T19:00:00.000Z"),
         isCorrect: true,

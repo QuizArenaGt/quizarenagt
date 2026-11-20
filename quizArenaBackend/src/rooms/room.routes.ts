@@ -14,11 +14,35 @@ roomRoutes.post(
     },
 );
 
+roomRoutes.get(
+    "/",
+    authenticateToken,
+    (req, res) => {
+        void roomController.listByHost(req, res);
+    },
+);
+
 roomRoutes.post(
     "/",
     authenticateToken,
     (req, res) => {
         void roomController.create(req, res);
+    },
+);
+
+roomRoutes.get(
+    "/:id/games/:gameId/results",
+    authenticateToken,
+    (req, res) => {
+        void roomController.getGameResults(req, res);
+    },
+);
+
+roomRoutes.get(
+    "/:id/games",
+    authenticateToken,
+    (req, res) => {
+        void roomController.listGames(req, res);
     },
 );
 
@@ -46,6 +70,10 @@ roomRoutes.patch(
 
 roomRoutes.post("/:id/start", authenticateToken, (req, res) => {
     void roomController.start(req, res);
+});
+
+roomRoutes.post("/:id/play-again", authenticateToken, (req, res) => {
+    void roomController.playAgain(req, res);
 });
 
 export { roomRoutes };

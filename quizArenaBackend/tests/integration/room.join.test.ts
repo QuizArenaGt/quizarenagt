@@ -95,14 +95,14 @@ describe("POST /rooms/join - Integração", () => {
 
         expect(response.body.player.sessionTokenHash).toBeUndefined();
 
-        const player = await prisma.roomPlayer.findUnique({
+        const player = await prisma.gamePlayer.findUnique({
             where: {
                 id: response.body.player.id,
             },
         });
 
         expect(player).not.toBeNull();
-        expect(player?.roomId).toBe(room.id);
+        expect(player?.gameId).toBe(room.currentGame.id);
         expect(player?.nickname).toBe("Jogador 1");
         expect(player?.sessionTokenHash).toBeDefined();
         expect(player?.sessionTokenHash).not.toBe(response.body.sessionToken);
@@ -131,8 +131,8 @@ describe("POST /rooms/join - Integração", () => {
         expect(secondResponse.status).toBe(409);
         expect(secondResponse.body).toHaveProperty("message");
 
-        const players = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const players = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
         });
 
         expect(players).toHaveLength(1);
@@ -158,8 +158,8 @@ describe("POST /rooms/join - Integração", () => {
     it("não deve permitir entrada em uma sala que já iniciou", async () => {
         const { room } = await createRoom();
 
-        await prisma.room.update({
-            where: { id: room.id },
+        await prisma.game.updateMany({
+            where: { roomId: room.id },
             data: { status: "IN_PROGRESS" },
         });
 
@@ -176,8 +176,8 @@ describe("POST /rooms/join - Integração", () => {
             "Esta sala não está aceitando novos jogadores.",
         );
 
-        const players = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const players = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
         });
 
         expect(players).toHaveLength(0);
@@ -218,8 +218,8 @@ describe("POST /rooms/join - Integração", () => {
             "Esta sala atingiu o limite de jogadores.",
         );
 
-        const players = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const players = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
         });
 
         expect(players).toHaveLength(2);
@@ -250,8 +250,8 @@ describe("POST /rooms/join - Integração", () => {
         expect(successfulResponses).toHaveLength(2);
         expect(rejectedResponses).toHaveLength(6);
 
-        const players = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const players = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
         });
 
         expect(players).toHaveLength(2);
@@ -272,8 +272,8 @@ describe("POST /rooms/join - Integração", () => {
         expect(response.body).toHaveProperty("message", "Dados inválidos.");
         expect(response.body.errors).toHaveProperty("code");
 
-        const players = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const players = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
         });
 
         expect(players).toHaveLength(0);
@@ -302,8 +302,8 @@ describe("POST /rooms/join - Integração", () => {
         expect(response.body).toHaveProperty("message", "Dados inválidos.");
         expect(response.body.errors).toHaveProperty("nickname");
 
-        const players = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const players = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
         });
 
         expect(players).toHaveLength(0);

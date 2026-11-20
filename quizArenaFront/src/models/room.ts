@@ -1,5 +1,13 @@
 import { PIN_LENGTH, normalizeRoomCode, validateRoomCode } from './game.ts';
-import type { BackendRoomStatus, GameMode, LobbyPlayerDto } from '../services/socket.ts';
+import type {
+    BackendRoomStatus,
+    GameCreatedPayload,
+    GameMode,
+    LobbyPlayerDto,
+    RoundClosedPayload,
+    RoundStartedPayload,
+} from '../services/socket.ts';
+import type { ApiGameSummary } from '../services/roomStorageService.ts';
 
 export type RoomStatus = 'Aguardando' | 'Em Andamento' | 'Finalizado';
 
@@ -13,6 +21,8 @@ export interface Room {
     gameMode: GameMode;
     status: RoomStatus;
     backendStatus: BackendRoomStatus;
+    /** ID da partida atual associada à sala (currentGame.id no backend). */
+    currentGameId?: string | null;
     /** Código alfanumérico de 6 caracteres gerado pelo backend. */
     code: string;
     /** IDs das perguntas vinculadas à sala. */
@@ -58,6 +68,14 @@ export function getClipboardRoomCode(code: string): string {
 /** Alunos só podem entrar em salas que ainda estão aguardando início. */
 export function isRoomOpen(room: Room): boolean {
     return room.backendStatus === 'WAITING' && room.status === 'Aguardando';
+}
+
+/** Exibe ação de "Jogar novamente" quando a partida da sala foi encerrada. */
+export function canPlayAgain(room: Room | null): boolean {
+    return (
+        room !== null &&
+        (room.backendStatus === 'FINISHED' || room.backendStatus === 'CANCELLED')
+    );
 }
 
 export interface CreateRoomFormInput {
@@ -237,4 +255,499 @@ export async function executeSubmitRoom<TApiRoom>(
         deps.lockRef.current = false;
         deps.onSubmittingChange?.(false);
     }
+}
+
+/**
+ * Remove duplicidades de salas pelo `id`, mantendo a primeira ocorrência na ordem recebida.
+ */
+export function deduplicateRoomsById(rooms: Room[]): Room[] {
+    const seen = new Set<string>();
+    const unique: Room[] = [];
+
+    for (const room of rooms) {
+        if (!room.id || seen.has(room.id)) continue;
+        seen.add(room.id);
+        unique.push(room);
+    }
+
+    return unique;
+}
+
+/**
+ * Insere ou atualiza uma sala na lista existente sem gerar duplicação por `id`.
+ */
+export function upsertRoomInList(currentRooms: Room[], targetRoom: Room): Room[] {
+    const exists = currentRooms.some((r) => r.id === targetRoom.id);
+    const updated = exists
+        ? currentRooms.map((r) => (r.id === targetRoom.id ? targetRoom : r))
+        : [targetRoom, ...currentRooms];
+    return deduplicateRoomsById(updated);
+}
+
+/**
+ * Resolve qual sala deve ser selecionada a partir do parâmetro `?sala=XXXXXX`:
+ * - Se não houver código na URL, retorna `selectedRoomId: null` (não abre partida automaticamente).
+ * - Se houver código na URL, seleciona a sala SOMENTE se ela pertencer à lista do host autenticado.
+ * - Se o código na URL não pertencer ao host autenticado, rejeita a seleção e sinaliza limpeza da URL.
+ */
+export function resolveSelectedRoomIdFromHostRooms(
+    hostRooms: Room[],
+    requestedUrlCode: string | null | undefined,
+): {
+    selectedRoomId: string | null;
+    matchedRoom: Room | null;
+    shouldClearUrlParam: boolean;
+} {
+    const rawCode = requestedUrlCode ?? '';
+    const cleanCode = normalizeRoomCode(rawCode);
+
+    if (!cleanCode) {
+        return {
+            selectedRoomId: null,
+            matchedRoom: null,
+            shouldClearUrlParam: false,
+        };
+    }
+
+    if (validateRoomCode(cleanCode) !== null) {
+        return {
+            selectedRoomId: null,
+            matchedRoom: null,
+            shouldClearUrlParam: true,
+        };
+    }
+
+    const matchedRoom =
+        hostRooms.find((room) => normalizeRoomCode(room.code) === cleanCode) ?? null;
+
+    if (!matchedRoom) {
+        return {
+            selectedRoomId: null,
+            matchedRoom: null,
+            shouldClearUrlParam: true,
+        };
+    }
+
+    return {
+        selectedRoomId: matchedRoom.id,
+        matchedRoom,
+        shouldClearUrlParam: false,
+    };
+}
+
+export function formatHostRoomsLoadError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 401 || error.status === 403) {
+            return 'Sua sessão expirou. Faça login novamente para acessar suas salas.';
+        }
+        if (error.status >= 500) {
+            return 'Não foi possível carregar suas salas devido a uma falha no servidor. Tente novamente.';
+        }
+        if (error.message?.trim()) {
+            return error.message.trim();
+        }
+    }
+
+    if (error instanceof Error) {
+        const msg = error.message.trim();
+        const lower = msg.toLowerCase();
+        if (
+            lower.includes('conectar ao servidor') ||
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
+        }
+    }
+
+    return 'Não foi possível carregar suas salas. Tente novamente.';
+}
+
+export interface HostSessionTracker {
+    activeSessionKey: string | null;
+    requestSeq: number;
+}
+
+export interface ExecuteLoadHostRoomsParams<
+    TApiRoom extends { id: string; code: string; hostId?: string },
+> {
+    sessionKey: string | null;
+    expectedHostId?: string | null;
+    requestedUrlCode?: string | null;
+    trackerRef: { current: HostSessionTracker };
+    existingRooms?: Room[];
+    fetchHostRooms: () => Promise<TApiRoom[]>;
+    mapRoom: (apiRoom: TApiRoom, existing?: Room) => Room;
+    onResetSessionState: () => void;
+    onLoadingChange?: (loading: boolean) => void;
+    onError: (error: string | null) => void;
+    onSuccess: (result: {
+        rooms: Room[];
+        selectedRoomId: string | null;
+        shouldClearUrlParam: boolean;
+    }) => void;
+}
+
+/**
+ * Carrega as salas persistidas do host autenticado com isolamento estrito entre sessões,
+ * descarte de respostas assíncronas atrasadas de sessões anteriores, deduplicação por `id`
+ * e resolução segura do parâmetro `?sala=XXXXXX`.
+ */
+export async function executeLoadHostRooms<
+    TApiRoom extends { id: string; code: string; hostId?: string },
+>({
+    sessionKey,
+    expectedHostId,
+    requestedUrlCode,
+    trackerRef,
+    existingRooms = [],
+    fetchHostRooms,
+    mapRoom,
+    onResetSessionState,
+    onLoadingChange,
+    onError,
+    onSuccess,
+}: ExecuteLoadHostRoomsParams<TApiRoom>): Promise<Room[] | null> {
+    const normalizedSessionKey = sessionKey?.trim() || null;
+    const sessionChanged = trackerRef.current.activeSessionKey !== normalizedSessionKey;
+
+    if (sessionChanged) {
+        trackerRef.current.activeSessionKey = normalizedSessionKey;
+        trackerRef.current.requestSeq += 1;
+        onResetSessionState();
+    }
+
+    if (!normalizedSessionKey) {
+        onLoadingChange?.(false);
+        return null;
+    }
+
+    trackerRef.current.requestSeq += 1;
+    const requestId = trackerRef.current.requestSeq;
+    const requestSessionKey = normalizedSessionKey;
+    const safeExistingRooms = sessionChanged ? [] : existingRooms;
+
+    onLoadingChange?.(true);
+    onError(null);
+
+    try {
+        const apiRooms = await fetchHostRooms();
+
+        // Ignora resposta atrasada caso o usuário tenha trocado de sessão ou disparado nova consulta
+        if (
+            trackerRef.current.requestSeq !== requestId ||
+            trackerRef.current.activeSessionKey !== requestSessionKey
+        ) {
+            return null;
+        }
+
+        const ownedApiRooms = expectedHostId
+            ? apiRooms.filter((room) => !room.hostId || room.hostId === expectedHostId)
+            : apiRooms;
+
+        const existingById = new Map<string, Room>();
+        for (const existing of safeExistingRooms) {
+            existingById.set(existing.id, existing);
+        }
+
+        const mappedRooms = deduplicateRoomsById(
+            ownedApiRooms.map((apiRoom) => mapRoom(apiRoom, existingById.get(apiRoom.id))),
+        );
+
+        const { selectedRoomId, shouldClearUrlParam } = resolveSelectedRoomIdFromHostRooms(
+            mappedRooms,
+            requestedUrlCode,
+        );
+
+        onSuccess({
+            rooms: mappedRooms,
+            selectedRoomId,
+            shouldClearUrlParam,
+        });
+
+        return mappedRooms;
+    } catch (error) {
+        if (
+            trackerRef.current.requestSeq !== requestId ||
+            trackerRef.current.activeSessionKey !== requestSessionKey
+        ) {
+            return null;
+        }
+
+        onError(formatHostRoomsLoadError(error));
+        return null;
+    } finally {
+        if (
+            trackerRef.current.requestSeq === requestId &&
+            trackerRef.current.activeSessionKey === requestSessionKey
+        ) {
+            onLoadingChange?.(false);
+        }
+    }
+}
+
+/**
+ * Formata timestamps nullable (`startedAt`, `finishedAt`, `archivedAt`) com segurança,
+ * evitando que `null` ou strings inválidas sejam convertidas para `1969/1970`.
+ */
+export function formatNullableDateTime(
+    value: string | Date | null | undefined,
+    fallback = 'Não registrado',
+    locale = 'pt-BR',
+): string {
+    if (value === null || value === undefined || value === '') {
+        return fallback;
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return fallback;
+    }
+
+    return parsed.toLocaleString(locale, {
+        dateStyle: 'short',
+        timeStyle: 'short',
+    });
+}
+
+/**
+ * Formata erros HTTP/rede ao iniciar uma nova partida (`POST /rooms/:id/play-again`).
+ */
+export function formatPlayAgainError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 401) {
+            return 'Sua sessão expirou. Faça login novamente para iniciar outra partida.';
+        }
+
+        if (error.status === 403) {
+            return 'Você não tem permissão para iniciar outra partida nesta sala.';
+        }
+
+        if (error.status === 404) {
+            return 'Sala não encontrada.';
+        }
+
+        if (error.status === 409) {
+            return (
+                error.message?.trim() ||
+                'Não foi possível criar nova partida porque já existe uma partida ativa ou a sala foi arquivada.'
+            );
+        }
+
+        if (error.status >= 500) {
+            return 'Não foi possível preparar uma nova partida devido a uma falha no servidor. Tente novamente em instantes.';
+        }
+
+        if (error.message?.trim()) {
+            return error.message.trim();
+        }
+    }
+
+    if (error instanceof Error) {
+        const msg = error.message.trim();
+        const lower = msg.toLowerCase();
+        if (
+            lower.includes('conectar ao servidor') ||
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror') ||
+            lower.includes('network request failed') ||
+            lower.includes('load failed')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
+        }
+        if (msg) {
+            return msg;
+        }
+    }
+
+    return 'Não foi possível preparar uma nova partida. Tente novamente.';
+}
+
+export interface ExecutePlayAgainDependencies<TApiRoom> {
+    room: Room | null;
+    lockRef: { current: boolean };
+    requestPlayAgain: (roomId: string) => Promise<TApiRoom>;
+    mapRoom: (apiRoom: TApiRoom, existing: Room) => Room;
+    onLoadingChange?: (loading: boolean) => void;
+    onError: (message: string | null) => void;
+    onSuccess: (updatedRoom: Room) => void;
+}
+
+/**
+ * Executa a criação de uma nova partida na mesma sala (`POST /rooms/:id/play-again`)
+ * com proteção contra cliques duplicados e atualização sem duplicar a sala.
+ */
+export async function executePlayAgain<TApiRoom>({
+    room,
+    lockRef,
+    requestPlayAgain,
+    mapRoom,
+    onLoadingChange,
+    onError,
+    onSuccess,
+}: ExecutePlayAgainDependencies<TApiRoom>): Promise<Room | null> {
+    if (!room || lockRef.current) {
+        return null;
+    }
+
+    lockRef.current = true;
+    onLoadingChange?.(true);
+    onError(null);
+
+    try {
+        const apiRoom = await requestPlayAgain(room.id);
+        const mappedRoom = mapRoom(apiRoom, room);
+        onSuccess(mappedRoom);
+        return mappedRoom;
+    } catch (error) {
+        onError(formatPlayAgainError(error));
+        return null;
+    } finally {
+        lockRef.current = false;
+        onLoadingChange?.(false);
+    }
+}
+
+/**
+ * Aplica o evento `game:created` de forma idempotente:
+ * se a sala já estiver apontando para o mesmo `currentGameId`, evita apagar jogadores
+ * recém-entrados antes da entrega do evento WebSocket.
+ */
+export function applyGameCreatedToRooms(
+    rooms: Room[],
+    payload: GameCreatedPayload,
+): { rooms: Room[]; didResetLiveGame: boolean } {
+    const target = rooms.find((r) => r.id === payload.roomId);
+    if (!target) {
+        return { rooms, didResetLiveGame: false };
+    }
+
+    const incomingGameId = payload.currentGame?.id ?? null;
+    const isSameNewWaitingGame =
+        incomingGameId !== null &&
+        target.currentGameId === incomingGameId &&
+        target.backendStatus === 'WAITING';
+
+    if (isSameNewWaitingGame) {
+        return { rooms, didResetLiveGame: false };
+    }
+
+    const updatedRooms = rooms.map((room) =>
+        room.id === payload.roomId
+            ? {
+                  ...room,
+                  backendStatus: payload.status,
+                  status: mapBackendRoomStatus(payload.status),
+                  maxPlayers: payload.maxPlayers,
+                  timeLimit: payload.questionTime,
+                  gameMode: payload.gameMode,
+                  ...(incomingGameId !== null ? { currentGameId: incomingGameId } : {}),
+                  players: [],
+              }
+            : room,
+    );
+
+    return { rooms: deduplicateRoomsById(updatedRooms), didResetLiveGame: true };
+}
+
+/**
+ * Calcula quantos segundos restam usando o prazo autoritativo `expiresAt`
+ * enviado pelo backend (com fallback apenas defensivo para `openedAt + timeLimit`).
+ */
+export function computeRemainingSecondsFromDeadline(
+    expiresAt: string | number | null | undefined,
+    openedAt?: string | number | null,
+    timeLimitSeconds = 0,
+    nowMs = Date.now(),
+): number {
+    let deadlineMs = Number.NaN;
+
+    if (typeof expiresAt === 'number') {
+        deadlineMs = expiresAt;
+    } else if (typeof expiresAt === 'string' && expiresAt.trim()) {
+        deadlineMs = Date.parse(expiresAt);
+    }
+
+    if (Number.isNaN(deadlineMs)) {
+        const openedMs =
+            typeof openedAt === 'number'
+                ? openedAt
+                : typeof openedAt === 'string' && openedAt.trim()
+                  ? Date.parse(openedAt)
+                  : Number.NaN;
+
+        if (!Number.isNaN(openedMs) && timeLimitSeconds > 0) {
+            deadlineMs = openedMs + timeLimitSeconds * 1000;
+        }
+    }
+
+    if (Number.isNaN(deadlineMs)) {
+        return 0;
+    }
+
+    return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+}
+
+export interface RecoveredHostMatchState {
+    activeRound: RoundStartedPayload['round'] | null;
+    closedRound: RoundClosedPayload['round'] | null;
+    answeredPlayers: { id: string; nickname: string }[];
+    remainingSeconds: number;
+}
+
+/**
+ * Extrai o estado completo da rodada em andamento ou última rodada fechada
+ * a partir do payload `currentGame` retornado pela API ao recarregar (`F5`) ou reconectar.
+ */
+export function extractHostMatchRecoveryState(
+    currentGame: ApiGameSummary | null | undefined,
+    nowMs = Date.now(),
+): RecoveredHostMatchState {
+    if (!currentGame) {
+        return {
+            activeRound: null,
+            closedRound: null,
+            answeredPlayers: [],
+            remainingSeconds: 0,
+        };
+    }
+
+    if (currentGame.activeRound && currentGame.activeRound.status === 'OPEN') {
+        const round = currentGame.activeRound;
+        return {
+            activeRound: {
+                id: round.id,
+                roundNumber: round.roundNumber,
+                status: round.status,
+                openedAt: round.openedAt,
+                expiresAt: round.expiresAt,
+                timeLimit: round.timeLimit,
+                question: round.question,
+            },
+            closedRound: null,
+            answeredPlayers: round.answeredPlayers ?? [],
+            remainingSeconds: computeRemainingSecondsFromDeadline(
+                round.expiresAt,
+                round.openedAt,
+                round.timeLimit,
+                nowMs,
+            ),
+        };
+    }
+
+    if (currentGame.status === 'IN_PROGRESS' && currentGame.lastClosedRound) {
+        return {
+            activeRound: null,
+            closedRound: currentGame.lastClosedRound,
+            answeredPlayers: [],
+            remainingSeconds: 0,
+        };
+    }
+
+    return {
+        activeRound: null,
+        closedRound: null,
+        answeredPlayers: [],
+        remainingSeconds: 0,
+    };
 }

@@ -2,6 +2,10 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Nota Prisma 6: índices parciais ("games_one_active_per_room_key", "rounds_one_open_per_game_key")
+// e triggers SQL de imutabilidade/integridade residem nas migrations SQL e devem ser preservados
+// manualmente usando `npx prisma migrate dev --create-only` antes de aplicar novas migrations.
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -21,7 +25,7 @@ model User {
   role               Role         @default(USER)
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
-  roomParticipations RoomPlayer[]
+  gameParticipations GamePlayer[]
 
   hostedRooms Room[]
 
@@ -66,6 +70,11 @@ enum GameMode {
 }
 
 enum RoomStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum GameStatus {
   WAITING
   IN_PROGRESS
   FINISHED
@@ -78,49 +87,52 @@ enum RoundStatus {
 }
 
 model Room {
-  id               String                @id @default(uuid())
-  code             String                @unique
-  hostId           String
-  maxPlayers       Int
-  questionTime     Int
-  gameMode         GameMode              @default(CLASSIC)
-  status           RoomStatus            @default(WAITING)
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  players          RoomPlayer[]
-  questions        Question[]
-  questionSnapshot RoomQuestionSnapshot?
-  game             Game?
+  id           String       @id @default(uuid())
+  code         String       @unique
+  name         String?
+  theme        String?
+  hostId       String
+  maxPlayers   Int
+  questionTime Int
+  gameMode     GameMode     @default(CLASSIC)
+  status       RoomStatus   @default(ACTIVE)
+  archivedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  questions    Question[]
+  games        Game[]
 
   host User @relation(fields: [hostId], references: [id], onDelete: Restrict)
 
+  @@index([hostId, status, createdAt(sort: Desc)])
   @@map("rooms")
 }
 
-model RoomPlayer {
-  id               String   @id @default(uuid())
-  roomId           String
+model GamePlayer {
+  id               String        @id @default(uuid())
+  gameId           String
   userId           String?
   nickname         String
-  score            Int      @default(0)
-  joinedAt         DateTime @default(now())
-  sessionTokenHash String?  @unique
+  score            Int           @default(0)
+  joinedAt         DateTime      @default(now())
+  sessionTokenHash String?       @unique
 
-  room    Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  game    Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
   user    User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   answers RoundAnswer[]
 
-  @@unique([roomId, nickname])
-  @@unique([roomId, userId])
-  @@map("room_players")
+  @@unique([gameId, nickname])
+  @@unique([gameId, userId])
+  @@index([gameId, joinedAt(sort: Asc)])
+  @@map("game_players")
 }
 
 model RoomQuestionSnapshot {
   id        String   @id @default(uuid())
-  roomId    String   @unique
+  gameId    String   @unique
   createdAt DateTime @default(now())
 
-  room      Room                           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  game      Game                           @relation(fields: [gameId], references: [id], onDelete: Cascade)
   questions RoomQuestionSnapshotQuestion[]
 
   @@map("room_question_snapshots")
@@ -158,15 +170,24 @@ model RoomQuestionSnapshotOption {
 }
 
 model Game {
-  id         String    @id @default(uuid())
-  roomId     String    @unique
-  startedAt  DateTime  @default(now())
-  finishedAt DateTime?
-  createdAt  DateTime  @default(now())
+  id               String                @id @default(uuid())
+  roomId           String
+  status           GameStatus            @default(WAITING)
+  maxPlayers       Int
+  questionTime     Int
+  gameMode         GameMode              @default(CLASSIC)
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 
-  room   Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  rounds Round[]
+  room             Room                  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  players          GamePlayer[]
+  questionSnapshot RoomQuestionSnapshot?
+  rounds           Round[]
 
+  @@index([roomId, createdAt(sort: Desc)])
+  @@index([roomId, status])
   @@map("games")
 }
 
@@ -177,6 +198,7 @@ model Round {
   roundNumber        Int
   status             RoundStatus @default(OPEN)
   openedAt           DateTime    @default(now())
+  expiresAt          DateTime
   closedAt           DateTime?
   timeLimit          Int
 
@@ -186,22 +208,23 @@ model Round {
 
   @@unique([gameId, roundNumber])
   @@unique([gameId, snapshotQuestionId])
+  // Índice parcial criado via migration SQL: rounds_open_expiresAt_idx em ("expiresAt") WHERE status = 'OPEN'
   @@map("rounds")
 }
 
 model RoundAnswer {
   id           String   @id @default(uuid())
   roundId      String
-  roomPlayerId String
+  gamePlayerId String
   optionId     String
   answeredAt   DateTime @default(now())
   isCorrect    Boolean
   points       Int      @default(0)
 
   round      Round                      @relation(fields: [roundId], references: [id], onDelete: Cascade)
-  roomPlayer RoomPlayer                 @relation(fields: [roomPlayerId], references: [id], onDelete: Cascade)
+  gamePlayer GamePlayer                 @relation(fields: [gamePlayerId], references: [id], onDelete: Cascade)
   option     RoomQuestionSnapshotOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
 
-  @@unique([roundId, roomPlayerId])
+  @@unique([roundId, gamePlayerId])
   @@map("round_answers")
 }

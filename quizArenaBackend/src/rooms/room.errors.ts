@@ -33,6 +33,20 @@ export class RoomNotEditableError extends Error {
     }
 }
 
+export class RoomReplayNotAllowedError extends Error {
+    constructor(message = "Já existe uma partida ativa para esta sala.") {
+        super(message);
+        this.name = "RoomReplayNotAllowedError";
+    }
+}
+
+export class RoomGameNotFoundError extends Error {
+    constructor(message = "Partida não encontrada para esta sala.") {
+        super(message);
+        this.name = "RoomGameNotFoundError";
+    }
+}
+
 export class RoomNotJoinableError extends Error {
     constructor(message = "Esta sala não está aceitando novos jogadores.") {
         super(message);

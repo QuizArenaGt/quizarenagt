@@ -1,8 +1,9 @@
 
 import type {
     Room,
+    Game,
     GameMode,
-    RoomStatus,
+    GameStatus,
     QuestionType,
 } from "@prisma/client";
 
@@ -19,6 +20,8 @@ type CreateRoomQuestionData = {
 
 type CreateRoomData = {
     code: string;
+    name?: string | null;
+    theme?: string | null;
     hostId: string;
     maxPlayers: number;
     questionTime: number;
@@ -27,6 +30,8 @@ type CreateRoomData = {
 };
 
 type UpdateRoomData = {
+    name?: string | null;
+    theme?: string | null;
     maxPlayers?: number;
     questionTime?: number;
     gameMode?: GameMode;
@@ -36,6 +41,7 @@ export type StartRoomResult =
     | {
         success: true;
         room: Room;
+        game: Game;
     }
     | {
         success: false;
@@ -47,10 +53,122 @@ export type StartRoomResult =
         | "NOT_ENOUGH_QUESTIONS";
     };
 
+export type CreateNextGameResult =
+    | {
+        success: true;
+        room: Room;
+        game: Game;
+    }
+    | {
+        success: false;
+        reason:
+        | "ROOM_NOT_FOUND"
+        | "ACCESS_DENIED"
+        | "ROOM_ARCHIVED"
+        | "ACTIVE_GAME_EXISTS";
+    };
+
+export function selectCurrentGame<
+    TGame extends { status: GameStatus },
+>(games: readonly TGame[]): TGame | null {
+    return (
+        games.find(
+            (game) =>
+                game.status === "WAITING" || game.status === "IN_PROGRESS",
+        ) ??
+        games[0] ??
+        null
+    );
+}
+
+const gameLobbyInclude = {
+    players: {
+        select: {
+            id: true,
+            nickname: true,
+            score: true,
+            joinedAt: true,
+        },
+        orderBy: {
+            joinedAt: "asc" as const,
+        },
+    },
+    questionSnapshot: {
+        select: {
+            id: true,
+            _count: {
+                select: {
+                    questions: true,
+                },
+            },
+        },
+    },
+    rounds: {
+        orderBy: {
+            roundNumber: "desc" as const,
+        },
+        include: {
+            snapshotQuestion: {
+                include: {
+                    options: {
+                        orderBy: {
+                            position: "asc" as const,
+                        },
+                    },
+                },
+            },
+            answers: {
+                include: {
+                    gamePlayer: {
+                        select: {
+                            id: true,
+                            nickname: true,
+                        },
+                    },
+                    option: {
+                        select: {
+                            id: true,
+                            text: true,
+                            isCorrect: true,
+                        },
+                    },
+                },
+            },
+        },
+    },
+};
+
 export class RoomRepository {
     async findById(id: string): Promise<Room | null> {
         return prisma.room.findUnique({
             where: { id },
+        });
+    }
+
+    async findByIdWithCurrentGame(id: string) {
+        return prisma.room.findUnique({
+            where: { id },
+            include: {
+                games: {
+                    orderBy: [
+                        { createdAt: "desc" },
+                        { id: "desc" },
+                    ],
+                    include: {
+                        players: {
+                            select: {
+                                id: true,
+                                nickname: true,
+                                score: true,
+                                joinedAt: true,
+                            },
+                            orderBy: {
+                                joinedAt: "asc",
+                            },
+                        },
+                    },
+                },
+            },
         });
     }
 
@@ -70,72 +188,157 @@ export class RoomRepository {
                         name: true,
                     },
                 },
-                players: {
-                    select: {
-                        id: true,
-                        nickname: true,
-                        score: true,
-                        joinedAt: true,
-                    },
-                    orderBy: {
-                        joinedAt: "asc",
-                    },
+                games: {
+                    orderBy: [
+                        { createdAt: "desc" },
+                        { id: "desc" },
+                    ],
+                    include: gameLobbyInclude,
                 },
             },
         });
     }
 
-    async findManyByHostId(hostId: string): Promise<Room[]> {
+    async findManyByHostId(hostId: string) {
         return prisma.room.findMany({
-            where: { hostId },
+            where: {
+                hostId,
+                status: "ACTIVE",
+            },
             orderBy: { createdAt: "desc" },
+            include: {
+                games: {
+                    orderBy: [
+                        { createdAt: "desc" },
+                        { id: "desc" },
+                    ],
+                    include: gameLobbyInclude,
+                },
+            },
         });
     }
 
-    async create(data: CreateRoomData): Promise<Room> {
+    async create(data: CreateRoomData) {
         const { questions, ...roomData } = data;
 
-        return prisma.room.create({
-            data: {
-                ...roomData,
-                ...(questions && {
-                    questions: {
-                        create: questions.map((question) => ({
-                            statement: question.statement,
-                            type: question.type,
-                            options: {
-                                create: question.options.map(
-                                    (option, position) => ({
-                                        text: option.text,
-                                        isCorrect: option.isCorrect,
-                                        position,
-                                    }),
-                                ),
-                            },
-                        })),
+        return prisma.$transaction(async (tx) => {
+            return tx.room.create({
+                data: {
+                    ...roomData,
+                    status: "ACTIVE",
+                    ...(questions && {
+                        questions: {
+                            create: questions.map((question) => ({
+                                statement: question.statement,
+                                type: question.type,
+                                options: {
+                                    create: question.options.map(
+                                        (option, position) => ({
+                                            text: option.text,
+                                            isCorrect: option.isCorrect,
+                                            position,
+                                        }),
+                                    ),
+                                },
+                            })),
+                        },
+                    }),
+                    games: {
+                        create: {
+                            status: "WAITING",
+                            maxPlayers: roomData.maxPlayers,
+                            questionTime: roomData.questionTime,
+                            gameMode: roomData.gameMode ?? "CLASSIC",
+                            startedAt: null,
+                            finishedAt: null,
+                        },
                     },
-                }),
-            },
+                },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                        include: {
+                            players: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                    score: true,
+                                    joinedAt: true,
+                                },
+                                orderBy: {
+                                    joinedAt: "asc",
+                                },
+                            },
+                        },
+                    },
+                },
+            });
         });
     }
 
     async update(
         id: string,
         data: UpdateRoomData,
-    ): Promise<Room> {
-        return prisma.room.update({
-            where: { id },
-            data,
-        });
-    }
+        waitingGameId?: string | null,
+    ) {
+        return prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT id
+                FROM rooms
+                WHERE id = ${id}
+                FOR UPDATE
+            `;
 
-    async updateStatus(
-        id: string,
-        status: RoomStatus,
-    ): Promise<Room> {
-        return prisma.room.update({
-            where: { id },
-            data: { status },
+            if (
+                waitingGameId &&
+                (data.maxPlayers !== undefined ||
+                    data.questionTime !== undefined ||
+                    data.gameMode !== undefined)
+            ) {
+                await tx.game.update({
+                    where: { id: waitingGameId },
+                    data: {
+                        ...(data.maxPlayers !== undefined && {
+                            maxPlayers: data.maxPlayers,
+                        }),
+                        ...(data.questionTime !== undefined && {
+                            questionTime: data.questionTime,
+                        }),
+                        ...(data.gameMode !== undefined && {
+                            gameMode: data.gameMode,
+                        }),
+                    },
+                });
+            }
+
+            return tx.room.update({
+                where: { id },
+                data,
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                        include: {
+                            players: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                    score: true,
+                                    joinedAt: true,
+                                },
+                                orderBy: {
+                                    joinedAt: "asc",
+                                },
+                            },
+                        },
+                    },
+                },
+            });
         });
     }
 
@@ -153,6 +356,14 @@ export class RoomRepository {
 
             const room = await tx.room.findUnique({
                 where: { id: roomId },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                    },
+                },
             });
 
             if (!room) {
@@ -169,15 +380,21 @@ export class RoomRepository {
                 };
             }
 
-            if (room.status !== "WAITING") {
+            const currentGame = selectCurrentGame(room.games);
+
+            if (
+                room.status !== "ACTIVE" ||
+                !currentGame ||
+                currentGame.status !== "WAITING"
+            ) {
                 return {
                     success: false,
                     reason: "ROOM_NOT_WAITING",
                 };
             }
 
-            const playerCount = await tx.roomPlayer.count({
-                where: { roomId },
+            const playerCount = await tx.gamePlayer.count({
+                where: { gameId: currentGame.id },
             });
 
             if (playerCount < 2) {
@@ -212,7 +429,7 @@ export class RoomRepository {
 
             await tx.roomQuestionSnapshot.create({
                 data: {
-                    roomId,
+                    gameId: currentGame.id,
                     questions: {
                         create: questions.map((question, position) => ({
                             sourceQuestionId: question.id,
@@ -234,23 +451,185 @@ export class RoomRepository {
                 },
             });
 
-            await tx.game.create({
-                data: {
-                    roomId,
-                },
-            });
-
-            const updatedRoom = await tx.room.update({
-                where: { id: roomId },
+            const updatedGame = await tx.game.update({
+                where: { id: currentGame.id },
                 data: {
                     status: "IN_PROGRESS",
+                    startedAt: new Date(),
                 },
             });
 
             return {
                 success: true,
-                room: updatedRoom,
+                room,
+                game: updatedGame,
             };
+        });
+    }
+
+    async createNextGame(
+        roomId: string,
+        hostId: string,
+    ): Promise<CreateNextGameResult> {
+        return prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT id
+                FROM rooms
+                WHERE id = ${roomId}
+                FOR UPDATE
+            `;
+
+            const room = await tx.room.findUnique({
+                where: { id: roomId },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                    },
+                },
+            });
+
+            if (!room) {
+                return {
+                    success: false,
+                    reason: "ROOM_NOT_FOUND",
+                };
+            }
+
+            if (room.hostId !== hostId) {
+                return {
+                    success: false,
+                    reason: "ACCESS_DENIED",
+                };
+            }
+
+            if (room.status !== "ACTIVE") {
+                return {
+                    success: false,
+                    reason: "ROOM_ARCHIVED",
+                };
+            }
+
+            const hasActiveGame = room.games.some(
+                (game) =>
+                    game.status === "WAITING" ||
+                    game.status === "IN_PROGRESS",
+            );
+
+            if (hasActiveGame) {
+                return {
+                    success: false,
+                    reason: "ACTIVE_GAME_EXISTS",
+                };
+            }
+
+            const game = await tx.game.create({
+                data: {
+                    roomId: room.id,
+                    status: "WAITING",
+                    maxPlayers: room.maxPlayers,
+                    questionTime: room.questionTime,
+                    gameMode: room.gameMode,
+                    startedAt: null,
+                    finishedAt: null,
+                },
+            });
+
+            return {
+                success: true,
+                room,
+                game,
+            };
+        });
+    }
+
+    async findGamesByRoomId(roomId: string) {
+        return prisma.game.findMany({
+            where: { roomId },
+            orderBy: [
+                { createdAt: "desc" },
+                { id: "desc" },
+            ],
+            include: {
+                players: {
+                    select: {
+                        id: true,
+                        nickname: true,
+                        score: true,
+                        joinedAt: true,
+                    },
+                    orderBy: [
+                        { score: "desc" },
+                        { joinedAt: "asc" },
+                        { id: "asc" },
+                    ],
+                },
+                rounds: {
+                    select: {
+                        id: true,
+                        status: true,
+                        answers: {
+                            select: {
+                                gamePlayerId: true,
+                                isCorrect: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    async findGameResultsById(roomId: string, gameId: string) {
+        return prisma.game.findFirst({
+            where: {
+                id: gameId,
+                roomId,
+            },
+            include: {
+                players: {
+                    select: {
+                        id: true,
+                        nickname: true,
+                        score: true,
+                        joinedAt: true,
+                    },
+                    orderBy: [
+                        { score: "desc" },
+                        { joinedAt: "asc" },
+                        { id: "asc" },
+                    ],
+                },
+                questionSnapshot: {
+                    include: {
+                        questions: {
+                            orderBy: { position: "asc" },
+                        },
+                    },
+                },
+                rounds: {
+                    orderBy: { roundNumber: "asc" },
+                    include: {
+                        snapshotQuestion: {
+                            select: {
+                                id: true,
+                                statement: true,
+                                position: true,
+                            },
+                        },
+                        answers: {
+                            select: {
+                                id: true,
+                                gamePlayerId: true,
+                                isCorrect: true,
+                                points: true,
+                            },
+                        },
+                    },
+                },
+            },
         });
     }
 }

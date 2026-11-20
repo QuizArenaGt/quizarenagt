@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import { JwtService } from "../auth/jwt.service.js";
 import { isValidRoomCode, normalizeRoomCode } from "../rooms/join-room.dto.js";
 import { hashRoomPlayerSessionToken } from "../rooms/room-player-session-token.js";
+import { selectCurrentGame } from "../rooms/room.repository.js";
 import { prisma } from "../database/prisma.js";
 import { setSocketServer } from "./room-events.js";
 
@@ -18,6 +19,7 @@ type SocketIdentity =
         type: "PLAYER";
         playerId: string;
         nickname: string;
+        gameId: string;
         roomId: string;
     };
 
@@ -76,10 +78,15 @@ export function createSocketServer(httpServer: HttpServer): Server {
                     select: {
                         id: true,
                         hostId: true,
+                        status: true,
                     },
                 });
 
-                if (!room || room.hostId !== payload.sub) {
+                if (
+                    !room ||
+                    room.hostId !== payload.sub ||
+                    room.status !== "ACTIVE"
+                ) {
                     return next(new Error("Acesso à sala não autorizado."));
                 }
 
@@ -93,32 +100,68 @@ export function createSocketServer(httpServer: HttpServer): Server {
                 return next();
             }
 
-            // Autenticação de jogador via token de sessão.
+            // Autenticação de jogador via token de sessão vinculado à partida ativa.
             const sessionTokenHash =
                 hashRoomPlayerSessionToken(token);
 
-            const player = await prisma.roomPlayer.findUnique({
+            const player = await prisma.gamePlayer.findUnique({
                 where: {
                     sessionTokenHash,
                 },
                 include: {
-                    room: {
+                    game: {
                         select: {
                             id: true,
+                            status: true,
+                            roomId: true,
+                            room: {
+                                select: {
+                                    id: true,
+                                    status: true,
+                                    games: {
+                                        orderBy: [
+                                            { createdAt: "desc" },
+                                            { id: "desc" },
+                                        ],
+                                        select: {
+                                            id: true,
+                                            status: true,
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
             });
 
-            if (!player || !player.sessionTokenHash) {
+            if (
+                !player ||
+                !player.sessionTokenHash ||
+                !player.game ||
+                !player.game.room ||
+                player.game.room.status !== "ACTIVE"
+            ) {
                 return next(new Error("Sessão de participante inválida."));
+            }
+
+            const currentGame = selectCurrentGame(player.game.room.games);
+
+            if (
+                !currentGame ||
+                currentGame.id !== player.gameId ||
+                (currentGame.status !== "WAITING" &&
+                    currentGame.status !== "IN_PROGRESS")
+            ) {
+                return next(new Error("Sessão de participante expirada."));
             }
 
             const identity: SocketIdentity = {
                 type: "PLAYER",
                 playerId: player.id,
                 nickname: player.nickname,
-                roomId: player.room.id,
+                gameId: player.gameId,
+                roomId: player.game.roomId,
             };
 
             socket.data.identity = identity;

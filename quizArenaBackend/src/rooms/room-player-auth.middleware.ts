@@ -32,19 +32,43 @@ export async function authenticateRoomPlayer(
     try {
         const sessionTokenHash = hashRoomPlayerSessionToken(token);
 
-        const roomPlayer =
+        const gamePlayer =
             await roomPlayerRepository.findBySessionTokenHash(
                 sessionTokenHash,
             );
 
-        if (!roomPlayer) {
+        if (
+            !gamePlayer ||
+            !gamePlayer.sessionTokenHash ||
+            !gamePlayer.game ||
+            !gamePlayer.game.room ||
+            gamePlayer.game.room.status !== "ACTIVE"
+        ) {
             res.status(401).json({
                 message: "Sessão de participante inválida.",
             });
             return;
         }
 
-        req.roomPlayer = roomPlayer;
+        const roomGames = gamePlayer.game.room.games ?? [];
+        const currentGame =
+            roomGames.find(
+                (game) =>
+                    game.status === "WAITING" ||
+                    game.status === "IN_PROGRESS",
+            ) ?? roomGames[0];
+
+        if (!currentGame || currentGame.id !== gamePlayer.gameId) {
+            res.status(401).json({
+                message: "Sessão de participante expirada ou pertencente a outra partida.",
+            });
+            return;
+        }
+
+        req.roomPlayer = {
+            ...gamePlayer,
+            roomId: gamePlayer.game.roomId,
+        };
 
         next();
     } catch {
