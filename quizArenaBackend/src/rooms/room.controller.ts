@@ -442,10 +442,73 @@ export class RoomController {
                 return;
             }
 
+            if (error instanceof RoomNotEditableError) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
             console.error("Erro interno ao consultar lobby.");
 
             res.status(500).json({
                 message: "Erro interno ao consultar lobby.",
+            });
+        }
+    }
+
+    async archive(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+
+        if (typeof roomId !== "string" || !roomId.trim()) {
+            res.status(400).json({
+                message: "Identificador da sala inválido.",
+            });
+            return;
+        }
+
+        try {
+            const room = await this.roomService.archiveRoom(
+                roomId,
+                req.user.id,
+            );
+
+            emitRoomEvent(room.id, "room:archived", {
+                roomId: room.id,
+                roomStatus: room.roomStatus,
+                archivedAt: room.archivedAt,
+            });
+
+            res.status(200).json({
+                message: "Sala arquivada com sucesso.",
+                room,
+            });
+        } catch (error: unknown) {
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao excluir sala.");
+
+            res.status(500).json({
+                message: "Erro interno ao excluir sala.",
             });
         }
     }

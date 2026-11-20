@@ -275,9 +275,9 @@ export default function DashboardForm({
                                                                 type="button"
                                                                 className="btn-icon danger"
                                                                 onClick={() => roomsVm.requestDelete(room)}
-                                                                aria-label={`Remover sala ${room.name}`}
+                                                                aria-label={`Excluir sala ${room.name}`}
                                                             >
-                                                                Remover
+                                                                Excluir
                                                             </button>
                                                         </div>
                                                     </div>
@@ -1173,11 +1173,13 @@ export default function DashboardForm({
             {/* Relatório da sala finalizada */}
             <RoomReportModal view={roomsVm.reportView} onClose={roomsVm.closeReport} />
 
-            {/* Confirmação antes de remover uma sala da visualização */}
+            {/* Confirmação antes de excluir uma sala (soft delete) */}
             <ConfirmDialog
                 isOpen={roomsVm.roomPendingDeletion !== null}
-                title="Remover sala da lista?"
-                confirmLabel="Remover"
+                title="Excluir sala?"
+                confirmLabel="Excluir sala"
+                loadingLabel="Excluindo..."
+                isLoading={roomsVm.isArchivingRoom}
                 tone="danger"
                 onConfirm={roomsVm.confirmDelete}
                 onCancel={roomsVm.cancelDelete}
@@ -1187,8 +1189,16 @@ export default function DashboardForm({
                     <strong>
                         {roomsVm.roomPendingDeletion && formatRoomCode(roomsVm.roomPendingDeletion.code)}
                     </strong>
-                    ) será removida desta listagem.
+                    ) deixará de aparecer na lista de salas ativas e não aceitará novos jogadores ou novas partidas.
                 </p>
+                <p style={{ marginTop: '8px' }}>
+                    O histórico de partidas e os resultados anteriores permanecerão preservados.
+                </p>
+                {roomsVm.archiveRoomError && (
+                    <p className="room-form-error" role="alert" style={{ marginTop: '12px' }}>
+                        {roomsVm.archiveRoomError}
+                    </p>
+                )}
             </ConfirmDialog>
 
             {/* Modal: Cadastrar / Editar Pergunta (vinculada à sala ativa) */}

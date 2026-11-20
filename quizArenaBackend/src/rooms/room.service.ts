@@ -60,6 +60,7 @@ type RoomRepositoryContract = Pick<
     | "update"
     | "startIfReady"
     | "createNextGame"
+    | "archiveByHost"
     | "findGamesByRoomId"
     | "findGameResultsById"
 >;
@@ -693,6 +694,30 @@ export class RoomService {
         }
     }
 
+    async archiveRoom(
+        roomId: string,
+        hostId: string,
+    ): Promise<ProjectedRoomSummary> {
+        const result = await this.roomRepository.archiveByHost(
+            roomId,
+            hostId,
+        );
+
+        if (result.success) {
+            return projectRoomWithGame(result.room);
+        }
+
+        switch (result.reason) {
+            case "ROOM_NOT_FOUND":
+                throw new RoomNotFoundError();
+
+            case "ACCESS_DENIED":
+                throw new RoomAccessDeniedError(
+                    "Você não tem permissão para excluir esta sala.",
+                );
+        }
+    }
+
     async joinRoom(data: unknown): Promise<JoinRoomResult> {
         const validation = validateJoinRoom(data);
 
@@ -849,6 +874,12 @@ export class RoomService {
             if (room.hostId !== authenticatedUserId) {
                 throw new RoomAccessDeniedError(
                     "Somente o host pode consultar esta sala com sua conta.",
+                );
+            }
+
+            if (room.status !== "ACTIVE") {
+                throw new RoomNotEditableError(
+                    "Esta sala foi arquivada e não está mais disponível.",
                 );
             }
 

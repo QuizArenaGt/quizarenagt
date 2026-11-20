@@ -68,6 +68,26 @@ export type CreateNextGameResult =
         | "ACTIVE_GAME_EXISTS";
     };
 
+export type ArchiveRoomResult =
+    | {
+        success: true;
+        room: Room & {
+            games: (Game & {
+                players: {
+                    id: string;
+                    nickname: string;
+                    score: number;
+                    joinedAt: Date;
+                }[];
+            })[];
+        };
+        alreadyArchived: boolean;
+    }
+    | {
+        success: false;
+        reason: "ROOM_NOT_FOUND" | "ACCESS_DENIED";
+    };
+
 export function selectCurrentGame<
     TGame extends { status: GameStatus },
 >(games: readonly TGame[]): TGame | null {
@@ -541,6 +561,103 @@ export class RoomRepository {
                 success: true,
                 room,
                 game,
+            };
+        });
+    }
+
+    async archiveByHost(
+        roomId: string,
+        hostId: string,
+    ): Promise<ArchiveRoomResult> {
+        return prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT id
+                FROM rooms
+                WHERE id = ${roomId}
+                FOR UPDATE
+            `;
+
+            const existingRoom = await tx.room.findUnique({
+                where: { id: roomId },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                        include: {
+                            players: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                    score: true,
+                                    joinedAt: true,
+                                },
+                                orderBy: {
+                                    joinedAt: "asc",
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            if (!existingRoom) {
+                return {
+                    success: false,
+                    reason: "ROOM_NOT_FOUND",
+                };
+            }
+
+            if (existingRoom.hostId !== hostId) {
+                return {
+                    success: false,
+                    reason: "ACCESS_DENIED",
+                };
+            }
+
+            // Idempotência: mantém archivedAt original e preserva todos os vínculos.
+            if (existingRoom.status === "ARCHIVED") {
+                return {
+                    success: true,
+                    room: existingRoom,
+                    alreadyArchived: true,
+                };
+            }
+
+            const updatedRoom = await tx.room.update({
+                where: { id: roomId },
+                data: {
+                    status: "ARCHIVED",
+                    archivedAt: new Date(),
+                },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                        include: {
+                            players: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                    score: true,
+                                    joinedAt: true,
+                                },
+                                orderBy: {
+                                    joinedAt: "asc",
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            return {
+                success: true,
+                room: updatedRoom,
+                alreadyArchived: false,
             };
         });
     }

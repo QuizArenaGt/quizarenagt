@@ -563,6 +563,91 @@ export function formatPlayAgainError(error: unknown): string {
     return 'Não foi possível preparar uma nova partida. Tente novamente.';
 }
 
+export function formatArchiveRoomError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 401) {
+            return 'Sua sessão expirou. Faça login novamente para excluir a sala.';
+        }
+
+        if (error.status === 403) {
+            return 'Você não tem permissão para excluir esta sala.';
+        }
+
+        if (error.status === 404) {
+            return 'Sala não encontrada. Atualize a listagem.';
+        }
+
+        if (error.status >= 500) {
+            return 'Não foi possível excluir a sala devido a uma falha no servidor. Tente novamente.';
+        }
+
+        if (error.message?.trim()) {
+            return error.message.trim();
+        }
+    }
+
+    if (error instanceof Error) {
+        const msg = error.message.trim();
+        const lower = msg.toLowerCase();
+        if (
+            lower.includes('conectar ao servidor') ||
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror') ||
+            lower.includes('network request failed') ||
+            lower.includes('load failed')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
+        }
+        if (msg) {
+            return msg;
+        }
+    }
+
+    return 'Não foi possível excluir a sala. Tente novamente.';
+}
+
+export interface ExecuteArchiveRoomDependencies {
+    room: Room | null;
+    lockRef: { current: boolean };
+    requestArchive: (roomId: string) => Promise<unknown>;
+    onArchivingChange?: (archiving: boolean) => void;
+    onError: (message: string | null) => void;
+    onSuccess: (archivedRoomId: string) => void;
+}
+
+/**
+ * Arquiva a sala no servidor (`DELETE /rooms/:id`) e só atualiza o estado local
+ * após a confirmação efetiva do backend.
+ */
+export async function executeArchiveRoom({
+    room,
+    lockRef,
+    requestArchive,
+    onArchivingChange,
+    onError,
+    onSuccess,
+}: ExecuteArchiveRoomDependencies): Promise<boolean> {
+    if (!room || lockRef.current) {
+        return false;
+    }
+
+    lockRef.current = true;
+    onArchivingChange?.(true);
+    onError(null);
+
+    try {
+        await requestArchive(room.id);
+        onSuccess(room.id);
+        return true;
+    } catch (error) {
+        onError(formatArchiveRoomError(error));
+        return false;
+    } finally {
+        lockRef.current = false;
+        onArchivingChange?.(false);
+    }
+}
+
 export interface ExecutePlayAgainDependencies<TApiRoom> {
     room: Room | null;
     lockRef: { current: boolean };
