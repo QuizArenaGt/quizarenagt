@@ -1,6 +1,8 @@
 import { GameMode } from "@prisma/client";
 
 export type CreateRoomDto = {
+    name?: string | null;
+    theme?: string | null;
     maxPlayers: number;
     questionTime: number;
     gameMode: GameMode;
@@ -46,7 +48,25 @@ export function validateCreateRoom(
     }
 
     const payload = body as Record<string, unknown>;
-    const { maxPlayers, questionTime, gameMode } = payload;
+    const { name, theme, maxPlayers, questionTime, gameMode } = payload;
+
+    let resolvedName: string | undefined;
+    if (name !== undefined && name !== null) {
+        if (typeof name !== "string" || !name.trim() || name.trim().length > 100) {
+            errors.name = "O nome da sala deve ter entre 1 e 100 caracteres.";
+        } else {
+            resolvedName = name.trim();
+        }
+    }
+
+    let resolvedTheme: string | undefined;
+    if (theme !== undefined && theme !== null) {
+        if (typeof theme !== "string" || !theme.trim() || theme.trim().length > 80) {
+            errors.theme = "O tema da sala deve ter entre 1 e 80 caracteres.";
+        } else {
+            resolvedTheme = theme.trim();
+        }
+    }
 
     if (
         typeof maxPlayers !== "number" ||
@@ -88,6 +108,8 @@ export function validateCreateRoom(
     return {
         success: true,
         data: {
+            ...(resolvedName !== undefined && { name: resolvedName }),
+            ...(resolvedTheme !== undefined && { theme: resolvedTheme }),
             maxPlayers: maxPlayers as number,
             questionTime: questionTime as number,
             gameMode: resolvedGameMode,

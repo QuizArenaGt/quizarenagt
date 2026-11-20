@@ -10,9 +10,15 @@ import {
     MIN_ROOM_PLAYERS,
     MIN_ROOM_QUESTIONS,
     ROOM_TIME_OPTIONS,
+    canPlayAgain,
+    formatNullableDateTime,
     formatRoomCode,
     getClipboardRoomCode,
 } from '../../../models/room';
+import {
+    formatGameDuration,
+    formatGameStatusLabel,
+} from '../../../models/roomReport';
 import { useQuestionBankViewModel } from '../../../viewmodels/useQuestionBankViewModel';
 import { useRoomsViewModel } from '../../../viewmodels/useRoomsViewModel';
 import QuestionFormModal from '../../../views/Dashboard/QuestionFormModal/QuestionFormModal';
@@ -23,15 +29,22 @@ import { useProfileViewModel } from '../../../viewmodels/useProfileViewModel';
 import OverviewStats from '../../../views/Dashboard/OverviewStats/OverviewStats';
 import type { GameMode } from '../../../services/socket';
 
-export default function DashboardForm() {
+interface DashboardFormProps {
+    authenticatedUserId?: string | null;
+}
+
+export default function DashboardForm({
+    authenticatedUserId = null,
+}: DashboardFormProps = {}) {
     const [activeTab, setActiveTab] = useState<'overview' | 'rooms' | 'questions'>('rooms');
     const navigate = useNavigate();
 
     const profileVm = useProfileViewModel();
-    const roomsVm = useRoomsViewModel();
+    const roomsVm = useRoomsViewModel(authenticatedUserId);
     const questionBank = useQuestionBankViewModel(roomsVm.activeRoom?.id ?? null);
 
     function handleLogout() {
+        roomsVm.resetSessionState();
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         navigate('/login');
@@ -188,7 +201,36 @@ export default function DashboardForm() {
                                 </p>
                             )}
 
-                            {roomsVm.rooms.length === 0 ? (
+                            {roomsVm.hostRoomsError && (
+                                <div
+                                    className="room-form-error"
+                                    role="alert"
+                                    style={{
+                                        marginBottom: '16px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        gap: '12px',
+                                        flexWrap: 'wrap',
+                                    }}
+                                >
+                                    <span>{roomsVm.hostRoomsError}</span>
+                                    <button
+                                        type="button"
+                                        className="secondary-btn"
+                                        onClick={() => void roomsVm.reloadHostRooms()}
+                                    >
+                                        Tentar novamente
+                                    </button>
+                                </div>
+                            )}
+
+                            {roomsVm.isLoadingHostRooms && roomsVm.rooms.length === 0 ? (
+                                <div className="welcome-banner" style={{ marginBottom: '24px' }}>
+                                    <h2>Carregando suas salas…</h2>
+                                    <p>Recuperando as salas criadas na sua conta.</p>
+                                </div>
+                            ) : roomsVm.rooms.length === 0 ? (
                                 <div className="welcome-banner" style={{ marginBottom: '24px' }}>
                                     <h2>Nenhuma sala aberta</h2>
                                     <p>
@@ -296,15 +338,29 @@ export default function DashboardForm() {
                                                         {isSelected ? 'Sala Selecionada' : 'Gerenciar Sala'}
                                                     </button>
                                                     {room.status === 'Finalizado' && (
-                                                        <button
-                                                            type="button"
-                                                            className="action-btn results"
-                                                            onClick={() =>
-                                                                roomsVm.openReport(room, questionBank.questions)
-                                                            }
-                                                        >
-                                                            Ver resultados
-                                                        </button>
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                className="action-btn results"
+                                                                onClick={() =>
+                                                                    roomsVm.openReport(room, questionBank.questions)
+                                                                }
+                                                            >
+                                                                Ver resultados
+                                                            </button>
+                                                            {canPlayAgain(room) && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="action-btn start"
+                                                                    disabled={roomsVm.isPlayingAgain}
+                                                                    onClick={() => void roomsVm.playAgain(room)}
+                                                                >
+                                                                    {roomsVm.isPlayingAgain
+                                                                        ? 'Preparando…'
+                                                                        : 'Jogar novamente'}
+                                                                </button>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
                                             </div>
@@ -599,27 +655,155 @@ export default function DashboardForm() {
                                                 </>
                                             )}
 
-                                            {activeRoom.backendStatus === 'FINISHED' && (
+                                            {canPlayAgain(activeRoom) && (
                                                 <div>
                                                     <h3 style={{ marginTop: 0, color: '#15803d' }}>
-                                                        🏁 Partida Finalizada!
+                                                        {activeRoom.backendStatus === 'FINISHED'
+                                                            ? '🏁 Partida Finalizada!'
+                                                            : 'Partida Encerrada'}
                                                     </h3>
                                                     <p>
                                                         Todas as rodadas foram concluídas e a pontuação final está
                                                         consolidada no placar ao lado.
                                                     </p>
-                                                    <button
-                                                        type="button"
-                                                        className="primary-btn"
-                                                        onClick={() =>
-                                                            roomsVm.openReport(activeRoom, questionBank.questions)
-                                                        }
-                                                    >
-                                                        Ver Relatório Completo da Partida
-                                                    </button>
+                                                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            className="primary-btn"
+                                                            disabled={roomsVm.isPlayingAgain}
+                                                            onClick={() => void roomsVm.playAgain(activeRoom)}
+                                                        >
+                                                            {roomsVm.isPlayingAgain
+                                                                ? 'Preparando nova partida…'
+                                                                : '🔄 Jogar novamente'}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="secondary-btn"
+                                                            onClick={() =>
+                                                                roomsVm.openReport(activeRoom, questionBank.questions)
+                                                            }
+                                                        >
+                                                            Ver Relatório Completo da Partida
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+
+                                    {/* BLOCO HISTÓRICO DE PARTIDAS PERSISTIDAS */}
+                                    <div
+                                        style={{
+                                            background: '#f8fafc',
+                                            border: '1px solid #e2e8f0',
+                                            borderRadius: '12px',
+                                            padding: '16px',
+                                        }}
+                                    >
+                                        <div
+                                            className="section-header"
+                                            style={{ marginBottom: '12px', alignItems: 'center' }}
+                                        >
+                                            <div>
+                                                <h3 style={{ margin: 0 }}>
+                                                    Histórico de Partidas ({roomsVm.roomGames.length})
+                                                </h3>
+                                                <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.9rem' }}>
+                                                    Partidas anteriores e atual persistidas no servidor para esta sala.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="secondary-btn"
+                                                disabled={roomsVm.isLoadingRoomGames}
+                                                onClick={() => void roomsVm.refreshRoomGames()}
+                                            >
+                                                {roomsVm.isLoadingRoomGames
+                                                    ? 'Atualizando…'
+                                                    : 'Atualizar Histórico'}
+                                            </button>
+                                        </div>
+
+                                        {roomsVm.roomGamesError && (
+                                            <p className="room-form-error" role="alert">
+                                                {roomsVm.roomGamesError}
+                                            </p>
+                                        )}
+
+                                        {roomsVm.isLoadingRoomGames && roomsVm.roomGames.length === 0 ? (
+                                            <p style={{ color: '#64748b', margin: 0 }}>
+                                                Carregando histórico de partidas…
+                                            </p>
+                                        ) : roomsVm.roomGames.length === 0 ? (
+                                            <p style={{ color: '#64748b', margin: 0 }}>
+                                                Nenhuma partida registrada nesta sala ainda.
+                                            </p>
+                                        ) : (
+                                            <div className="table-container">
+                                                <table className="questions-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Partida</th>
+                                                            <th>Status</th>
+                                                            <th>Data</th>
+                                                            <th>Duração</th>
+                                                            <th>Jogadores</th>
+                                                            <th>Vencedor</th>
+                                                            <th>Resultados</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {roomsVm.roomGames.map((game, index) => (
+                                                            <tr key={game.id}>
+                                                                <td>#{roomsVm.roomGames.length - index}</td>
+                                                                <td>
+                                                                    <span
+                                                                        className={`status-badge ${
+                                                                            game.status === 'WAITING'
+                                                                                ? 'waiting'
+                                                                                : game.status === 'IN_PROGRESS'
+                                                                                  ? 'active'
+                                                                                  : 'finished'
+                                                                        }`}
+                                                                    >
+                                                                        {formatGameStatusLabel(game.status)}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    {formatNullableDateTime(
+                                                                        game.startedAt ?? game.createdAt,
+                                                                    )}
+                                                                </td>
+                                                                <td>
+                                                                    {formatGameDuration(game.durationMs, game.status)}
+                                                                </td>
+                                                                <td>{game.playerCount}</td>
+                                                                <td>
+                                                                    {game.winner
+                                                                        ? `${game.winner.nickname} (${game.winner.score} pts)`
+                                                                        : '—'}
+                                                                </td>
+                                                                <td>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="btn-icon"
+                                                                        onClick={() =>
+                                                                            void roomsVm.openGameReport(
+                                                                                activeRoom,
+                                                                                game.id,
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Ver resultados
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* BLOCO 2: PERGUNTAS VINCULADAS A ESTA SALA */}

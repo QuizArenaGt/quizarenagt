@@ -2,6 +2,8 @@
 import { GameMode } from "@prisma/client";
 
 export type UpdateRoomDto = {
+    name?: string | null;
+    theme?: string | null;
     maxPlayers?: number;
     questionTime?: number;
     gameMode?: GameMode;
@@ -47,6 +49,8 @@ export function validateUpdateRoom(
     const data: UpdateRoomDto = {};
 
     const allowedFields = [
+        "name",
+        "theme",
         "maxPlayers",
         "questionTime",
         "gameMode",
@@ -58,6 +62,24 @@ export function validateUpdateRoom(
 
     if (providedFields.length === 0) {
         errors.body = "Informe ao menos uma configuração para atualizar.";
+    }
+
+    if (Object.hasOwn(payload, "name")) {
+        const value = payload.name;
+        if (typeof value !== "string" || !value.trim() || value.trim().length > 100) {
+            errors.name = "O nome da sala deve ter entre 1 e 100 caracteres.";
+        } else {
+            data.name = value.trim();
+        }
+    }
+
+    if (Object.hasOwn(payload, "theme")) {
+        const value = payload.theme;
+        if (typeof value !== "string" || !value.trim() || value.trim().length > 80) {
+            errors.theme = "O tema da sala deve ter entre 1 e 80 caracteres.";
+        } else {
+            data.theme = value.trim();
+        }
     }
 
     if (Object.hasOwn(payload, "maxPlayers")) {

@@ -1,40 +1,123 @@
 import Button from '../../../components/ui/Button/Button';
 import Modal from '../../../components/ui/Modal/Modal';
-import type { Room } from '../../../models/room';
-import { formatRate, type QuestionReportRow, type RoomReport, type StudentReportRow } from '../../../models/roomReport';
+import { formatNullableDateTime, type Room } from '../../../models/room';
+import {
+    formatGameDuration,
+    formatGameStatusLabel,
+    formatRate,
+    type QuestionReportRow,
+    type RoomReport,
+    type StudentReportRow,
+} from '../../../models/roomReport';
+import type { ApiGameDetailedResults } from '../../../services/roomStorageService';
 import RateBar from '../components/RateBar';
 import '../reports.css';
 
 interface RoomReportModalProps {
-    view: { room: Room; report: RoomReport | null } | null;
+    view: {
+        room: Room;
+        report: RoomReport | null;
+        gameDetails?: ApiGameDetailedResults | null;
+        isLoading?: boolean;
+        error?: string | null;
+    } | null;
     onClose: () => void;
 }
 
 /**
- * VIEW — relatório de uma sala finalizada: ranking, perguntas mais
+ * VIEW — relatório de uma sala ou partida: ranking, perguntas mais
  * acertadas e mais erradas, e alunos com mais acertos e mais erros.
- * Todos os números chegam prontos do Model (buildRoomReport).
+ * Todos os números chegam prontos do Model (buildRoomReport / buildRoomReportFromServerGame).
  */
 export default function RoomReportModal({ view, onClose }: RoomReportModalProps) {
+    const details = view?.gameDetails ?? null;
+
     return (
         <Modal
             isOpen={view !== null}
             onClose={onClose}
             size="lg"
             title={view ? `Resultados — ${view.room.name}` : ''}
-            description={view?.report ? undefined : 'Nenhum aluno concluiu esta sala ainda.'}
+            description={
+                view?.isLoading
+                    ? 'Carregando dados da partida…'
+                    : view?.error
+                      ? undefined
+                      : view?.report
+                        ? undefined
+                        : 'Nenhum participante registrado nesta partida ainda.'
+            }
         >
-            {view?.report ? (
-                <ReportContent report={view.report} />
-            ) : (
-                <p className="report-empty">
-                    Quando os alunos terminarem a partida pelo código da sala, os resultados aparecerão aqui.
+            {view?.isLoading ? (
+                <p className="report-empty">Carregando resultados da partida…</p>
+            ) : view?.error ? (
+                <p className="room-form-error" role="alert">
+                    {view.error}
                 </p>
+            ) : (
+                <>
+                    {details && <GameMetadataBanner details={details} />}
+                    {view?.report ? (
+                        <ReportContent report={view.report} />
+                    ) : (
+                        <p className="report-empty">
+                            Quando os participantes concluírem a partida pelo código da sala, o ranking e as
+                            estatísticas aparecerão aqui.
+                        </p>
+                    )}
+                </>
             )}
             <div className="report-actions">
                 <Button onClick={onClose}>Fechar</Button>
             </div>
         </Modal>
+    );
+}
+
+function GameMetadataBanner({ details }: { details: ApiGameDetailedResults }) {
+    return (
+        <div
+            style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: '10px',
+                padding: '12px',
+                marginBottom: '16px',
+                borderRadius: '10px',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                fontSize: '0.88rem',
+            }}
+        >
+            <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Status</span>
+                <strong>{formatGameStatusLabel(details.status)}</strong>
+            </div>
+            <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Modo</span>
+                <strong>{details.gameMode}</strong>
+            </div>
+            <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Início</span>
+                <strong>{formatNullableDateTime(details.startedAt, 'Não iniciada')}</strong>
+            </div>
+            <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Encerramento</span>
+                <strong>{formatNullableDateTime(details.finishedAt, 'Em aberto')}</strong>
+            </div>
+            <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Duração</span>
+                <strong>{formatGameDuration(details.durationMs, details.status)}</strong>
+            </div>
+            <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Vencedor</span>
+                <strong>
+                    {details.winner
+                        ? `${details.winner.nickname} (${details.winner.score} pts)`
+                        : '—'}
+                </strong>
+            </div>
+        </div>
     );
 }
 
@@ -89,31 +172,33 @@ function ReportContent({ report }: { report: RoomReport }) {
                 </div>
             </section>
 
-            <div className="report-grid">
-                <QuestionHighlight
-                    id="report-best-questions"
-                    title="Questões mais acertadas"
-                    rows={report.mostCorrectQuestions}
-                />
-                <QuestionHighlight
-                    id="report-worst-questions"
-                    title="Questões mais erradas"
-                    rows={report.mostMissedQuestions}
-                />
-                <StudentHighlight
-                    id="report-best-students"
-                    title="Alunos com mais acertos"
-                    rows={report.studentsWithMostCorrect}
-                    metric={(row) => `${row.correctCount} ${row.correctCount === 1 ? 'acerto' : 'acertos'}`}
-                />
-                <StudentHighlight
-                    id="report-worst-students"
-                    title="Alunos com mais erros"
-                    rows={report.studentsWithMostWrong}
-                    metric={(row) => `${row.wrongCount} ${row.wrongCount === 1 ? 'erro' : 'erros'}`}
-                    emptyText="Ninguém errou nesta sala."
-                />
-            </div>
+            {report.questionRows.length > 0 && (
+                <div className="report-grid">
+                    <QuestionHighlight
+                        id="report-best-questions"
+                        title="Questões mais acertadas"
+                        rows={report.mostCorrectQuestions}
+                    />
+                    <QuestionHighlight
+                        id="report-worst-questions"
+                        title="Questões mais erradas"
+                        rows={report.mostMissedQuestions}
+                    />
+                    <StudentHighlight
+                        id="report-best-students"
+                        title="Alunos com mais acertos"
+                        rows={report.studentsWithMostCorrect}
+                        metric={(row) => `${row.correctCount} ${row.correctCount === 1 ? 'acerto' : 'acertos'}`}
+                    />
+                    <StudentHighlight
+                        id="report-worst-students"
+                        title="Alunos com mais erros"
+                        rows={report.studentsWithMostWrong}
+                        metric={(row) => `${row.wrongCount} ${row.wrongCount === 1 ? 'erro' : 'erros'}`}
+                        emptyText="Ninguém errou nesta sala."
+                    />
+                </div>
+            )}
 
             {report.participantCount > report.realStudentCount && (
                 <p className="report-note">

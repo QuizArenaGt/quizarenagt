@@ -14,10 +14,15 @@ import {
     type PlayPhase,
 } from '../src/models/game.ts';
 import {
+    deduplicateRoomsById,
+    executeLoadHostRooms,
     executeLoadRoomByCode,
     executeSubmitRoom,
+    formatNullableDateTime,
     formatRoomCode,
     getClipboardRoomCode,
+    upsertRoomInList,
+    type HostSessionTracker,
     type Room,
 } from '../src/models/room.ts';
 import { ApiError } from '../src/services/api.ts';
@@ -28,7 +33,9 @@ import {
 import {
     createRoomApi,
     isValidApiRoom,
+    listHostRoomsApi,
     mapApiRoomToModel,
+    type ApiHostRoom,
     type ApiRoom,
     type ApiRoomLobby,
 } from '../src/services/roomStorageService.ts';
@@ -676,5 +683,442 @@ describe('Melhoria UX — Validar existência e disponibilidade da sala antes de
         } finally {
             globalThis.fetch = originalFetch;
         }
+    });
+});
+
+describe('BUG 05 — Persistência, recuperação automática e isolamento de salas do host', () => {
+    const hostAId = 'host-a-uuid';
+    const hostBId = 'host-b-uuid';
+
+    const roomWaitingHostA: ApiHostRoom = {
+        id: 'room-a1',
+        code: 'HOSTA1',
+        hostId: hostAId,
+        maxPlayers: 15,
+        questionTime: 30,
+        gameMode: 'CLASSIC',
+        status: 'WAITING',
+        createdAt: '2026-11-18T12:00:00.000Z',
+        updatedAt: '2026-11-18T12:00:00.000Z',
+        players: [
+            {
+                id: 'p1',
+                nickname: 'Ana',
+                score: 0,
+                joinedAt: '2026-11-18T12:01:00.000Z',
+            },
+        ],
+    };
+
+    const roomInProgressHostA: ApiHostRoom = {
+        id: 'room-a2',
+        code: 'HOSTA2',
+        hostId: hostAId,
+        maxPlayers: 20,
+        questionTime: 45,
+        gameMode: 'HARDCORE',
+        status: 'IN_PROGRESS',
+        createdAt: '2026-11-18T11:00:00.000Z',
+        updatedAt: '2026-11-18T11:30:00.000Z',
+        players: [
+            {
+                id: 'p2',
+                nickname: 'Bruno',
+                score: 1450,
+                joinedAt: '2026-11-18T11:02:00.000Z',
+            },
+            {
+                id: 'p3',
+                nickname: 'Carla',
+                score: 920,
+                joinedAt: '2026-11-18T11:03:00.000Z',
+            },
+        ],
+    };
+
+    const roomHostB: ApiHostRoom = {
+        id: 'room-b1',
+        code: 'HOSTB1',
+        hostId: hostBId,
+        maxPlayers: 10,
+        questionTime: 30,
+        gameMode: 'CLASSIC',
+        status: 'WAITING',
+        createdAt: '2026-11-18T12:30:00.000Z',
+        updatedAt: '2026-11-18T12:30:00.000Z',
+        players: [],
+    };
+
+    it('1. Carregamento inicial sem ?sala=: deve listar todas as salas do host sem abrir partida automaticamente', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: null, requestSeq: 0 } as HostSessionTracker,
+        };
+        let loadedRooms: Room[] = [];
+        let selectedRoomId: string | null = 'stale-id';
+        let clearedUrl = false;
+        const loadingHistory: boolean[] = [];
+
+        await executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            requestedUrlCode: null,
+            trackerRef,
+            fetchHostRooms: async () => [roomWaitingHostA, roomInProgressHostA],
+            mapRoom: (apiRoom, existing) =>
+                mapApiRoomToModel(apiRoom, {
+                    name: existing?.name,
+                    theme: existing?.theme,
+                }),
+            onResetSessionState: () => {
+                loadedRooms = [];
+                selectedRoomId = null;
+            },
+            onLoadingChange: (loading) => loadingHistory.push(loading),
+            onError: () => {},
+            onSuccess: (result) => {
+                loadedRooms = result.rooms;
+                selectedRoomId = result.selectedRoomId;
+                clearedUrl = result.shouldClearUrlParam;
+            },
+        });
+
+        assert.equal(loadedRooms.length, 2);
+        assert.equal(loadedRooms[0].code, 'HOSTA1');
+        assert.equal(loadedRooms[1].code, 'HOSTA2');
+        assert.equal(selectedRoomId, null);
+        assert.equal(clearedUrl, false);
+        assert.deepEqual(loadingHistory, [true, false]);
+    });
+
+    it('2. Lista vazia: deve retornar array vazio sem erro quando o host não possuir salas', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: hostAId, requestSeq: 0 } as HostSessionTracker,
+        };
+        let loadedRooms: Room[] = [];
+        let error: string | null = null;
+
+        await executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            requestedUrlCode: null,
+            trackerRef,
+            fetchHostRooms: async () => [],
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {},
+            onError: (err) => {
+                error = err;
+            },
+            onSuccess: (result) => {
+                loadedRooms = result.rooms;
+            },
+        });
+
+        assert.deepEqual(loadedRooms, []);
+        assert.equal(error, null);
+    });
+
+    it('3 e 4. Seleção por ?sala=: deve selecionar sala da URL somente se pertencer ao host e rejeitar código de outro usuário', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: hostAId, requestSeq: 0 } as HostSessionTracker,
+        };
+        let selectedRoomId: string | null = null;
+        let shouldClearUrlParam = false;
+
+        // 3. Código na URL pertence ao host A -> seleciona a sala correspondente
+        await executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            requestedUrlCode: ' hosta2 ',
+            trackerRef,
+            fetchHostRooms: async () => [roomWaitingHostA, roomInProgressHostA],
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {},
+            onError: () => {},
+            onSuccess: (result) => {
+                selectedRoomId = result.selectedRoomId;
+                shouldClearUrlParam = result.shouldClearUrlParam;
+            },
+        });
+
+        assert.equal(selectedRoomId, 'room-a2');
+        assert.equal(shouldClearUrlParam, false);
+
+        // 4. Código na URL pertence ao host B ('HOSTB1') -> não seleciona e sinaliza remoção do parâmetro
+        await executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            requestedUrlCode: 'HOSTB1',
+            trackerRef,
+            fetchHostRooms: async () => [roomWaitingHostA, roomInProgressHostA],
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {},
+            onError: () => {},
+            onSuccess: (result) => {
+                selectedRoomId = result.selectedRoomId;
+                shouldClearUrlParam = result.shouldClearUrlParam;
+            },
+        });
+
+        assert.equal(selectedRoomId, null);
+        assert.equal(shouldClearUrlParam, true);
+    });
+
+    it('5. Prevenção de duplicação: não deve duplicar salas por id ao carregar ou atualizar', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: hostAId, requestSeq: 0 } as HostSessionTracker,
+        };
+        let loadedRooms: Room[] = [];
+
+        await executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            trackerRef,
+            fetchHostRooms: async () => [
+                roomWaitingHostA,
+                roomWaitingHostA,
+                roomInProgressHostA,
+            ],
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {},
+            onError: () => {},
+            onSuccess: (result) => {
+                loadedRooms = result.rooms;
+            },
+        });
+
+        assert.equal(loadedRooms.length, 2);
+
+        const updatedA1: Room = {
+            ...loadedRooms[0],
+            name: 'Sala Renomeada',
+        };
+        const afterUpsert = upsertRoomInList(loadedRooms, updatedA1);
+        assert.equal(afterUpsert.length, 2);
+        assert.equal(afterUpsert[0].name, 'Sala Renomeada');
+        assert.equal(deduplicateRoomsById([...afterUpsert, updatedA1]).length, 2);
+    });
+
+    it('6 e 7. Isolamento entre sessões: troca de usuário limpa memória imediatamente e resposta atrasada da sessão anterior é descartada', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: hostAId, requestSeq: 0 } as HostSessionTracker,
+        };
+        let resetCalls = 0;
+        let activeRooms: Room[] = [mapApiRoomToModel(roomWaitingHostA)];
+
+        let resolveDelayedHostA!: (rooms: ApiHostRoom[]) => void;
+        const delayedHostAPromise = new Promise<ApiHostRoom[]>((resolve) => {
+            resolveDelayedHostA = resolve;
+        });
+
+        // Dispara requisição do Host A (que ficará pendente)
+        const pendingHostALoad = executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            trackerRef,
+            existingRooms: activeRooms,
+            fetchHostRooms: () => delayedHostAPromise,
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {
+                resetCalls += 1;
+                activeRooms = [];
+            },
+            onError: () => {},
+            onSuccess: (result) => {
+                activeRooms = result.rooms;
+            },
+        });
+
+        // Usuário faz logout e entra como Host B antes da resposta do Host A chegar
+        const hostBLoad = await executeLoadHostRooms({
+            sessionKey: hostBId,
+            expectedHostId: hostBId,
+            trackerRef,
+            existingRooms: activeRooms,
+            fetchHostRooms: async () => [roomHostB],
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {
+                resetCalls += 1;
+                activeRooms = [];
+            },
+            onError: () => {},
+            onSuccess: (result) => {
+                activeRooms = result.rooms;
+            },
+        });
+
+        assert.equal(resetCalls, 1);
+        assert.equal(hostBLoad?.length, 1);
+        assert.equal(activeRooms.length, 1);
+        assert.equal(activeRooms[0].code, 'HOSTB1');
+
+        // Agora a resposta atrasada do Host A chega: deve ser totalmente ignorada
+        resolveDelayedHostA([roomWaitingHostA, roomInProgressHostA]);
+        const delayedResult = await pendingHostALoad;
+
+        assert.equal(delayedResult, null);
+        assert.equal(activeRooms.length, 1);
+        assert.equal(activeRooms[0].code, 'HOSTB1');
+    });
+
+    it('8. Recuperação de sala IN_PROGRESS: deve preservar status Em Andamento, jogadores e pontuações persistidas', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: hostAId, requestSeq: 0 } as HostSessionTracker,
+        };
+        let loadedRooms: Room[] = [];
+
+        await executeLoadHostRooms({
+            sessionKey: hostAId,
+            expectedHostId: hostAId,
+            requestedUrlCode: 'HOSTA2',
+            trackerRef,
+            fetchHostRooms: async () => [roomInProgressHostA],
+            mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+            onResetSessionState: () => {},
+            onError: () => {},
+            onSuccess: (result) => {
+                loadedRooms = result.rooms;
+            },
+        });
+
+        assert.equal(loadedRooms.length, 1);
+        const recovered = loadedRooms[0];
+        assert.equal(recovered.backendStatus, 'IN_PROGRESS');
+        assert.equal(recovered.status, 'Em Andamento');
+        assert.equal(recovered.gameMode, 'HARDCORE');
+        assert.equal(recovered.timeLimit, 45);
+        assert.equal(recovered.players.length, 2);
+        assert.equal(recovered.players[0].nickname, 'Bruno');
+        assert.equal(recovered.players[0].score, 1450);
+        assert.equal(recovered.players[1].nickname, 'Carla');
+        assert.equal(recovered.players[1].score, 920);
+    });
+
+    it('9. Falha de conexão e possibilidade de tentar novamente (listHostRoomsApi + executeLoadHostRooms)', async () => {
+        const trackerRef = {
+            current: { activeSessionKey: hostAId, requestSeq: 0 } as HostSessionTracker,
+        };
+        let capturedError = null as string | null;
+        let loadedRooms: Room[] = [];
+        let shouldFail = true;
+
+        const originalFetch = globalThis.fetch;
+        try {
+            globalThis.fetch = (async () => {
+                if (shouldFail) {
+                    throw new Error('Failed to fetch');
+                }
+                return new Response(
+                    JSON.stringify({
+                        rooms: [roomWaitingHostA],
+                    }),
+                    {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' },
+                    },
+                );
+            }) as typeof fetch;
+
+            // Primeira tentativa falha por conexão
+            const firstAttempt = await executeLoadHostRooms({
+                sessionKey: hostAId,
+                expectedHostId: hostAId,
+                trackerRef,
+                fetchHostRooms: () => listHostRoomsApi('token-host-a'),
+                mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+                onResetSessionState: () => {},
+                onError: (err) => {
+                    capturedError = err;
+                },
+                onSuccess: (result) => {
+                    loadedRooms = result.rooms;
+                },
+            });
+
+            assert.equal(firstAttempt, null);
+            assert.equal(loadedRooms.length, 0);
+            assert.equal(
+                capturedError,
+                'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.',
+            );
+
+            // Segunda tentativa ("Tentar novamente") recupera as salas com sucesso
+            shouldFail = false;
+            const retryAttempt = await executeLoadHostRooms({
+                sessionKey: hostAId,
+                expectedHostId: hostAId,
+                trackerRef,
+                fetchHostRooms: () => listHostRoomsApi('token-host-a'),
+                mapRoom: (apiRoom) => mapApiRoomToModel(apiRoom),
+                onResetSessionState: () => {},
+                onError: (err) => {
+                    capturedError = err;
+                },
+                onSuccess: (result) => {
+                    loadedRooms = result.rooms;
+                },
+            });
+
+            assert.equal(retryAttempt?.length, 1);
+            assert.equal(capturedError, null);
+            assert.equal(loadedRooms.length, 1);
+            assert.equal(loadedRooms[0].code, 'HOSTA1');
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    it('10. Formatação segura de startedAt e finishedAt nullable no frontend', () => {
+        assert.equal(formatNullableDateTime(null), 'Não registrado');
+        assert.equal(formatNullableDateTime(undefined, 'Não iniciado'), 'Não iniciado');
+        assert.equal(formatNullableDateTime('', 'Não iniciado'), 'Não iniciado');
+        assert.equal(formatNullableDateTime('data-invalida'), 'Não registrado');
+
+        const formatted = formatNullableDateTime('2026-11-18T15:30:00.000Z');
+        assert.notEqual(formatted, 'Não registrado');
+        assert.equal(formatted.includes('1969'), false);
+        assert.equal(formatted.includes('1970'), false);
+    });
+
+    it('11. Mapeamento de ApiHostRoom preserva name, theme e fallback de players em currentGame', () => {
+        const apiRoom: ApiHostRoom = {
+            id: 'room-proj-1',
+            code: 'PRJ123',
+            name: 'Sala Biologia',
+            theme: 'Ciências',
+            hostId: 'host-1',
+            maxPlayers: 12,
+            questionTime: 45,
+            gameMode: 'HARDCORE',
+            status: 'WAITING',
+            roomStatus: 'ACTIVE',
+            archivedAt: null,
+            createdAt: '2026-11-18T15:00:00.000Z',
+            updatedAt: '2026-11-18T15:00:00.000Z',
+            currentGame: {
+                id: 'game-proj-1',
+                status: 'WAITING',
+                maxPlayers: 12,
+                questionTime: 45,
+                gameMode: 'HARDCORE',
+                startedAt: null,
+                finishedAt: null,
+                createdAt: '2026-11-18T15:00:00.000Z',
+                players: [
+                    {
+                        id: 'gp-1',
+                        nickname: 'Mariana',
+                        score: 0,
+                        joinedAt: '2026-11-18T15:01:00.000Z',
+                    },
+                ],
+            },
+        };
+
+        const mapped = mapApiRoomToModel(apiRoom);
+        assert.equal(mapped.name, 'Sala Biologia');
+        assert.equal(mapped.theme, 'Ciências');
+        assert.equal(mapped.backendStatus, 'WAITING');
+        assert.equal(mapped.players.length, 1);
+        assert.equal(mapped.players[0].nickname, 'Mariana');
     });
 });

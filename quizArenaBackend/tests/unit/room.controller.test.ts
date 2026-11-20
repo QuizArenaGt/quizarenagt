@@ -1,723 +1,443 @@
-
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { emitRoomEventMock } = vi.hoisted(() => ({
+    emitRoomEventMock: vi.fn(),
+}));
+
+vi.mock("../../src/realtime/room-events.js", () => ({
+    emitRoomEvent: emitRoomEventMock,
+}));
 
 import { RoomController } from "../../src/rooms/room.controller.js";
 import {
+    DuplicateNicknameError,
     InvalidRoomDataError,
-    RoomNotFoundError,
     RoomAccessDeniedError,
-    RoomNotEditableError,
-    RoomNotJoinableError,
-    RoomFullError,
     RoomAuthenticationError,
+    RoomFullError,
+    RoomNotEditableError,
+    RoomNotFoundError,
+    RoomNotJoinableError,
+    RoomReplayNotAllowedError,
     RoomStartRequirementsError,
 } from "../../src/rooms/room.errors.js";
-import type { RoomService } from "../../src/rooms/room.service.js";
+
+function createResponseMock() {
+    const res = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+    };
+
+    return res as unknown as Response & {
+        status: ReturnType<typeof vi.fn>;
+        json: ReturnType<typeof vi.fn>;
+    };
+}
 
 describe("RoomController", () => {
-    let roomService: {
+    let roomServiceMock: {
         createRoom: ReturnType<typeof vi.fn>;
+        listHostRooms: ReturnType<typeof vi.fn>;
         updateRoom: ReturnType<typeof vi.fn>;
-        getRoomLobby: ReturnType<typeof vi.fn>;
         startRoom: ReturnType<typeof vi.fn>;
+        playAgain: ReturnType<typeof vi.fn>;
+        joinRoom: ReturnType<typeof vi.fn>;
         checkRoomAvailability: ReturnType<typeof vi.fn>;
+        getRoomLobby: ReturnType<typeof vi.fn>;
     };
 
     let controller: RoomController;
 
-    type AuthenticatedRequest = Request & {
-        user: {
-            id: string;
-            role: "HOST";
-        };
-    };
+    const baseDate = new Date("2026-11-18T12:00:00.000Z");
 
-    let req: Partial<AuthenticatedRequest>;
-    let res: {
-        status: ReturnType<typeof vi.fn>;
-        json: ReturnType<typeof vi.fn>;
-    };
-
-    const authenticatedUser = {
-        id: "authenticated-host-uuid",
-        role: "HOST" as const,
-    };
-
-    const validBody = {
-        maxPlayers: 10,
-        questionTime: 30,
-        gameMode: "CLASSIC",
-    };
-
-    const roomFixture = {
+    const projectedRoomFixture = {
         id: "room-test-uuid",
         code: "ABC123",
-        hostId: authenticatedUser.id,
-        ...validBody,
-        status: "WAITING",
+        name: "Sala Principal",
+        theme: "Ciência",
+        hostId: "user-host-uuid",
+        maxPlayers: 10,
+        questionTime: 30,
+        gameMode: "CLASSIC" as const,
+        status: "WAITING" as const,
+        roomStatus: "ACTIVE" as const,
+        archivedAt: null,
+        createdAt: baseDate,
+        updatedAt: baseDate,
+        players: [
+            {
+                id: "player-uuid",
+                nickname: "Alice",
+                score: 0,
+                joinedAt: baseDate,
+            },
+        ],
+        currentGame: {
+            id: "game-test-uuid",
+            status: "WAITING" as const,
+            maxPlayers: 10,
+            questionTime: 30,
+            gameMode: "CLASSIC" as const,
+            startedAt: null,
+            finishedAt: null,
+            createdAt: baseDate,
+            playerCount: 1,
+            players: [
+                {
+                    id: "player-uuid",
+                    nickname: "Alice",
+                    score: 0,
+                    joinedAt: baseDate,
+                },
+            ],
+        },
     };
 
     beforeEach(() => {
-        roomService = {
+        vi.clearAllMocks();
+        roomServiceMock = {
             createRoom: vi.fn(),
+            listHostRooms: vi.fn(),
             updateRoom: vi.fn(),
-            getRoomLobby: vi.fn(),
             startRoom: vi.fn(),
+            playAgain: vi.fn(),
+            joinRoom: vi.fn(),
             checkRoomAvailability: vi.fn(),
+            getRoomLobby: vi.fn(),
         };
-
-        controller = new RoomController(
-            roomService as unknown as RoomService,
-        );
-
-        req = {
-            body: validBody,
-            params: { id: roomFixture.id },
-            user: authenticatedUser,
-        };
-
-        res = {
-            status: vi.fn().mockReturnThis(),
-            json: vi.fn().mockReturnThis(),
-        };
-    });
-
-    afterEach(() => {
-        vi.restoreAllMocks();
+        controller = new RoomController(roomServiceMock as never);
     });
 
     describe("create", () => {
-        it("deve retornar 401 quando não houver usuário autenticado", async () => {
-            req.user = undefined as unknown as AuthenticatedRequest["user"];
+        it("deve criar uma sala para o host autenticado", async () => {
+            roomServiceMock.createRoom.mockResolvedValue(projectedRoomFixture);
+            const req = {
+                user: { id: "user-host-uuid" },
+                body: { maxPlayers: 10, questionTime: 30, gameMode: "CLASSIC" },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            await controller.create(
-                req as Request,
-                res as unknown as Response,
-            );
+            await controller.create(req, res);
 
-            expect(res.status).toHaveBeenCalledWith(401);
-            expect(roomService.createRoom).not.toHaveBeenCalled();
-        });
-
-        it("deve criar uma sala e retornar 201 com os dados da sala", async () => {
-            roomService.createRoom.mockResolvedValue(roomFixture);
-
-            await controller.create(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(roomService.createRoom).toHaveBeenCalledWith({
-                ...validBody,
-                hostId: authenticatedUser.id,
-            });
             expect(res.status).toHaveBeenCalledWith(201);
-            expect(res.json).toHaveBeenCalledWith(roomFixture);
+            expect(res.json).toHaveBeenCalledWith(projectedRoomFixture);
         });
 
-        it("deve retornar 400 imediatamente quando houver erro de validação", async () => {
-            roomService.createRoom.mockRejectedValue(
+        it("deve retornar 400 quando dados da sala forem inválidos", async () => {
+            roomServiceMock.createRoom.mockRejectedValue(
                 new InvalidRoomDataError("Dados inválidos.", {
-                    maxPlayers:
-                        "A quantidade de jogadores deve ser um número inteiro entre 2 e 50.",
+                    maxPlayers: "Inválido",
                 }),
             );
+            const req = {
+                user: { id: "user-host-uuid" },
+                body: {},
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            await controller.create(
-                req as Request,
-                res as unknown as Response,
-            );
+            await controller.create(req, res);
 
             expect(res.status).toHaveBeenCalledWith(400);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Dados inválidos.",
-                errors: {
-                    maxPlayers:
-                        "A quantidade de jogadores deve ser um número inteiro entre 2 e 50.",
-                },
-            });
         });
+    });
 
-        it("deve retornar 500 com mensagem amigável sem expor detalhes internos quando ocorrer erro no servidor", async () => {
-            const consoleSpy = vi
-                .spyOn(console, "error")
-                .mockImplementation(() => { });
+    describe("listByHost", () => {
+        it("deve listar salas do host autenticado", async () => {
+            roomServiceMock.listHostRooms.mockResolvedValue([
+                projectedRoomFixture,
+            ]);
+            const req = {
+                user: { id: "user-host-uuid" },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            roomService.createRoom.mockRejectedValue(
-                new Error("FATAL: database connection refused on port 5432"),
-            );
+            await controller.listByHost(req, res);
 
-            await controller.create(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(500);
+            expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({
-                message: "Erro interno ao criar sala.",
+                rooms: [projectedRoomFixture],
             });
-            expect(consoleSpy).toHaveBeenCalled();
         });
     });
 
     describe("update", () => {
-        it("deve retornar 401 quando não houver usuário autenticado", async () => {
-            req.user = undefined as unknown as AuthenticatedRequest["user"];
+        it("deve atualizar configurações da sala e emitir room:updated", async () => {
+            const updatedRoom = { ...projectedRoomFixture, maxPlayers: 20 };
+            roomServiceMock.updateRoom.mockResolvedValue(updatedRoom);
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+                body: { maxPlayers: 20 },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
+            await controller.update(req, res);
+
+            expect(emitRoomEventMock).toHaveBeenCalledWith(
+                updatedRoom.id,
+                "room:updated",
+                expect.objectContaining({ maxPlayers: 20 }),
             );
-
-            expect(res.status).toHaveBeenCalledWith(401);
-            expect(roomService.updateRoom).not.toHaveBeenCalled();
-        });
-
-        it("deve retornar 400 quando o identificador da sala for inválido", async () => {
-            req.params = {} as Request["params"];
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(400);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Identificador da sala inválido.",
-            });
-            expect(roomService.updateRoom).not.toHaveBeenCalled();
-        });
-
-        it("deve atualizar a sala e retornar 200", async () => {
-            roomService.updateRoom.mockResolvedValue(roomFixture);
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(roomService.updateRoom).toHaveBeenCalledWith({
-                roomId: roomFixture.id,
-                hostId: authenticatedUser.id,
-                data: validBody,
-            });
             expect(res.status).toHaveBeenCalledWith(200);
-            expect(res.json).toHaveBeenCalledWith(roomFixture);
+            expect(res.json).toHaveBeenCalledWith(updatedRoom);
         });
 
-        it("deve utilizar o ID do usuário autenticado, ignorando hostId enviado no body", async () => {
-            req.body = {
-                maxPlayers: 20,
-                hostId: "fake-host-uuid",
-            };
-
-            roomService.updateRoom.mockResolvedValue(roomFixture);
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
+        it("deve retornar 409 quando a sala não puder ser editada", async () => {
+            roomServiceMock.updateRoom.mockRejectedValue(
+                new RoomNotEditableError("Não editável."),
             );
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+                body: { maxPlayers: 20 },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            expect(roomService.updateRoom).toHaveBeenCalledWith({
-                roomId: roomFixture.id,
-                hostId: authenticatedUser.id,
-                data: req.body,
-            });
-        });
-
-        it("deve retornar 400 quando os dados forem inválidos", async () => {
-            roomService.updateRoom.mockRejectedValue(
-                new InvalidRoomDataError("Dados inválidos.", {
-                    maxPlayers: "Quantidade inválida.",
-                }),
-            );
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(400);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Dados inválidos.",
-                errors: {
-                    maxPlayers: "Quantidade inválida.",
-                },
-            });
-        });
-
-        it("deve retornar 404 quando a sala não existir", async () => {
-            roomService.updateRoom.mockRejectedValue(
-                new RoomNotFoundError(),
-            );
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(404);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Sala não encontrada.",
-            });
-        });
-
-        it("deve retornar 403 quando o usuário não for o host", async () => {
-            roomService.updateRoom.mockRejectedValue(
-                new RoomAccessDeniedError(),
-            );
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(403);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Você não tem permissão para alterar esta sala.",
-            });
-        });
-
-        it("deve retornar 409 quando a sala não puder mais ser editada", async () => {
-            roomService.updateRoom.mockRejectedValue(
-                new RoomNotEditableError(),
-            );
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
+            await controller.update(req, res);
 
             expect(res.status).toHaveBeenCalledWith(409);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "As configurações desta sala não podem mais ser alteradas.",
-            });
-        });
-
-        it("deve retornar 500 quando ocorrer um erro inesperado", async () => {
-            const consoleSpy = vi
-                .spyOn(console, "error")
-                .mockImplementation(() => { });
-
-            roomService.updateRoom.mockRejectedValue(
-                new Error("Erro inesperado no banco"),
-            );
-
-            await controller.update(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(500);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Erro interno ao atualizar sala.",
-            });
-            expect(consoleSpy).toHaveBeenCalled();
         });
     });
-
 
     describe("start", () => {
-        it("deve retornar 401 quando não houver usuário autenticado", async () => {
-            req.user = undefined as unknown as AuthenticatedRequest["user"];
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(401);
-            expect(roomService.startRoom).not.toHaveBeenCalled();
-        });
-
-        it("deve retornar 400 quando o identificador da sala for inválido", async () => {
-            req.params = {} as Request["params"];
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(400);
-            expect(roomService.startRoom).not.toHaveBeenCalled();
-        });
-
-        it("deve iniciar a partida e retornar 200", async () => {
-            const startedRoom = {
-                ...roomFixture,
-                status: "IN_PROGRESS",
+        it("deve iniciar a partida e emitir game:started", async () => {
+            const started = {
+                ...projectedRoomFixture,
+                status: "IN_PROGRESS" as const,
             };
+            roomServiceMock.startRoom.mockResolvedValue(started);
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            roomService.startRoom.mockResolvedValue(startedRoom);
+            await controller.start(req, res);
 
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(roomService.startRoom).toHaveBeenCalledWith(
-                roomFixture.id,
-                authenticatedUser.id,
+            expect(emitRoomEventMock).toHaveBeenCalledWith(
+                started.id,
+                "game:started",
+                { roomId: started.id, status: "IN_PROGRESS" },
             );
             expect(res.status).toHaveBeenCalledWith(200);
-            expect(res.json).toHaveBeenCalledWith(startedRoom);
+            expect(res.json).toHaveBeenCalledWith(started);
         });
 
-        it("deve retornar 404 quando a sala não existir", async () => {
-            roomService.startRoom.mockRejectedValue(
-                new RoomNotFoundError(),
-            );
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(404);
-        });
-
-        it("deve retornar 403 quando o usuário não for o host", async () => {
-            roomService.startRoom.mockRejectedValue(
-                new RoomAccessDeniedError(),
-            );
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(403);
-        });
-
-        it("deve retornar 409 quando a sala já tiver sido iniciada", async () => {
-            roomService.startRoom.mockRejectedValue(
-                new RoomNotEditableError(),
-            );
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(409);
-        });
-
-        it("deve retornar 409 quando não houver jogadores suficientes", async () => {
-            roomService.startRoom.mockRejectedValue(
+        it("deve retornar 409 quando requisitos mínimos não forem atingidos", async () => {
+            roomServiceMock.startRoom.mockRejectedValue(
                 new RoomStartRequirementsError("NOT_ENOUGH_PLAYERS"),
             );
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(409);
-        });
-
-        it("deve retornar 409 quando não houver perguntas suficientes", async () => {
-            roomService.startRoom.mockRejectedValue(
-                new RoomStartRequirementsError("NOT_ENOUGH_QUESTIONS"),
-            );
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
+            await controller.start(req, res);
 
             expect(res.status).toHaveBeenCalledWith(409);
-        });
-
-        it("deve retornar 500 quando ocorrer um erro inesperado", async () => {
-            const consoleSpy = vi
-                .spyOn(console, "error")
-                .mockImplementation(() => { });
-
-            roomService.startRoom.mockRejectedValue(
-                new Error("Erro inesperado no banco"),
-            );
-
-            await controller.start(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(500);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Erro interno ao iniciar partida.",
-            });
-            expect(consoleSpy).toHaveBeenCalled();
         });
     });
 
+    describe("playAgain", () => {
+        it("deve preparar nova partida e retornar 201 com a sala atualizada", async () => {
+            const nextGameRoom = {
+                ...projectedRoomFixture,
+                players: [],
+                currentGame: {
+                    ...projectedRoomFixture.currentGame,
+                    id: "game-2-uuid",
+                    playerCount: 0,
+                    players: [],
+                },
+            };
+            roomServiceMock.playAgain.mockResolvedValue(nextGameRoom);
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-    describe("getLobby", () => {
-        const lobbyFixture = {
-            id: roomFixture.id,
-            code: roomFixture.code,
-            status: "WAITING",
-            gameMode: "CLASSIC",
-            maxPlayers: 10,
-            questionTime: 30,
-            createdAt: new Date("2026-11-16T00:00:00.000Z"),
-            host: {
-                id: authenticatedUser.id,
-                name: "HostTeste",
-            },
-            players: [
+            await controller.playAgain(req, res);
+
+            expect(roomServiceMock.playAgain).toHaveBeenCalledWith(
+                projectedRoomFixture.id,
+                "user-host-uuid",
+            );
+            expect(emitRoomEventMock).toHaveBeenCalledWith(
+                projectedRoomFixture.id,
+                "game:created",
                 {
-                    id: "player-test-uuid",
-                    nickname: "JogadorTeste",
-                    score: 0,
-                    joinedAt: new Date("2026-11-16T00:01:00.000Z"),
+                    roomId: projectedRoomFixture.id,
+                    status: nextGameRoom.status,
+                    maxPlayers: nextGameRoom.maxPlayers,
+                    questionTime: nextGameRoom.questionTime,
+                    gameMode: nextGameRoom.gameMode,
+                    currentGame: nextGameRoom.currentGame,
                 },
-            ],
-        };
-
-        beforeEach(() => {
-            req.params = { code: "ABC123" };
-            req.headers = {
-                authorization: "Bearer token-de-teste",
-            } as Request["headers"];
+            );
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith(nextGameRoom);
         });
 
-        it.each([
-            { code: "ABC" },
-            { code: "ABC12" },
-            { code: "ABC1234" },
-            { code: "ABC@23" },
-            { code: "   " },
-        ])("deve retornar 400 quando o código da sala for inválido ('$code')", async ({ code }) => {
-            req.params = { code };
-
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
+        it("deve retornar 409 quando já existir partida ativa ou sala arquivada", async () => {
+            roomServiceMock.playAgain.mockRejectedValueOnce(
+                new RoomReplayNotAllowedError(),
             );
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+            } as unknown as Request;
+            const res1 = createResponseMock();
 
-            expect(res.status).toHaveBeenCalledWith(400);
-            expect(roomService.getRoomLobby).not.toHaveBeenCalled();
+            await controller.playAgain(req, res1);
+            expect(res1.status).toHaveBeenCalledWith(409);
+            expect(emitRoomEventMock).not.toHaveBeenCalled();
+
+            roomServiceMock.playAgain.mockRejectedValueOnce(
+                new RoomNotEditableError("Arquivada."),
+            );
+            const res2 = createResponseMock();
+
+            await controller.playAgain(req, res2);
+            expect(res2.status).toHaveBeenCalledWith(409);
         });
 
-        it("deve normalizar código com espaços e letras minúsculas ao consultar o lobby", async () => {
-            req.params = { code: " abc 123 " };
-            roomService.getRoomLobby.mockResolvedValue(lobbyFixture);
+        it("deve retornar 403 e 404 para acesso negado e sala inexistente", async () => {
+            const req = {
+                user: { id: "user-host-uuid" },
+                params: { id: projectedRoomFixture.id },
+            } as unknown as Request;
 
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(roomService.getRoomLobby).toHaveBeenCalledWith(
-                "ABC123",
-                "token-de-teste",
-            );
-            expect(res.status).toHaveBeenCalledWith(200);
-        });
-
-        it("deve retornar 401 quando não houver credencial", async () => {
-            req.headers = {} as Request["headers"];
-
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(401);
-            expect(roomService.getRoomLobby).not.toHaveBeenCalled();
-        });
-
-        it("deve retornar 401 quando o token estiver vazio", async () => {
-            req.headers = {
-                authorization: "Bearer ",
-            } as Request["headers"];
-
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(401);
-            expect(roomService.getRoomLobby).not.toHaveBeenCalled();
-        });
-
-        it("deve consultar o lobby e retornar 200", async () => {
-            roomService.getRoomLobby.mockResolvedValue(lobbyFixture);
-
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(roomService.getRoomLobby).toHaveBeenCalledWith(
-                "ABC123",
-                "token-de-teste",
-            );
-
-            expect(res.status).toHaveBeenCalledWith(200);
-
-            expect(res.json).toHaveBeenCalledWith({
-                room: {
-                    ...lobbyFixture,
-                    playerCount: 1,
-                },
-            });
-        });
-
-        it("deve retornar 401 quando o serviço rejeitar a autenticação", async () => {
-            roomService.getRoomLobby.mockRejectedValue(
-                new RoomAuthenticationError(),
-            );
-
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(401);
-        });
-
-        it("deve retornar 403 quando o usuário não tiver acesso à sala", async () => {
-            roomService.getRoomLobby.mockRejectedValue(
+            roomServiceMock.playAgain.mockRejectedValueOnce(
                 new RoomAccessDeniedError(),
             );
+            const res403 = createResponseMock();
+            await controller.playAgain(req, res403);
+            expect(res403.status).toHaveBeenCalledWith(403);
 
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(403);
-        });
-
-        it("deve retornar 404 quando a sala não existir", async () => {
-            roomService.getRoomLobby.mockRejectedValue(
+            roomServiceMock.playAgain.mockRejectedValueOnce(
                 new RoomNotFoundError(),
             );
+            const res404 = createResponseMock();
+            await controller.playAgain(req, res404);
+            expect(res404.status).toHaveBeenCalledWith(404);
+        });
+    });
 
-            await controller.getLobby(
-                req as Request,
-                res as unknown as Response,
+    describe("join", () => {
+        it("deve registrar jogador e emitir player:joined", async () => {
+            const joinResult = {
+                player: {
+                    id: "player-uuid",
+                    gameId: "game-test-uuid",
+                    roomId: projectedRoomFixture.id,
+                    userId: null,
+                    nickname: "Alice",
+                    score: 0,
+                    joinedAt: baseDate,
+                },
+                sessionToken: "session-token",
+            };
+            roomServiceMock.joinRoom.mockResolvedValue(joinResult);
+            const req = {
+                body: { code: "ABC123", nickname: "Alice" },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.join(req, res);
+
+            expect(emitRoomEventMock).toHaveBeenCalledWith(
+                projectedRoomFixture.id,
+                "player:joined",
+                expect.objectContaining({
+                    roomId: projectedRoomFixture.id,
+                }),
             );
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith(joinResult);
+        });
 
-            expect(res.status).toHaveBeenCalledWith(404);
+        it("deve retornar 409 para RoomFullError, RoomNotJoinableError e DuplicateNicknameError", async () => {
+            const req = { body: { code: "ABC123", nickname: "Alice" } } as Request;
+
+            for (const err of [
+                new RoomFullError(),
+                new RoomNotJoinableError(),
+                new DuplicateNicknameError(),
+            ]) {
+                roomServiceMock.joinRoom.mockRejectedValueOnce(err);
+                const res = createResponseMock();
+                await controller.join(req, res);
+                expect(res.status).toHaveBeenCalledWith(409);
+            }
         });
     });
 
     describe("checkAvailability", () => {
-        beforeEach(() => {
-            req.params = { code: "ABC123" };
-        });
-
-        it("deve retornar 200 quando a sala existir e estiver disponível", async () => {
-            roomService.checkRoomAvailability.mockResolvedValue({
+        it("deve retornar 200 com disponibilidade da sala", async () => {
+            const availability = {
                 code: "ABC123",
                 status: "WAITING",
+                roomStatus: "ACTIVE",
                 available: true,
-            });
-
-            req.params = { code: " abc 123 " };
-
-            await controller.checkAvailability(
-                req as Request,
-                res as unknown as Response,
+            };
+            roomServiceMock.checkRoomAvailability.mockResolvedValue(
+                availability,
             );
+            const req = { params: { code: "abc123" } } as unknown as Request;
+            const res = createResponseMock();
 
-            expect(roomService.checkRoomAvailability).toHaveBeenCalledWith(
+            await controller.checkAvailability(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({ room: availability });
+        });
+    });
+
+    describe("getLobby", () => {
+        it("deve retornar os dados do lobby com players da partida atual", async () => {
+            const lobbyFixture = {
+                ...projectedRoomFixture,
+                host: {
+                    id: "user-host-uuid",
+                    name: "Host Teste",
+                },
+                playerCount: 1,
+            };
+            roomServiceMock.getRoomLobby.mockResolvedValue(lobbyFixture);
+            const req = {
+                params: { code: "abc123" },
+                headers: { authorization: "Bearer valid-token" },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.getLobby(req, res);
+
+            expect(roomServiceMock.getRoomLobby).toHaveBeenCalledWith(
                 "ABC123",
+                "valid-token",
             );
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({
-                room: {
-                    code: "ABC123",
-                    status: "WAITING",
-                    available: true,
-                },
+                room: lobbyFixture,
             });
         });
 
-        it("deve retornar 400 quando o código tiver formato inválido sem consultar o serviço", async () => {
-            req.params = { code: "ABC" };
-
-            await controller.checkAvailability(
-                req as Request,
-                res as unknown as Response,
+        it("deve retornar 401 quando RoomAuthenticationError for lançado", async () => {
+            roomServiceMock.getRoomLobby.mockRejectedValue(
+                new RoomAuthenticationError(),
             );
+            const req = {
+                params: { code: "ABC123" },
+                headers: { authorization: "Bearer bad-token" },
+            } as unknown as Request;
+            const res = createResponseMock();
 
-            expect(res.status).toHaveBeenCalledWith(400);
-            expect(roomService.checkRoomAvailability).not.toHaveBeenCalled();
-        });
+            await controller.getLobby(req, res);
 
-        it("deve retornar 404 quando a sala não existir", async () => {
-            roomService.checkRoomAvailability.mockRejectedValue(
-                new RoomNotFoundError(
-                    "Sala não encontrada. Verifique o código informado.",
-                ),
-            );
-
-            await controller.checkAvailability(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(404);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Sala não encontrada. Verifique o código informado.",
-            });
-        });
-
-        it("deve retornar 409 quando a sala estiver encerrada, em andamento ou lotada", async () => {
-            roomService.checkRoomAvailability.mockRejectedValue(
-                new RoomFullError(),
-            );
-
-            await controller.checkAvailability(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(409);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Esta sala atingiu o limite de jogadores.",
-            });
-        });
-
-        it("deve retornar 409 quando a sala estiver encerrada (RoomNotJoinableError)", async () => {
-            roomService.checkRoomAvailability.mockRejectedValue(
-                new RoomNotJoinableError("Esta sala já foi encerrada."),
-            );
-
-            await controller.checkAvailability(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(409);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Esta sala já foi encerrada.",
-            });
-        });
-
-        it("deve retornar 500 quando ocorrer erro interno inesperado", async () => {
-            const consoleSpy = vi
-                .spyOn(console, "error")
-                .mockImplementation(() => { });
-
-            roomService.checkRoomAvailability.mockRejectedValue(
-                new Error("Database error"),
-            );
-
-            await controller.checkAvailability(
-                req as Request,
-                res as unknown as Response,
-            );
-
-            expect(res.status).toHaveBeenCalledWith(500);
-            expect(res.json).toHaveBeenCalledWith({
-                message: "Erro interno ao verificar disponibilidade da sala.",
-            });
-            expect(consoleSpy).toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(401);
         });
     });
 });

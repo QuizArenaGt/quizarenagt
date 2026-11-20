@@ -1,5 +1,18 @@
 
-import type { Role, RoomPlayer } from "@prisma/client";
+import type { GamePlayer, GameStatus, Role, RoomStatus } from "@prisma/client";
+
+export type AuthenticatedGamePlayer = GamePlayer & {
+    roomId: string;
+    game?: {
+        id: string;
+        roomId: string;
+        status: GameStatus;
+        room?: {
+            id: string;
+            status: RoomStatus;
+        };
+    };
+};
 
 declare global {
     namespace Express {
@@ -9,7 +22,7 @@ declare global {
                 role: Role;
             };
 
-            roomPlayer?: RoomPlayer;
+            roomPlayer?: AuthenticatedGamePlayer;
         }
     }
 }

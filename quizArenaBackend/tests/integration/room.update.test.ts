@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { hash } from "bcryptjs";
-import { RoomStatus } from "@prisma/client";
+import { GameStatus, RoomStatus } from "@prisma/client";
 
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
@@ -88,8 +88,16 @@ describe("PATCH /rooms/:id - Integração", () => {
             data: {
                 code: `UPD${Date.now().toString().slice(-3)}${Math.floor(Math.random() * 1000)}`,
                 hostId,
+                status: RoomStatus.ACTIVE,
                 maxPlayers: 10,
                 questionTime: 30,
+                games: {
+                    create: {
+                        status: GameStatus.WAITING,
+                        maxPlayers: 10,
+                        questionTime: 30,
+                    },
+                },
             },
         });
     }
@@ -245,19 +253,19 @@ describe("PATCH /rooms/:id - Integração", () => {
         expect(unchangedRoom?.maxPlayers).toBe(10);
     });
 
-    it("deve retornar 409 quando a sala já estiver em andamento", async () => {
+    it("deve retornar 409 quando a partida já estiver em andamento", async () => {
         const { user, token } = await createUserAndToken(
             "room.update.host@email.com",
         );
 
         const room = await createRoom(user.id);
 
-        await prisma.room.update({
+        await prisma.game.updateMany({
             where: {
-                id: room.id,
+                roomId: room.id,
             },
             data: {
-                status: RoomStatus.IN_PROGRESS,
+                status: GameStatus.IN_PROGRESS,
             },
         });
 
@@ -274,9 +282,12 @@ describe("PATCH /rooms/:id - Integração", () => {
             where: {
                 id: room.id,
             },
+            include: {
+                games: true,
+            },
         });
 
         expect(unchangedRoom?.maxPlayers).toBe(10);
-        expect(unchangedRoom?.status).toBe(RoomStatus.IN_PROGRESS);
+        expect(unchangedRoom?.games[0]?.status).toBe(GameStatus.IN_PROGRESS);
     });
 });

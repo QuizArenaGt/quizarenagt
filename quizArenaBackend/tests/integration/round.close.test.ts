@@ -116,10 +116,15 @@ async function createStartedRoom() {
 
     await createQuestions(context.room.id, 5);
 
-    await prisma.roomPlayer.createMany({
+    const initialGame = await prisma.game.findFirstOrThrow({
+        where: { roomId: context.room.id },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+
+    await prisma.gamePlayer.createMany({
         data: [
-            { roomId: context.room.id, nickname: "Jogador 1" },
-            { roomId: context.room.id, nickname: "Jogador 2" },
+            { gameId: initialGame.id, nickname: "Jogador 1" },
+            { gameId: initialGame.id, nickname: "Jogador 2" },
         ],
     });
 
@@ -158,8 +163,8 @@ async function submitAnswersDirectly(
                 },
             },
         }),
-        prisma.roomPlayer.findMany({
-            where: { roomId },
+        prisma.gamePlayer.findMany({
+            where: { game: { roomId } },
         }),
     ]);
 
@@ -175,7 +180,7 @@ async function submitAnswersDirectly(
         await prisma.roundAnswer.create({
             data: {
                 roundId,
-                roomPlayerId: player.id,
+                gamePlayerId: player.id,
                 optionId: correctOption.id,
                 answeredAt: new Date(),
                 isCorrect: true,
@@ -183,7 +188,7 @@ async function submitAnswersDirectly(
             },
         });
 
-        await prisma.roomPlayer.update({
+        await prisma.gamePlayer.update({
             where: { id: player.id },
             data: {
                 score: { increment: 120 },
@@ -244,8 +249,8 @@ describe("POST /rounds/:id/close - Integração", () => {
             ),
         ).toBe(true);
 
-        const playersBeforeRetry = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const playersBeforeRetry = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
             orderBy: { nickname: "asc" },
         });
 
@@ -255,8 +260,8 @@ describe("POST /rounds/:id/close - Integração", () => {
 
         expect(retryResponse.status).toBe(200);
 
-        const playersAfterRetry = await prisma.roomPlayer.findMany({
-            where: { roomId: room.id },
+        const playersAfterRetry = await prisma.gamePlayer.findMany({
+            where: { game: { roomId: room.id } },
             orderBy: { nickname: "asc" },
         });
 
@@ -272,6 +277,7 @@ describe("POST /rounds/:id/close - Integração", () => {
             where: { id: roundId },
             data: {
                 openedAt: new Date(Date.now() - 31_000),
+                expiresAt: new Date(Date.now() - 1_000),
             },
         });
 

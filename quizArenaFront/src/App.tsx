@@ -27,6 +27,7 @@ function ProtectedRoute() {
     const [status, setStatus] = useState<
         "checking" | "authenticated" | "unauthorized" | "error"
     >("checking");
+    const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
 
     useEffect(() => {
         let active = true;
@@ -35,17 +36,21 @@ function ProtectedRoute() {
             const token = localStorage.getItem("token");
 
             if (!token) {
-                if (active) setStatus("unauthorized");
+                if (active) {
+                    setAuthenticatedUserId(null);
+                    setStatus("unauthorized");
+                }
                 return;
             }
 
             try {
-                await apiRequest<AuthenticatedUser>("/auth/me", {
+                const user = await apiRequest<AuthenticatedUser>("/auth/me", {
                     method: "GET",
                     token,
                 });
 
                 if (active) {
+                    setAuthenticatedUserId(user.id);
                     setStatus("authenticated");
                 }
             } catch (error) {
@@ -54,6 +59,7 @@ function ProtectedRoute() {
                 if (error instanceof ApiError && error.status === 401) {
                     localStorage.removeItem("token");
                     localStorage.removeItem("user");
+                    setAuthenticatedUserId(null);
                     setStatus("unauthorized");
                     return;
                 }
@@ -89,7 +95,12 @@ function ProtectedRoute() {
         );
     }
 
-    return <DashboardForm />;
+    return (
+        <DashboardForm
+            key={authenticatedUserId ?? "session"}
+            authenticatedUserId={authenticatedUserId}
+        />
+    );
 }
 
 function AppRoutes() {

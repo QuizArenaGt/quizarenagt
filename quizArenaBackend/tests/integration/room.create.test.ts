@@ -113,6 +113,9 @@ describe("POST /rooms - Integração", () => {
             where: {
                 id: response.body.id,
             },
+            include: {
+                games: true,
+            },
         });
 
         const questions = await prisma.question.findMany({
@@ -129,7 +132,9 @@ describe("POST /rooms - Integração", () => {
         expect(room?.maxPlayers).toBe(10);
         expect(room?.questionTime).toBe(30);
         expect(room?.gameMode).toBe("CLASSIC");
-        expect(room?.status).toBe("WAITING");
+        expect(room?.status).toBe("ACTIVE");
+        expect(room?.games).toHaveLength(1);
+        expect(room?.games[0]?.status).toBe("WAITING");
     });
 
     it("deve criar uma sala no modo HARDCORE", async () => {

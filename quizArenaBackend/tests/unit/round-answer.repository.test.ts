@@ -1,404 +1,307 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+const { prismaMock, transactionClient } = vi.hoisted(() => {
+    const transactionClient = {
+        $queryRaw: vi.fn(),
+        round: {
+            findUnique: vi.fn(),
+        },
+        gamePlayer: {
+            findUnique: vi.fn(),
+            update: vi.fn(),
+        },
+        roundAnswer: {
+            findUnique: vi.fn(),
+            create: vi.fn(),
+        },
+    };
 
-import { RoundAnswerRepository } from "../../src/round-answers/round-answer.repository.js";
-import { prisma } from "../../src/database/prisma.js";
+    return {
+        transactionClient,
+        prismaMock: {
+            $transaction: vi.fn(
+                async (
+                    callback: (tx: typeof transactionClient) => Promise<unknown>,
+                ) => callback(transactionClient),
+            ),
+        },
+    };
+});
 
 vi.mock("../../src/database/prisma.js", () => ({
-    prisma: {
-        $transaction: vi.fn(),
-    },
+    prisma: prismaMock,
 }));
 
-const transactionClient = {
-    $queryRaw: vi.fn(),
-    round: {
-        findUnique: vi.fn(),
-    },
-    roomPlayer: {
-        findUnique: vi.fn(),
-        update: vi.fn(),
-    },
-    roundAnswer: {
-        findUnique: vi.fn(),
-        create: vi.fn(),
-    },
-};
-
-type TransactionCallback = (
-    tx: typeof transactionClient,
-) => Promise<unknown>;
-
-const transactionMock = (
-    prisma as unknown as {
-        $transaction: ReturnType<typeof vi.fn>;
-    }
-).$transaction;
-
-const roundFixture = {
-    id: "round-test-uuid",
-    status: "OPEN",
-    openedAt: new Date(Date.now() - 1000),
-    timeLimit: 60,
-    game: {
-        id: "game-test-uuid",
-        roomId: "room-test-uuid",
-        finishedAt: null,
-        room: {
-            id: "room-test-uuid",
-            status: "IN_PROGRESS",
-            gameMode: "CLASSIC",
-        },
-    },
-    snapshotQuestion: {
-        id: "snapshot-question-uuid",
-        options: [
-            {
-                id: "option-correct-uuid",
-                text: "Correta",
-                isCorrect: true,
-            },
-            {
-                id: "option-wrong-uuid",
-                text: "Incorreta",
-                isCorrect: false,
-            },
-        ],
-    },
-};
-
-const playerFixture = {
-    roomId: "room-test-uuid",
-};
+import { RoundAnswerRepository } from "../../src/round-answers/round-answer.repository.js";
 
 describe("RoundAnswerRepository", () => {
     let repository: RoundAnswerRepository;
 
+    const roundFixture = {
+        id: "round-test-uuid",
+        gameId: "game-test-uuid",
+        snapshotQuestionId: "snap-question-1",
+        roundNumber: 1,
+        status: "OPEN" as const,
+        openedAt: new Date("2026-11-18T12:00:00.000Z"),
+        closedAt: null,
+        timeLimit: 30,
+        game: {
+            id: "game-test-uuid",
+            roomId: "room-test-uuid",
+            status: "IN_PROGRESS" as const,
+            gameMode: "CLASSIC" as const,
+            finishedAt: null,
+            room: {
+                id: "room-test-uuid",
+                status: "ACTIVE" as const,
+            },
+        },
+        snapshotQuestion: {
+            id: "snap-question-1",
+            options: [
+                {
+                    id: "option-correct",
+                    text: "Correta",
+                    isCorrect: true,
+                },
+                {
+                    id: "option-wrong",
+                    text: "Errada",
+                    isCorrect: false,
+                },
+            ],
+        },
+    };
+
     beforeEach(() => {
         vi.clearAllMocks();
-
-        transactionMock.mockImplementation(
-            (callback: TransactionCallback) =>
-                callback(transactionClient),
-        );
-
-        transactionClient.$queryRaw.mockResolvedValue([]);
-        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
-        transactionClient.roomPlayer.findUnique.mockResolvedValue(playerFixture);
-        transactionClient.roomPlayer.update.mockResolvedValue({});
-        transactionClient.roundAnswer.findUnique.mockResolvedValue(null);
-
-        transactionClient.roundAnswer.create.mockImplementation(
-            async ({ data }: { data: Record<string, unknown> }) => ({
-                id: "answer-test-uuid",
-                ...data,
-            }),
-        );
-
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-11-18T12:00:15.000Z"));
         repository = new RoundAnswerRepository();
     });
 
-    describe("submitAnswer", () => {
-        it("deve registrar uma resposta correta e atualizar a pontuação", async () => {
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
+    afterEach(() => {
+        vi.useRealTimers();
+    });
 
-            expect(transactionMock).toHaveBeenCalled();
-            expect(transactionClient.$queryRaw).toHaveBeenCalled();
+    it("deve registrar uma resposta correta e atualizar a pontuação do GamePlayer", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: roundFixture.gameId,
+        });
+        transactionClient.roundAnswer.findUnique.mockResolvedValue(null);
+        const createdAnswer = {
+            id: "answer-uuid",
+            roundId: roundFixture.id,
+            gamePlayerId: "gp-1",
+            optionId: "option-correct",
+            isCorrect: true,
+            answeredAt: new Date("2026-11-18T12:00:15.000Z"),
+            points: 125,
+        };
+        transactionClient.roundAnswer.create.mockResolvedValue(createdAnswer);
 
-            expect(transactionClient.roundAnswer.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    roundId: "round-test-uuid",
-                    roomPlayerId: "player-test-uuid",
-                    optionId: "option-correct-uuid",
-                    isCorrect: true,
-                    answeredAt: expect.any(Date),
-                    points: expect.any(Number),
-                }),
-            });
+        const result = await repository.submitAnswer(
+            roundFixture.id,
+            "gp-1",
+            "option-correct",
+        );
 
-            const createdAnswer =
-                transactionClient.roundAnswer.create.mock.calls[0][0].data;
+        expect(transactionClient.roundAnswer.create).toHaveBeenCalledWith({
+            data: {
+                roundId: roundFixture.id,
+                gamePlayerId: "gp-1",
+                optionId: "option-correct",
+                isCorrect: true,
+                answeredAt: new Date("2026-11-18T12:00:15.000Z"),
+                points: 125,
+            },
+        });
+        expect(transactionClient.gamePlayer.update).toHaveBeenCalledWith({
+            where: { id: "gp-1" },
+            data: {
+                score: { increment: 125 },
+            },
+        });
+        expect(result).toEqual({ success: true, answer: createdAnswer });
+    });
 
-            expect(createdAnswer.points).toBeGreaterThanOrEqual(100);
-            expect(createdAnswer.points).toBeLessThanOrEqual(150);
-
-            expect(transactionClient.roomPlayer.update).toHaveBeenCalledWith({
-                where: {
-                    id: "player-test-uuid",
-                },
-                data: {
-                    score: {
-                        increment: createdAnswer.points,
-                    },
-                },
-            });
-
-            expect(result).toEqual({
-                success: true,
-                answer: {
-                    id: "answer-test-uuid",
-                    ...createdAnswer,
-                },
-            });
+    it("deve registrar resposta incorreta no modo CLASSIC sem pontuação e descontar 30 no HARDCORE", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: roundFixture.gameId,
+        });
+        transactionClient.roundAnswer.findUnique.mockResolvedValue(null);
+        transactionClient.roundAnswer.create.mockResolvedValue({
+            id: "ans-classic",
+            points: 0,
         });
 
-        it("deve registrar uma resposta incorreta no modo CLASSIC sem pontuação", async () => {
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-wrong-uuid",
-            );
+        await repository.submitAnswer(roundFixture.id, "gp-1", "option-wrong");
+        expect(transactionClient.roundAnswer.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ points: 0 }),
+            }),
+        );
 
-            expect(transactionClient.roundAnswer.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    roundId: "round-test-uuid",
-                    roomPlayerId: "player-test-uuid",
-                    optionId: "option-wrong-uuid",
-                    isCorrect: false,
-                    points: 0,
-                }),
-            });
-
-            expect(transactionClient.roomPlayer.update).toHaveBeenCalledWith({
-                where: {
-                    id: "player-test-uuid",
-                },
-                data: {
-                    score: {
-                        increment: 0,
-                    },
-                },
-            });
-
-            expect(result).toMatchObject({
-                success: true,
-                answer: {
-                    isCorrect: false,
-                    points: 0,
-                },
-            });
+        transactionClient.round.findUnique.mockResolvedValue({
+            ...roundFixture,
+            game: { ...roundFixture.game, gameMode: "HARDCORE" },
+        });
+        transactionClient.roundAnswer.create.mockResolvedValue({
+            id: "ans-hardcore",
+            points: -30,
         });
 
-        it("deve descontar 30 pontos por uma resposta incorreta no modo HARDCORE", async () => {
-            transactionClient.round.findUnique.mockResolvedValue({
-                ...roundFixture,
-                game: {
-                    ...roundFixture.game,
-                    room: {
-                        ...roundFixture.game.room,
-                        gameMode: "HARDCORE",
-                    },
-                },
-            });
+        await repository.submitAnswer(roundFixture.id, "gp-1", "option-wrong");
+        expect(transactionClient.roundAnswer.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ points: -30 }),
+            }),
+        );
+        expect(transactionClient.gamePlayer.update).toHaveBeenCalledWith({
+            where: { id: "gp-1" },
+            data: { score: { increment: -30 } },
+        });
+    });
 
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-wrong-uuid",
-            );
+    it("deve retornar ROUND_NOT_FOUND quando a rodada não existir", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(null);
 
-            expect(transactionClient.roundAnswer.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    isCorrect: false,
-                    points: -30,
-                }),
-            });
+        const result = await repository.submitAnswer(
+            "missing",
+            "gp-1",
+            "option-correct",
+        );
 
-            expect(transactionClient.roomPlayer.update).toHaveBeenCalledWith({
-                where: {
-                    id: "player-test-uuid",
-                },
-                data: {
-                    score: {
-                        increment: -30,
-                    },
-                },
-            });
+        expect(result).toEqual({
+            success: false,
+            reason: "ROUND_NOT_FOUND",
+        });
+    });
 
-            expect(result).toMatchObject({
-                success: true,
-                answer: {
-                    isCorrect: false,
-                    points: -30,
-                },
-            });
+    it("deve rejeitar GamePlayer de outra partida (inclusive partida anterior da mesma sala)", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: "other-game-uuid",
         });
 
-        it("deve retornar ROUND_NOT_FOUND quando a rodada não existir", async () => {
-            transactionClient.round.findUnique.mockResolvedValue(null);
+        const result = await repository.submitAnswer(
+            roundFixture.id,
+            "gp-from-game-1",
+            "option-correct",
+        );
 
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
+        expect(result).toEqual({
+            success: false,
+            reason: "PLAYER_NOT_IN_ROOM",
+        });
+    });
 
-            expect(result).toEqual({
-                success: false,
-                reason: "ROUND_NOT_FOUND",
-            });
+    it("deve rejeitar participante inexistente", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+        transactionClient.gamePlayer.findUnique.mockResolvedValue(null);
 
-            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
-            expect(transactionClient.roomPlayer.update).not.toHaveBeenCalled();
+        const result = await repository.submitAnswer(
+            roundFixture.id,
+            "missing-player",
+            "option-correct",
+        );
+
+        expect(result).toEqual({
+            success: false,
+            reason: "PLAYER_NOT_IN_ROOM",
+        });
+    });
+
+    it("deve rejeitar rodada fechada", async () => {
+        transactionClient.round.findUnique.mockResolvedValue({
+            ...roundFixture,
+            status: "CLOSED",
+        });
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: roundFixture.gameId,
         });
 
-        it("deve rejeitar um participante que não pertence à sala", async () => {
-            transactionClient.roomPlayer.findUnique.mockResolvedValue({
-                roomId: "another-room-uuid",
-            });
+        const result = await repository.submitAnswer(
+            roundFixture.id,
+            "gp-1",
+            "option-correct",
+        );
 
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
+        expect(result).toEqual({
+            success: false,
+            reason: "ROUND_NOT_OPEN",
+        });
+    });
 
-            expect(result).toEqual({
-                success: false,
-                reason: "PLAYER_NOT_IN_ROOM",
-            });
-
-            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
+    it("deve rejeitar partida finalizada, cancelada ou sala arquivada", async () => {
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: roundFixture.gameId,
         });
 
-        it("deve rejeitar um participante inexistente", async () => {
-            transactionClient.roomPlayer.findUnique.mockResolvedValue(null);
+        transactionClient.round.findUnique.mockResolvedValueOnce({
+            ...roundFixture,
+            game: { ...roundFixture.game, status: "FINISHED", finishedAt: new Date() },
+        });
+        expect(
+            await repository.submitAnswer(
+                roundFixture.id,
+                "gp-1",
+                "option-correct",
+            ),
+        ).toEqual({ success: false, reason: "GAME_NOT_IN_PROGRESS" });
 
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
+        transactionClient.round.findUnique.mockResolvedValueOnce({
+            ...roundFixture,
+            game: {
+                ...roundFixture.game,
+                room: { id: "room-test-uuid", status: "ARCHIVED" },
+            },
+        });
+        expect(
+            await repository.submitAnswer(
+                roundFixture.id,
+                "gp-1",
+                "option-correct",
+            ),
+        ).toEqual({ success: false, reason: "GAME_NOT_IN_PROGRESS" });
+    });
 
-            expect(result).toEqual({
-                success: false,
-                reason: "PLAYER_NOT_IN_ROOM",
-            });
+    it("deve rejeitar alternativa inválida, duplicada ou com tempo expirado", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: roundFixture.gameId,
         });
 
-        it("deve rejeitar uma rodada fechada", async () => {
-            transactionClient.round.findUnique.mockResolvedValue({
-                ...roundFixture,
-                status: "CLOSED",
-            });
+        expect(
+            await repository.submitAnswer(
+                roundFixture.id,
+                "gp-1",
+                "option-invalid",
+            ),
+        ).toEqual({ success: false, reason: "OPTION_NOT_VALID" });
 
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "ROUND_NOT_OPEN",
-            });
-
-            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
+        transactionClient.roundAnswer.findUnique.mockResolvedValueOnce({
+            id: "existing",
         });
+        expect(
+            await repository.submitAnswer(
+                roundFixture.id,
+                "gp-1",
+                "option-correct",
+            ),
+        ).toEqual({ success: false, reason: "ALREADY_ANSWERED" });
 
-        it("deve rejeitar uma sala que não esteja em andamento", async () => {
-            transactionClient.round.findUnique.mockResolvedValue({
-                ...roundFixture,
-                game: {
-                    ...roundFixture.game,
-                    room: {
-                        ...roundFixture.game.room,
-                        status: "FINISHED",
-                    },
-                },
-            });
-
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "GAME_NOT_IN_PROGRESS",
-            });
-        });
-
-        it("deve rejeitar uma partida finalizada", async () => {
-            transactionClient.round.findUnique.mockResolvedValue({
-                ...roundFixture,
-                game: {
-                    ...roundFixture.game,
-                    finishedAt: new Date(),
-                },
-            });
-
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "GAME_NOT_IN_PROGRESS",
-            });
-        });
-
-        it("deve rejeitar uma alternativa que não pertence à pergunta da rodada", async () => {
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-from-another-question",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "OPTION_NOT_VALID",
-            });
-
-            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
-        });
-
-        it("deve rejeitar uma segunda resposta do mesmo participante", async () => {
-            transactionClient.roundAnswer.findUnique.mockResolvedValue({
-                id: "existing-answer-uuid",
-            });
-
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "ALREADY_ANSWERED",
-            });
-
-            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
-        });
-
-        it("deve rejeitar uma resposta enviada após o tempo da rodada", async () => {
-            transactionClient.round.findUnique.mockResolvedValue({
-                ...roundFixture,
-                openedAt: new Date(Date.now() - 61_000),
-                timeLimit: 60,
-            });
-
-            const result = await repository.submitAnswer(
-                "round-test-uuid",
-                "player-test-uuid",
-                "option-correct-uuid",
-            );
-
-            expect(result).toEqual({
-                success: false,
-                reason: "ROUND_TIME_EXPIRED",
-            });
-
-            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
-            expect(transactionClient.roomPlayer.update).not.toHaveBeenCalled();
-        });
+        transactionClient.roundAnswer.findUnique.mockResolvedValueOnce(null);
+        vi.setSystemTime(new Date("2026-11-18T12:00:31.000Z"));
+        expect(
+            await repository.submitAnswer(
+                roundFixture.id,
+                "gp-1",
+                "option-correct",
+            ),
+        ).toEqual({ success: false, reason: "ROUND_TIME_EXPIRED" });
     });
 });

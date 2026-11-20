@@ -8,7 +8,7 @@ import {
     it,
 } from "vitest";
 import request from "supertest";
-import { QuestionType, Role, RoomStatus } from "@prisma/client";
+import { GameStatus, QuestionType, Role, RoomStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import { app } from "../../src/app.js";
@@ -90,6 +90,13 @@ describe("PUT /questions/:id - Integração", () => {
                     hostId,
                     maxPlayers: 10,
                     questionTime: 20,
+                    games: {
+                        create: {
+                            status: GameStatus.WAITING,
+                            maxPlayers: 10,
+                            questionTime: 20,
+                        },
+                    },
                 },
             });
 
@@ -139,7 +146,18 @@ describe("PUT /questions/:id - Integração", () => {
                 },
             },
             data: {
-                status: RoomStatus.WAITING,
+                status: RoomStatus.ACTIVE,
+            },
+        });
+
+        await prisma.game.updateMany({
+            where: {
+                roomId: {
+                    in: roomIds,
+                },
+            },
+            data: {
+                status: GameStatus.WAITING,
             },
         });
     });
@@ -331,15 +349,15 @@ describe("PUT /questions/:id - Integração", () => {
         expect(response.status).toBe(404);
     });
 
-    it("deve retornar 409 quando a sala estiver em andamento", async () => {
+    it("deve retornar 409 quando a partida estiver em andamento", async () => {
         const created = await createQuestion(
             adminRoomId,
             adminToken,
         );
 
-        await prisma.room.update({
-            where: { id: adminRoomId },
-            data: { status: RoomStatus.IN_PROGRESS },
+        await prisma.game.updateMany({
+            where: { roomId: adminRoomId },
+            data: { status: GameStatus.IN_PROGRESS },
         });
 
         const response = await updateQuestion(
@@ -351,7 +369,7 @@ describe("PUT /questions/:id - Integração", () => {
         expect(response.status).toBe(409);
     });
 
-    it("deve retornar 409 quando a sala estiver finalizada", async () => {
+    it("deve retornar 409 quando a sala estiver arquivada", async () => {
         const created = await createQuestion(
             adminRoomId,
             adminToken,
@@ -359,7 +377,7 @@ describe("PUT /questions/:id - Integração", () => {
 
         await prisma.room.update({
             where: { id: adminRoomId },
-            data: { status: RoomStatus.FINISHED },
+            data: { status: RoomStatus.ARCHIVED },
         });
 
         const response = await updateQuestion(

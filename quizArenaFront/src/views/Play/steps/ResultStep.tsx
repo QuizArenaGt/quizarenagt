@@ -84,7 +84,7 @@ export default function ResultStep({
 
             <div className="play-result__actions">
                 <Button size="lg" onClick={onPlayAgain}>
-                    Entrar em outra sala
+                    Jogar novamente
                 </Button>
                 <Button size="lg" variant="secondary" onClick={onLeave}>
                     Voltar ao início

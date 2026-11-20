@@ -7,11 +7,13 @@ import {
     RoomNotFoundError,
     RoomAccessDeniedError,
     RoomNotEditableError,
+    RoomReplayNotAllowedError,
     RoomNotJoinableError,
     RoomFullError,
     DuplicateNicknameError,
     RoomAuthenticationError,
     RoomStartRequirementsError,
+    RoomGameNotFoundError,
 } from "./room.errors.js";
 import { emitRoomEvent } from "../realtime/room-events.js";
 
@@ -48,6 +50,31 @@ export class RoomController {
 
             res.status(500).json({
                 message: "Erro interno ao criar sala.",
+            });
+        }
+    }
+
+    async listByHost(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        try {
+            const rooms = await this.roomService.listHostRooms(
+                req.user.id,
+            );
+
+            res.status(200).json({
+                rooms,
+            });
+        } catch {
+            console.error("Erro interno ao listar salas do host.");
+
+            res.status(500).json({
+                message: "Erro interno ao listar salas.",
             });
         }
     }
@@ -181,6 +208,72 @@ export class RoomController {
 
             res.status(500).json({
                 message: "Erro interno ao iniciar partida.",
+            });
+        }
+    }
+
+    async playAgain(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+
+        if (typeof roomId !== "string") {
+            res.status(400).json({
+                message: "Identificador da sala inválido.",
+            });
+            return;
+        }
+
+        try {
+            const room = await this.roomService.playAgain(
+                roomId,
+                req.user.id,
+            );
+
+            emitRoomEvent(room.id, "game:created", {
+                roomId: room.id,
+                status: room.status,
+                maxPlayers: room.maxPlayers,
+                questionTime: room.questionTime,
+                gameMode: room.gameMode,
+                currentGame: room.currentGame,
+            });
+
+            res.status(201).json(room);
+        } catch (error: unknown) {
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (
+                error instanceof RoomNotEditableError ||
+                error instanceof RoomReplayNotAllowedError
+            ) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao preparar nova partida.");
+
+            res.status(500).json({
+                message: "Erro interno ao preparar nova partida.",
             });
         }
     }
@@ -325,18 +418,7 @@ export class RoomController {
             );
 
             res.status(200).json({
-                room: {
-                    id: room.id,
-                    code: room.code,
-                    status: room.status,
-                    gameMode: room.gameMode,
-                    maxPlayers: room.maxPlayers,
-                    questionTime: room.questionTime,
-                    createdAt: room.createdAt,
-                    host: room.host,
-                    players: room.players,
-                    playerCount: room.players.length,
-                },
+                room,
             });
         } catch (error: unknown) {
             if (error instanceof RoomAuthenticationError) {
@@ -368,5 +450,107 @@ export class RoomController {
         }
     }
 
+    async listGames(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+
+        if (typeof roomId !== "string") {
+            res.status(400).json({
+                message: "Identificador da sala inválido.",
+            });
+            return;
+        }
+
+        try {
+            const games = await this.roomService.listRoomGames(
+                roomId,
+                req.user.id,
+            );
+
+            res.status(200).json({
+                games,
+            });
+        } catch (error: unknown) {
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao consultar histórico de partidas.");
+
+            res.status(500).json({
+                message: "Erro interno ao consultar histórico de partidas.",
+            });
+        }
+    }
+
+    async getGameResults(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+        const gameId = req.params.gameId;
+
+        if (typeof roomId !== "string" || typeof gameId !== "string") {
+            res.status(400).json({
+                message: "Identificador da sala ou da partida inválido.",
+            });
+            return;
+        }
+
+        try {
+            const game = await this.roomService.getGameResults(
+                roomId,
+                gameId,
+                req.user.id,
+            );
+
+            res.status(200).json({
+                game,
+            });
+        } catch (error: unknown) {
+            if (
+                error instanceof RoomNotFoundError ||
+                error instanceof RoomGameNotFoundError
+            ) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao consultar resultados da partida.");
+
+            res.status(500).json({
+                message: "Erro interno ao consultar resultados da partida.",
+            });
+        }
+    }
 
 }

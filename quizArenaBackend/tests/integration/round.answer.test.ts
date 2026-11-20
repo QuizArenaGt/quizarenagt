@@ -283,8 +283,8 @@ describe("POST /rounds/:id/answer - Integração", () => {
         const { room, roundId, sessionToken } =
             await createStartedRoom();
 
-        await prisma.room.update({
-            where: { id: room.id },
+        await prisma.game.updateMany({
+            where: { roomId: room.id },
             data: {
                 status: "FINISHED",
             },
@@ -390,13 +390,13 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(response.body.answer).not.toHaveProperty("isCorrect");
         expect(response.body.answer).not.toHaveProperty("points");
         expect(response.body.answer).not.toHaveProperty("optionId");
-        expect(response.body.answer).not.toHaveProperty("roomPlayerId");
+        expect(response.body.answer).not.toHaveProperty("gamePlayerId");
 
         const persistedAnswer = await prisma.roundAnswer.findUnique({
             where: {
-                roundId_roomPlayerId: {
+                roundId_gamePlayerId: {
                     roundId,
-                    roomPlayerId: player.id,
+                    gamePlayerId: player.id,
                 },
             },
         });
@@ -409,7 +409,7 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedAnswer?.points).toBeGreaterThanOrEqual(100);
         expect(persistedAnswer?.points).toBeLessThanOrEqual(150);
 
-        const persistedPlayer = await prisma.roomPlayer.findUnique({
+        const persistedPlayer = await prisma.gamePlayer.findUnique({
             where: { id: player.id },
         });
 
@@ -445,13 +445,13 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(response.body.answer).not.toHaveProperty("isCorrect");
         expect(response.body.answer).not.toHaveProperty("points");
         expect(response.body.answer).not.toHaveProperty("optionId");
-        expect(response.body.answer).not.toHaveProperty("roomPlayerId");
+        expect(response.body.answer).not.toHaveProperty("gamePlayerId");
 
         const persistedAnswer = await prisma.roundAnswer.findUnique({
             where: {
-                roundId_roomPlayerId: {
+                roundId_gamePlayerId: {
                     roundId,
-                    roomPlayerId: player.id,
+                    gamePlayerId: player.id,
                 },
             },
         });
@@ -461,7 +461,7 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedAnswer?.isCorrect).toBe(false);
         expect(persistedAnswer?.points).toBe(0);
 
-        const persistedPlayer = await prisma.roomPlayer.findUnique({
+        const persistedPlayer = await prisma.gamePlayer.findUnique({
             where: { id: player.id },
         });
 
@@ -499,9 +499,9 @@ describe("POST /rounds/:id/answer - Integração", () => {
 
         const persistedAnswer = await prisma.roundAnswer.findUnique({
             where: {
-                roundId_roomPlayerId: {
+                roundId_gamePlayerId: {
                     roundId,
-                    roomPlayerId: player.id,
+                    gamePlayerId: player.id,
                 },
             },
         });
@@ -510,7 +510,7 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedAnswer?.isCorrect).toBe(false);
         expect(persistedAnswer?.points).toBe(-30);
 
-        const persistedPlayer = await prisma.roomPlayer.findUnique({
+        const persistedPlayer = await prisma.gamePlayer.findUnique({
             where: { id: player.id },
         });
 
@@ -545,7 +545,7 @@ describe("POST /rounds/:id/answer - Integração", () => {
         const answers = await prisma.roundAnswer.findMany({
             where: {
                 roundId,
-                roomPlayerId: player.id,
+                gamePlayerId: player.id,
             },
         });
 

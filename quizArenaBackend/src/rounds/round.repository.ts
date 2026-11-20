@@ -1,7 +1,7 @@
-
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+import { selectCurrentGame } from "../rooms/room.repository.js";
 
 export type RoundWithQuestion = Prisma.RoundGetPayload<{
     include: {
@@ -16,6 +16,86 @@ export type RoundWithQuestion = Prisma.RoundGetPayload<{
         };
     };
 }>;
+
+export type ClosedRoundWithDetails = Prisma.RoundGetPayload<{
+    include: {
+        game: {
+            include: {
+                room: {
+                    select: {
+                        id: true;
+                        hostId: true;
+                        status: true;
+                    };
+                };
+                players: {
+                    select: {
+                        id: true;
+                        nickname: true;
+                        score: true;
+                    };
+                    orderBy: { joinedAt: "asc" };
+                };
+                questionSnapshot: {
+                    select: {
+                        id: true;
+                        _count: {
+                            select: {
+                                questions: true;
+                            };
+                        };
+                    };
+                };
+                rounds: {
+                    select: {
+                        id: true;
+                        status: true;
+                    };
+                };
+            };
+        };
+        snapshotQuestion: {
+            include: {
+                options: {
+                    orderBy: { position: "asc" };
+                };
+            };
+        };
+        answers: {
+            include: {
+                gamePlayer: {
+                    select: {
+                        id: true;
+                        nickname: true;
+                    };
+                };
+                option: {
+                    select: {
+                        id: true;
+                        text: true;
+                        isCorrect: true;
+                    };
+                };
+            };
+        };
+    };
+}>;
+
+export type CloseRoundResult =
+    | {
+        success: true;
+        round: ClosedRoundWithDetails;
+        alreadyClosed: boolean;
+        gameFinished: boolean;
+    }
+    | {
+        success: false;
+        reason:
+        | "ROUND_NOT_FOUND"
+        | "ACCESS_DENIED"
+        | "GAME_NOT_IN_PROGRESS"
+        | "ROUND_NOT_READY";
+    };
 
 export type CreateNextRoundResult =
     | {
@@ -34,12 +114,100 @@ export type CreateNextRoundResult =
         | "DECK_FINISHED";
     };
 
+const closeRoundInclude = {
+    game: {
+        include: {
+            room: {
+                select: {
+                    id: true,
+                    hostId: true,
+                    status: true,
+                },
+            },
+            players: {
+                select: {
+                    id: true,
+                    nickname: true,
+                    score: true,
+                },
+                orderBy: { joinedAt: "asc" as const },
+            },
+            questionSnapshot: {
+                select: {
+                    id: true,
+                    _count: {
+                        select: {
+                            questions: true,
+                        },
+                    },
+                },
+            },
+            rounds: {
+                select: {
+                    id: true,
+                    status: true,
+                },
+            },
+        },
+    },
+    snapshotQuestion: {
+        include: {
+            options: {
+                orderBy: { position: "asc" as const },
+            },
+        },
+    },
+    answers: {
+        include: {
+            gamePlayer: {
+                select: {
+                    id: true,
+                    nickname: true,
+                },
+            },
+            option: {
+                select: {
+                    id: true,
+                    text: true,
+                    isCorrect: true,
+                },
+            },
+        },
+    },
+};
+
+async function getTransactionNow(tx: {
+    $queryRaw: Prisma.TransactionClient["$queryRaw"];
+}): Promise<Date> {
+    const rows = await tx.$queryRaw<{ now: Date }[]>`
+        SELECT NOW() AS now
+    `;
+
+    if (Array.isArray(rows) && rows[0]?.now instanceof Date) {
+        return rows[0].now;
+    }
+
+    return new Date();
+}
+
 export class RoundRepository {
+    async findExpiredOpenRoundIds(limit = 50): Promise<string[]> {
+        const rows = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT id
+            FROM rounds
+            WHERE status = 'OPEN'
+              AND "expiresAt" <= NOW()
+            ORDER BY "expiresAt" ASC
+            LIMIT ${limit}
+        `;
+
+        return Array.isArray(rows) ? rows.map((row) => row.id) : [];
+    }
 
     async closeRound(
         roundId: string,
-        hostId: string,
-    ) {
+        hostId?: string,
+    ): Promise<CloseRoundResult> {
         return prisma.$transaction(async (tx) => {
             await tx.$queryRaw`
                 SELECT id
@@ -48,136 +216,90 @@ export class RoundRepository {
                 FOR UPDATE
             `;
 
-            const round = await tx.round.findUnique({
+            const round = (await tx.round.findUnique({
                 where: { id: roundId },
-                include: {
-                    game: {
-                        include: {
-                            room: {
-                                include: {
-                                    players: {
-                                        select: {
-                                            id: true,
-                                            nickname: true,
-                                            score: true,
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    snapshotQuestion: {
-                        include: {
-                            options: {
-                                orderBy: { position: "asc" },
-                            },
-                        },
-                    },
-                    answers: {
-                        include: {
-                            roomPlayer: {
-                                select: {
-                                    id: true,
-                                    nickname: true,
-                                },
-                            },
-                            option: {
-                                select: {
-                                    id: true,
-                                    text: true,
-                                    isCorrect: true,
-                                },
-                            },
-                        },
-                    },
-                },
-            });
+                include: closeRoundInclude,
+            })) as ClosedRoundWithDetails | null;
 
             if (!round) {
-                return { success: false as const, reason: "ROUND_NOT_FOUND" as const };
+                return { success: false, reason: "ROUND_NOT_FOUND" };
             }
 
-            const room = round.game.room;
+            const game = round.game;
+            const room = game.room;
 
-            if (room.hostId !== hostId) {
-                return { success: false as const, reason: "ACCESS_DENIED" as const };
+            if (hostId !== undefined && room.hostId !== hostId) {
+                return { success: false, reason: "ACCESS_DENIED" };
+            }
+
+            // Idempotência: repetir o fechamento (ex.: concorrência worker vs HTTP)
+            // não reprocessa pontuação nem falha mesmo que a partida já tenha finalizado.
+            if (round.status === "CLOSED") {
+                return {
+                    success: true,
+                    round,
+                    alreadyClosed: true,
+                    gameFinished: false,
+                };
             }
 
             if (
-                room.status !== "IN_PROGRESS" ||
-                round.game.finishedAt !== null
+                room.status !== "ACTIVE" ||
+                game.status !== "IN_PROGRESS" ||
+                game.finishedAt !== null
             ) {
-                return { success: false as const, reason: "GAME_NOT_IN_PROGRESS" as const };
+                return { success: false, reason: "GAME_NOT_IN_PROGRESS" };
             }
 
-            // Repetir a chamada não processa a rodada novamente.
-            if (round.status === "CLOSED") {
-                return { success: true as const, round };
-            }
+            const now = await getTransactionNow(tx);
+            const expiresAt =
+                round.expiresAt ??
+                new Date(round.openedAt.getTime() + round.timeLimit * 1000);
 
-            const elapsedMs = Date.now() - round.openedAt.getTime();
-            const timeExpired = elapsedMs >= round.timeLimit * 1000;
-
+            const timeExpired = now.getTime() >= expiresAt.getTime();
             const allPlayersAnswered =
-                room.players.length > 0 &&
-                round.answers.length >= room.players.length;
+                game.players.length > 0 &&
+                round.answers.length >= game.players.length;
 
             if (!timeExpired && !allPlayersAnswered) {
-                return { success: false as const, reason: "ROUND_NOT_READY" as const };
+                return { success: false, reason: "ROUND_NOT_READY" };
             }
 
-            const closedRound = await tx.round.update({
+            const closedRound = (await tx.round.update({
                 where: { id: roundId },
                 data: {
                     status: "CLOSED",
-                    closedAt: new Date(),
+                    closedAt: now,
                 },
-                include: {
-                    game: {
-                        include: {
-                            room: {
-                                include: {
-                                    players: {
-                                        select: {
-                                            id: true,
-                                            nickname: true,
-                                            score: true,
-                                        },
-                                    },
-                                },
-                            },
-                        },
+                include: closeRoundInclude,
+            })) as ClosedRoundWithDetails;
+
+            const totalSnapshotQuestions =
+                game.questionSnapshot?._count?.questions ?? 0;
+            const existingRounds = game.rounds ?? [];
+            const closedRoundsAfterThis = existingRounds.filter(
+                (r) => r.id === roundId || r.status === "CLOSED",
+            ).length;
+
+            const isLastRound =
+                totalSnapshotQuestions > 0 &&
+                closedRoundsAfterThis >= totalSnapshotQuestions;
+
+            if (isLastRound) {
+                await tx.game.update({
+                    where: { id: game.id },
+                    data: {
+                        status: "FINISHED",
+                        finishedAt: now,
                     },
-                    snapshotQuestion: {
-                        include: {
-                            options: {
-                                orderBy: { position: "asc" },
-                            },
-                        },
-                    },
-                    answers: {
-                        include: {
-                            roomPlayer: {
-                                select: {
-                                    id: true,
-                                    nickname: true,
-                                },
-                            },
-                            option: {
-                                select: {
-                                    id: true,
-                                    text: true,
-                                    isCorrect: true,
-                                },
-                            },
-                        },
-                    },
-                },
-            });
+                });
+            }
 
             return {
-                success: true as const,
+                success: true,
                 round: closedRound,
+                alreadyClosed: false,
+                gameFinished: isLastRound,
             };
         });
     }
@@ -197,17 +319,21 @@ export class RoundRepository {
             const room = await tx.room.findUnique({
                 where: { id: roomId },
                 include: {
-                    questionSnapshot: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
                         include: {
-                            questions: {
-                                orderBy: {
-                                    position: "asc",
+                            questionSnapshot: {
+                                include: {
+                                    questions: {
+                                        orderBy: {
+                                            position: "asc",
+                                        },
+                                    },
                                 },
                             },
-                        },
-                    },
-                    game: {
-                        include: {
                             rounds: {
                                 orderBy: {
                                     roundNumber: "desc",
@@ -233,21 +359,30 @@ export class RoundRepository {
                 };
             }
 
-            if (room.status !== "IN_PROGRESS") {
+            if (room.status !== "ACTIVE") {
                 return {
                     success: false,
                     reason: "ROOM_NOT_IN_PROGRESS",
                 };
             }
 
-            if (!room.game) {
+            const currentGame = selectCurrentGame(room.games);
+
+            if (!currentGame) {
                 return {
                     success: false,
                     reason: "GAME_NOT_FOUND",
                 };
             }
 
-            const previousRound = room.game.rounds[0];
+            if (currentGame.status !== "IN_PROGRESS") {
+                return {
+                    success: false,
+                    reason: "ROOM_NOT_IN_PROGRESS",
+                };
+            }
+
+            const previousRound = currentGame.rounds[0];
 
             if (previousRound?.status === "OPEN") {
                 return {
@@ -267,7 +402,7 @@ export class RoundRepository {
             }
 
             const snapshotQuestions =
-                room.questionSnapshot?.questions ?? [];
+                currentGame.questionSnapshot?.questions ?? [];
 
             const nextPosition = previousRound
                 ? previousRound.roundNumber
@@ -277,18 +412,14 @@ export class RoundRepository {
                 (question) => question.position === nextPosition,
             );
 
+            const now = await getTransactionNow(tx);
+
             if (!nextQuestion) {
                 await tx.game.update({
-                    where: { id: room.game.id },
-                    data: {
-                        finishedAt: new Date(),
-                    },
-                });
-
-                await tx.room.update({
-                    where: { id: room.id },
+                    where: { id: currentGame.id },
                     data: {
                         status: "FINISHED",
+                        finishedAt: now,
                     },
                 });
 
@@ -298,12 +429,19 @@ export class RoundRepository {
                 };
             }
 
+            const openedAt = now;
+            const expiresAt = new Date(
+                openedAt.getTime() + currentGame.questionTime * 1000,
+            );
+
             const round = await tx.round.create({
                 data: {
-                    gameId: room.game.id,
+                    gameId: currentGame.id,
                     snapshotQuestionId: nextQuestion.id,
                     roundNumber: nextPosition + 1,
-                    timeLimit: room.questionTime,
+                    openedAt,
+                    expiresAt,
+                    timeLimit: currentGame.questionTime,
                 },
                 include: {
                     snapshotQuestion: {

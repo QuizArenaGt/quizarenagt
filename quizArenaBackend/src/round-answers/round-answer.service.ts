@@ -26,12 +26,12 @@ export class RoundAnswerService {
 
     async submitAnswer(
         roundId: string,
-        roomPlayerId: string,
+        gamePlayerId: string,
         optionId: string,
     ) {
         const result = await this.roundAnswerRepository.submitAnswer(
             roundId,
-            roomPlayerId,
+            gamePlayerId,
             optionId,
         );
 
@@ -39,7 +39,7 @@ export class RoundAnswerService {
             return {
                 id: result.answer.id,
                 roundId: result.answer.roundId,
-                roomPlayerId: result.answer.roomPlayerId,
+                gamePlayerId: result.answer.gamePlayerId,
                 optionId: result.answer.optionId,
                 answeredAt: result.answer.answeredAt,
                 isCorrect: result.answer.isCorrect,

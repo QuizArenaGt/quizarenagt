@@ -84,10 +84,15 @@ async function createOtherUser(): Promise<string> {
 }
 
 async function createPlayers(roomId: string): Promise<void> {
-    await prisma.roomPlayer.createMany({
+    const game = await prisma.game.findFirstOrThrow({
+        where: { roomId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+
+    await prisma.gamePlayer.createMany({
         data: [
-            { roomId, nickname: "Jogador 1" },
-            { roomId, nickname: "Jogador 2" },
+            { gameId: game.id, nickname: "Jogador 1" },
+            { gameId: game.id, nickname: "Jogador 2" },
         ],
     });
 }
@@ -178,8 +183,8 @@ describe("POST /rooms/:id/rounds - Integração", () => {
     it("deve criar a primeira rodada utilizando a primeira pergunta do snapshot", async () => {
         const { room, token } = await createStartedRoom();
 
-        const snapshot = await prisma.roomQuestionSnapshot.findUnique({
-            where: { roomId: room.id },
+        const snapshot = await prisma.roomQuestionSnapshot.findFirst({
+            where: { game: { roomId: room.id } },
             include: {
                 questions: {
                     orderBy: { position: "asc" },
@@ -365,12 +370,14 @@ describe("POST /rooms/:id/rounds - Integração", () => {
             where: { id: room.id },
         });
 
-        expect(persistedRoom?.status).toBe("FINISHED");
+        expect(persistedRoom?.status).toBe("ACTIVE");
 
-        const game = await prisma.game.findUnique({
+        const game = await prisma.game.findFirst({
             where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
+        expect(game?.status).toBe("FINISHED");
         expect(game?.finishedAt).toBeInstanceOf(Date);
 
         const rounds = await prisma.round.findMany({

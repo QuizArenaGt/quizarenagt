@@ -87,9 +87,14 @@ async function createPlayers(
     roomId: string,
     quantity: number,
 ): Promise<void> {
-    await prisma.roomPlayer.createMany({
+    const game = await prisma.game.findFirstOrThrow({
+        where: { roomId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+
+    await prisma.gamePlayer.createMany({
         data: Array.from({ length: quantity }, (_, index) => ({
-            roomId,
+            gameId: game.id,
             nickname: `Jogador ${index + 1}`,
         })),
     });
@@ -153,11 +158,12 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(response.status).toBe(401);
 
-        const persistedRoom = await prisma.room.findUnique({
-            where: { id: room.id },
+        const persistedGame = await prisma.game.findFirst({
+            where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
-        expect(persistedRoom?.status).toBe("WAITING");
+        expect(persistedGame?.status).toBe("WAITING");
     });
 
     it("deve iniciar a partida e persistir o snapshot do deck", async () => {
@@ -190,18 +196,21 @@ describe("POST /rooms/:id/start - Integração", () => {
             where: { id: room.id },
         });
 
-        expect(persistedRoom?.status).toBe("IN_PROGRESS");
+        expect(persistedRoom?.status).toBe("ACTIVE");
 
-        const game = await prisma.game.findUnique({
+        const game = await prisma.game.findFirst({
             where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
         expect(game).not.toBeNull();
         expect(game?.roomId).toBe(room.id);
+        expect(game?.status).toBe("IN_PROGRESS");
+        expect(game?.startedAt).toBeInstanceOf(Date);
         expect(game?.finishedAt).toBeNull();
 
         const snapshot = await prisma.roomQuestionSnapshot.findUnique({
-            where: { roomId: room.id },
+            where: { gameId: game!.id },
             include: {
                 questions: {
                     orderBy: { position: "asc" },
@@ -264,7 +273,7 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         const snapshotAfterChanges =
             await prisma.roomQuestionSnapshot.findUnique({
-                where: { roomId: room.id },
+                where: { gameId: game!.id },
                 include: {
                     questions: {
                         orderBy: { position: "asc" },
@@ -307,11 +316,12 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(response.status).toBe(403);
 
-        const persistedRoom = await prisma.room.findUnique({
-            where: { id: room.id },
+        const persistedGame = await prisma.game.findFirst({
+            where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
-        expect(persistedRoom?.status).toBe("WAITING");
+        expect(persistedGame?.status).toBe("WAITING");
     });
 
     it("não deve iniciar com menos de 2 jogadores", async () => {
@@ -325,11 +335,12 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(response.status).toBe(409);
 
-        const persistedRoom = await prisma.room.findUnique({
-            where: { id: room.id },
+        const persistedGame = await prisma.game.findFirst({
+            where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
-        expect(persistedRoom?.status).toBe("WAITING");
+        expect(persistedGame?.status).toBe("WAITING");
     });
 
     it("não deve iniciar com menos de 5 perguntas ativas", async () => {
@@ -344,17 +355,18 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(response.status).toBe(409);
 
-        const snapshot = await prisma.roomQuestionSnapshot.findUnique({
-            where: { roomId: room.id },
+        const snapshot = await prisma.roomQuestionSnapshot.findFirst({
+            where: { game: { roomId: room.id } },
         });
 
         expect(snapshot).toBeNull();
 
-        const persistedRoom = await prisma.room.findUnique({
-            where: { id: room.id },
+        const persistedGame = await prisma.game.findFirst({
+            where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
-        expect(persistedRoom?.status).toBe("WAITING");
+        expect(persistedGame?.status).toBe("WAITING");
     });
 
     it("não deve considerar perguntas inativas na contagem", async () => {
@@ -370,11 +382,12 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         expect(response.status).toBe(409);
 
-        const persistedRoom = await prisma.room.findUnique({
-            where: { id: room.id },
+        const persistedGame = await prisma.game.findFirst({
+            where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
-        expect(persistedRoom?.status).toBe("WAITING");
+        expect(persistedGame?.status).toBe("WAITING");
     });
 
     it("não deve iniciar uma sala que já foi iniciada", async () => {
@@ -382,8 +395,8 @@ describe("POST /rooms/:id/start - Integração", () => {
 
         await createPlayers(room.id, 2);
 
-        await prisma.room.update({
-            where: { id: room.id },
+        await prisma.game.updateMany({
+            where: { roomId: room.id },
             data: { status: "IN_PROGRESS" },
         });
 
@@ -429,14 +442,15 @@ describe("POST /rooms/:id/start - Integração", () => {
         expect(successfulResponses).toHaveLength(1);
         expect(rejectedResponses).toHaveLength(1);
 
-        const persistedRoom = await prisma.room.findUnique({
-            where: { id: room.id },
+        const persistedGame = await prisma.game.findFirst({
+            where: { roomId: room.id },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         });
 
-        expect(persistedRoom?.status).toBe("IN_PROGRESS");
+        expect(persistedGame?.status).toBe("IN_PROGRESS");
 
         const snapshotCount = await prisma.roomQuestionSnapshot.count({
-            where: { roomId: room.id },
+            where: { game: { roomId: room.id } },
         });
 
         expect(snapshotCount).toBe(1);

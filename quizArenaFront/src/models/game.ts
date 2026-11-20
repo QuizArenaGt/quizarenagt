@@ -154,6 +154,35 @@ export function sanitizePin(value: string): string {
 }
 
 /**
+ * Estado limpo inicial do jogador antes de entrar em uma partida.
+ * Utilizado ao sair ou ao optar por jogar uma nova partida para garantir
+ * que token, pontuação, respostas e lobby anteriores não sejam reutilizados.
+ */
+export function createCleanPlayerMatchState() {
+    return {
+        phase: 'join' as PlayPhase,
+        pin: '',
+        nickname: '',
+        room: null as GameRoom | null,
+        playerId: null as string | null,
+        sessionToken: null as string | null,
+        lobbyPlayers: [] as { id: string; nickname: string; score: number; joinedAt: string }[],
+        currentRoundId: null as string | null,
+        currentQuestion: null as Question | null,
+        questionNumber: 1,
+        selectedOptionId: null as string | null,
+        hasSubmittedAnswer: false,
+        isSubmittingAnswer: false,
+        answerError: null as string | null,
+        playedQuestions: [] as Question[],
+        answers: [] as PlayerAnswer[],
+        serverRanking: [] as RankingEntry[],
+        serverTotalScore: 0,
+        error: null as string | null,
+    };
+}
+
+/**
  * Monta a rota de entrada do jogador com o código normalizado e validado na query string.
  */
 export function buildPlayRouteWithPin(pin: string, playRoute = '/jogar'): string {
