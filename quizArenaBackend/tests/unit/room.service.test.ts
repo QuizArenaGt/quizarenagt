@@ -58,6 +58,7 @@ describe("RoomService", () => {
         update: ReturnType<typeof vi.fn>;
         startIfReady: ReturnType<typeof vi.fn>;
         createNextGame: ReturnType<typeof vi.fn>;
+        archiveByHost: ReturnType<typeof vi.fn>;
         findGamesByRoomId: ReturnType<typeof vi.fn>;
         findGameResultsById: ReturnType<typeof vi.fn>;
     };
@@ -88,6 +89,7 @@ describe("RoomService", () => {
             update: vi.fn(),
             startIfReady: vi.fn(),
             createNextGame: vi.fn(),
+            archiveByHost: vi.fn(),
             findGamesByRoomId: vi.fn(),
             findGameResultsById: vi.fn(),
         };
@@ -725,6 +727,62 @@ describe("RoomService", () => {
             await expect(
                 service.listRoomGames(roomFixture.id, "outro-host"),
             ).rejects.toThrow(RoomAccessDeniedError);
+        });
+    });
+
+    describe("archiveRoom", () => {
+        it("deve arquivar sala do host e projetar roomStatus ARCHIVED com archivedAt", async () => {
+            const archivedAt = new Date("2026-11-20T12:00:00.000Z");
+            roomRepositoryMock.archiveByHost.mockResolvedValue({
+                success: true,
+                alreadyArchived: false,
+                room: {
+                    ...roomFixture,
+                    status: "ARCHIVED" as const,
+                    archivedAt,
+                    games: [baseGameFixture],
+                },
+            });
+
+            const projected = await service.archiveRoom(
+                roomFixture.id,
+                roomFixture.hostId,
+            );
+
+            expect(projected.roomStatus).toBe("ARCHIVED");
+            expect(projected.archivedAt).toEqual(archivedAt);
+        });
+
+        it("deve lançar RoomNotFoundError ou RoomAccessDeniedError quando falhar", async () => {
+            roomRepositoryMock.archiveByHost.mockResolvedValueOnce({
+                success: false,
+                reason: "ROOM_NOT_FOUND",
+            });
+            await expect(
+                service.archiveRoom(roomFixture.id, roomFixture.hostId),
+            ).rejects.toThrow(RoomNotFoundError);
+
+            roomRepositoryMock.archiveByHost.mockResolvedValueOnce({
+                success: false,
+                reason: "ACCESS_DENIED",
+            });
+            await expect(
+                service.archiveRoom(roomFixture.id, "outro-host"),
+            ).rejects.toThrow(RoomAccessDeniedError);
+        });
+
+        it("deve impedir carregamento no lobby ao vivo (getRoomLobby) para sala ARCHIVED", async () => {
+            jwtServiceMock.verify.mockReturnValue({ sub: roomFixture.hostId });
+            roomRepositoryMock.findByCodeWithLobby.mockResolvedValue({
+                ...roomFixture,
+                status: "ARCHIVED" as const,
+                archivedAt: baseDate,
+                host: { id: roomFixture.hostId, name: "Host" },
+            });
+
+            await expect(
+                service.getRoomLobby("ABC123", "jwt-token"),
+            ).rejects.toThrow(RoomNotEditableError);
         });
     });
 });

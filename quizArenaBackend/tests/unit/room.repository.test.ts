@@ -507,4 +507,80 @@ describe("RoomRepository", () => {
             });
         });
     });
+
+    describe("archiveByHost", () => {
+        it("deve arquivar a sala do host com ARCHIVED e archivedAt sem excluir vínculos", async () => {
+            transactionClient.room.findUnique.mockResolvedValue({
+                ...roomFixture,
+                games: [{ ...gameFixture, players: [] }],
+            });
+            const archivedAt = new Date("2026-11-20T12:00:00.000Z");
+            const updated = {
+                ...roomFixture,
+                status: "ARCHIVED" as const,
+                archivedAt,
+                games: [{ ...gameFixture, players: [] }],
+            };
+            transactionClient.room.update.mockResolvedValue(updated);
+
+            const result = await repository.archiveByHost(
+                roomFixture.id,
+                roomFixture.hostId,
+            );
+
+            expect(transactionClient.$queryRaw).toHaveBeenCalled();
+            expect(transactionClient.room.update).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: { id: roomFixture.id },
+                    data: {
+                        status: "ARCHIVED",
+                        archivedAt: expect.any(Date),
+                    },
+                }),
+            );
+            expect(result).toEqual({
+                success: true,
+                room: updated,
+                alreadyArchived: false,
+            });
+        });
+
+        it("deve ser idempotente quando a sala já estiver ARCHIVED e preservar archivedAt original", async () => {
+            const originalArchivedAt = new Date("2026-11-19T10:00:00.000Z");
+            const alreadyArchived = {
+                ...roomFixture,
+                status: "ARCHIVED" as const,
+                archivedAt: originalArchivedAt,
+                games: [],
+            };
+            transactionClient.room.findUnique.mockResolvedValue(alreadyArchived);
+
+            const result = await repository.archiveByHost(
+                roomFixture.id,
+                roomFixture.hostId,
+            );
+
+            expect(transactionClient.room.update).not.toHaveBeenCalled();
+            expect(result).toEqual({
+                success: true,
+                room: alreadyArchived,
+                alreadyArchived: true,
+            });
+        });
+
+        it("deve retornar ROOM_NOT_FOUND ou ACCESS_DENIED quando aplicável", async () => {
+            transactionClient.room.findUnique.mockResolvedValueOnce(null);
+            await expect(
+                repository.archiveByHost("inexistente", roomFixture.hostId),
+            ).resolves.toEqual({ success: false, reason: "ROOM_NOT_FOUND" });
+
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                games: [],
+            });
+            await expect(
+                repository.archiveByHost(roomFixture.id, "outro-host"),
+            ).resolves.toEqual({ success: false, reason: "ACCESS_DENIED" });
+        });
+    });
 });

@@ -287,6 +287,24 @@ export async function updateRoomApi(
     return response;
 }
 
+export async function archiveRoomApi(roomId: string): Promise<ApiRoom | null> {
+    const response = await apiRequest<{ message?: string; room?: ApiRoom }>(
+        `/rooms/${encodeURIComponent(roomId)}`,
+        {
+            method: 'DELETE',
+        },
+    );
+
+    if (response && typeof response === 'object' && 'room' in response && response.room) {
+        if (!isValidApiRoom(response.room)) {
+            throw new Error('Resposta inválida ao excluir sala.');
+        }
+        return response.room;
+    }
+
+    return null;
+}
+
 export async function getRoomLobbyApi(
     code: string,
     token?: string,

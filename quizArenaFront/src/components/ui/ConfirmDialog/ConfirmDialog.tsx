@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
     title: string;
     children: ReactNode;
     confirmLabel: string;
+    loadingLabel?: string;
+    isLoading?: boolean;
     /** "danger" para ações destrutivas, como excluir. */
     tone?: 'default' | 'danger';
     onConfirm: () => void;
@@ -24,20 +26,32 @@ export default function ConfirmDialog({
     title,
     children,
     confirmLabel,
+    loadingLabel,
+    isLoading = false,
     tone = 'default',
     onConfirm,
     onCancel,
 }: ConfirmDialogProps) {
     return (
-        <Modal isOpen={isOpen} onClose={onCancel} title={title}>
+        <Modal
+            isOpen={isOpen}
+            onClose={() => {
+                if (!isLoading) onCancel();
+            }}
+            title={title}
+        >
             <div className="ui-confirm">
                 <div className="ui-confirm__message">{children}</div>
                 <div className="ui-confirm__actions">
-                    <Button variant="secondary" onClick={onCancel}>
+                    <Button variant="secondary" onClick={onCancel} disabled={isLoading}>
                         Cancelar
                     </Button>
-                    <Button variant={tone === 'danger' ? 'danger' : 'primary'} onClick={onConfirm}>
-                        {confirmLabel}
+                    <Button
+                        variant={tone === 'danger' ? 'danger' : 'primary'}
+                        onClick={onConfirm}
+                        disabled={isLoading}
+                    >
+                        {isLoading ? (loadingLabel ?? confirmLabel) : confirmLabel}
                     </Button>
                 </div>
             </div>

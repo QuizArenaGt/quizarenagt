@@ -42,6 +42,7 @@ describe("RoomController", () => {
         updateRoom: ReturnType<typeof vi.fn>;
         startRoom: ReturnType<typeof vi.fn>;
         playAgain: ReturnType<typeof vi.fn>;
+        archiveRoom: ReturnType<typeof vi.fn>;
         joinRoom: ReturnType<typeof vi.fn>;
         checkRoomAvailability: ReturnType<typeof vi.fn>;
         getRoomLobby: ReturnType<typeof vi.fn>;
@@ -102,6 +103,7 @@ describe("RoomController", () => {
             updateRoom: vi.fn(),
             startRoom: vi.fn(),
             playAgain: vi.fn(),
+            archiveRoom: vi.fn(),
             joinRoom: vi.fn(),
             checkRoomAvailability: vi.fn(),
             getRoomLobby: vi.fn(),
@@ -438,6 +440,74 @@ describe("RoomController", () => {
             await controller.getLobby(req, res);
 
             expect(res.status).toHaveBeenCalledWith(401);
+        });
+    });
+
+    describe("archive", () => {
+        it("deve arquivar sala do host, emitir room:archived e retornar 200", async () => {
+            const archivedRoom = {
+                ...projectedRoomFixture,
+                roomStatus: "ARCHIVED" as const,
+                archivedAt: baseDate,
+            };
+            roomServiceMock.archiveRoom.mockResolvedValue(archivedRoom);
+            const req = {
+                params: { id: projectedRoomFixture.id },
+                user: { id: "user-host-uuid" },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.archive(req, res);
+
+            expect(roomServiceMock.archiveRoom).toHaveBeenCalledWith(
+                projectedRoomFixture.id,
+                "user-host-uuid",
+            );
+            expect(emitRoomEventMock).toHaveBeenCalledWith(
+                projectedRoomFixture.id,
+                "room:archived",
+                {
+                    roomId: projectedRoomFixture.id,
+                    roomStatus: "ARCHIVED",
+                    archivedAt: baseDate,
+                },
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Sala arquivada com sucesso.",
+                room: archivedRoom,
+            });
+        });
+
+        it("deve retornar 401, 403 e 404 conforme erro no arquivamento", async () => {
+            const unauthReq = {
+                params: { id: "room-test-uuid" },
+            } as unknown as Request;
+            const unauthRes = createResponseMock();
+            await controller.archive(unauthReq, unauthRes);
+            expect(unauthRes.status).toHaveBeenCalledWith(401);
+
+            roomServiceMock.archiveRoom.mockRejectedValueOnce(
+                new RoomAccessDeniedError(),
+            );
+            const forbiddenReq = {
+                params: { id: "room-test-uuid" },
+                user: { id: "other-user" },
+            } as unknown as Request;
+            const forbiddenRes = createResponseMock();
+            await controller.archive(forbiddenReq, forbiddenRes);
+            expect(forbiddenRes.status).toHaveBeenCalledWith(403);
+
+            roomServiceMock.archiveRoom.mockRejectedValueOnce(
+                new RoomNotFoundError(),
+            );
+            const notFoundReq = {
+                params: { id: "room-test-uuid" },
+                user: { id: "user-host-uuid" },
+            } as unknown as Request;
+            const notFoundRes = createResponseMock();
+            await controller.archive(notFoundReq, notFoundRes);
+            expect(notFoundRes.status).toHaveBeenCalledWith(404);
         });
     });
 });

@@ -76,4 +76,8 @@ roomRoutes.post("/:id/play-again", authenticateToken, (req, res) => {
     void roomController.playAgain(req, res);
 });
 
+roomRoutes.delete("/:id", authenticateToken, (req, res) => {
+    void roomController.archive(req, res);
+});
+
 export { roomRoutes };

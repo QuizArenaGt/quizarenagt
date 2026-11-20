@@ -11,6 +11,7 @@ import {
     applyGameCreatedToRooms,
     canPlayAgain,
     computeRemainingSecondsFromDeadline,
+    executeArchiveRoom,
     executeLoadHostRooms,
     executeLoadRoomByCode,
     executePlayAgain,
@@ -34,6 +35,7 @@ import {
     recordRoundClosedResult,
 } from '../services/roomResultsService';
 import {
+    archiveRoomApi,
     closeRoundApi,
     createNextRoundApi,
     createRoomApi,
@@ -105,8 +107,10 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     // Sala cujo código está sendo exibido em destaque (modal de projeção)
     const [displayedRoom, setDisplayedRoom] = useState<Room | null>(null);
 
-    // Sala aguardando confirmação de remoção da visualização
+    // Sala aguardando confirmação de arquivamento/remoção
     const [roomPendingDeletion, setRoomPendingDeletion] = useState<Room | null>(null);
+    const [isArchivingRoom, setIsArchivingRoom] = useState(false);
+    const [archiveRoomError, setArchiveRoomError] = useState<string | null>(null);
 
     // Histórico persistido e relatório aberto
     const [roomGames, setRoomGames] = useState<ApiGameHistoryItem[]>([]);
@@ -124,6 +128,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const activeRoundIdRef = useRef<string | null>(null);
     const isSubmittingRoomRef = useRef(false);
     const isPlayingAgainRef = useRef(false);
+    const isArchivingRoomRef = useRef(false);
     const gamesRequestSeqRef = useRef(0);
     const reportRequestSeqRef = useRef(0);
     const sessionTrackerRef = useRef<HostSessionTracker>({
@@ -186,6 +191,8 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setHostRoomsError(null);
         setDisplayedRoom(null);
         setRoomPendingDeletion(null);
+        setIsArchivingRoom(false);
+        setArchiveRoomError(null);
         setReportView(null);
         setLookupCode('');
         clearAllRoomResults();
@@ -496,6 +503,23 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 deleteRoomResults(payload.roomId);
                 void refreshRoomGames(payload.roomId);
             }
+        });
+
+        socket.on('room:archived', (payload: { roomId: string }) => {
+            if (payload.roomId !== currentRoomId) return;
+            setRooms((current) => current.filter((room) => room.id !== payload.roomId));
+            setDisplayedRoom((current) => (current?.id === payload.roomId ? null : current));
+            setReportView((current) => (current?.room.id === payload.roomId ? null : current));
+            setActiveRoomId(null);
+            closingRoundIdRef.current = null;
+            activeRoundIdRef.current = null;
+            setActiveRound(null);
+            setClosedRound(null);
+            setAnsweredPlayers([]);
+            setRoundRemainingSeconds(0);
+            setRoomGames([]);
+            setRoomGamesError(null);
+            deleteRoomResults(payload.roomId);
         });
 
         return () => {
@@ -832,20 +856,54 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         }
     }
 
-    const requestDelete = useCallback((room: Room) => setRoomPendingDeletion(room), []);
-    const cancelDelete = useCallback(() => setRoomPendingDeletion(null), []);
+    const requestDelete = useCallback((room: Room) => {
+        setArchiveRoomError(null);
+        setRoomPendingDeletion(room);
+    }, []);
 
-    function confirmDelete() {
-        if (!roomPendingDeletion) return;
-        const deletedId = roomPendingDeletion.id;
-        setRooms((current) => current.filter((room) => room.id !== deletedId));
-        setDisplayedRoom((current) => (current?.id === deletedId ? null : current));
-        if (activeRoomId === deletedId) {
-            setActiveRoomId(null);
-        }
-        deleteRoomResults(deletedId);
+    const cancelDelete = useCallback(() => {
+        if (isArchivingRoomRef.current) return;
+        setArchiveRoomError(null);
         setRoomPendingDeletion(null);
-    }
+    }, []);
+
+    const confirmDelete = useCallback(async () => {
+        const targetRoom = roomPendingDeletion;
+        if (!targetRoom) return;
+
+        await executeArchiveRoom({
+            room: targetRoom,
+            lockRef: isArchivingRoomRef,
+            requestArchive: archiveRoomApi,
+            onArchivingChange: setIsArchivingRoom,
+            onError: setArchiveRoomError,
+            onSuccess: (archivedId) => {
+                setRooms((current) => current.filter((room) => room.id !== archivedId));
+                setDisplayedRoom((current) => (current?.id === archivedId ? null : current));
+                setReportView((current) => (current?.room.id === archivedId ? null : current));
+                if (activeRoomId === archivedId) {
+                    setActiveRoomId(null);
+                    closingRoundIdRef.current = null;
+                    activeRoundIdRef.current = null;
+                    setActiveRound(null);
+                    setClosedRound(null);
+                    setAnsweredPlayers([]);
+                    setRoundRemainingSeconds(0);
+                    setRoomGames([]);
+                    setRoomGamesError(null);
+                }
+                if (urlRoomCodeRef.current === targetRoom.code) {
+                    setSearchParams((prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.delete('sala');
+                        return next;
+                    }, { replace: true });
+                }
+                deleteRoomResults(archivedId);
+                setRoomPendingDeletion(null);
+            },
+        });
+    }, [activeRoomId, roomPendingDeletion, setSearchParams]);
 
     const openGameReport = useCallback(async (room: Room, gameId: string) => {
         await executeOpenGameResults({
@@ -934,6 +992,8 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         editingRoom,
         submitRoom,
         roomPendingDeletion,
+        isArchivingRoom,
+        archiveRoomError,
         requestDelete,
         cancelDelete,
         confirmDelete,
