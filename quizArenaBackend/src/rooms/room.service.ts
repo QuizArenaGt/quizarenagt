@@ -61,6 +61,7 @@ type RoomRepositoryContract = Pick<
     | "startIfReady"
     | "createNextGame"
     | "archiveByHost"
+    | "finishActiveGame"
     | "findGamesByRoomId"
     | "findGameResultsById"
 >;
@@ -91,6 +92,20 @@ export type UpdateRoomInput = {
 export type JoinRoomResult = {
     player: Omit<GamePlayer, "sessionTokenHash"> & { roomId: string };
     sessionToken: string;
+};
+
+export type FinishRoomResult = {
+    room: ProjectedRoomSummary;
+    gameId: string;
+    finishedAt: Date;
+    alreadyFinished: boolean;
+    closedRoundPayload: RoundClosedWirePayload | null;
+    ranking: {
+        id: string;
+        nickname: string;
+        score: number;
+        position: number;
+    }[];
 };
 
 export type RoomAvailabilityResult = {
@@ -714,6 +729,73 @@ export class RoomService {
             case "ACCESS_DENIED":
                 throw new RoomAccessDeniedError(
                     "Você não tem permissão para excluir esta sala.",
+                );
+        }
+    }
+
+    async finishRoom(
+        roomId: string,
+        hostId: string,
+    ): Promise<FinishRoomResult> {
+        const result = await this.roomRepository.finishActiveGame(
+            roomId,
+            hostId,
+        );
+
+        if (result.success) {
+            const sortedPlayers = [...result.players].sort(
+                (a, b) =>
+                    b.score - a.score ||
+                    a.joinedAt.getTime() - b.joinedAt.getTime() ||
+                    a.id.localeCompare(b.id),
+            );
+
+            const ranking = sortedPlayers.map((player, index) => ({
+                id: player.id,
+                nickname: player.nickname,
+                score: player.score,
+                position: index + 1,
+            }));
+
+            const closedRoundPayload = result.closedRound
+                ? buildRoundClosedPayload(result.closedRound, sortedPlayers)
+                : null;
+
+            const projectedRoom = projectRoomWithGame(result.room, {
+                ...result.game,
+                players: sortedPlayers,
+            });
+
+            return {
+                room: projectedRoom,
+                gameId: result.game.id,
+                finishedAt: result.game.finishedAt ?? new Date(),
+                alreadyFinished: result.alreadyFinished,
+                closedRoundPayload,
+                ranking,
+            };
+        }
+
+        switch (result.reason) {
+            case "ROOM_NOT_FOUND":
+                throw new RoomNotFoundError();
+
+            case "ACCESS_DENIED":
+                throw new RoomAccessDeniedError(
+                    "Você não tem permissão para encerrar a partida desta sala.",
+                );
+
+            case "ROOM_ARCHIVED":
+                throw new RoomNotEditableError(
+                    "Não é possível encerrar partida em uma sala arquivada.",
+                );
+
+            case "GAME_NOT_FOUND":
+                throw new RoomGameNotFoundError();
+
+            case "GAME_NOT_IN_PROGRESS":
+                throw new RoomNotEditableError(
+                    "A partida não está em andamento para ser encerrada.",
                 );
         }
     }

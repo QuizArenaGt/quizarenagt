@@ -53,13 +53,18 @@ describe("RoundService", () => {
 
     const repositoryMock = {
         createNextRound: vi.fn(),
+        closeRound: vi.fn(),
+        findExpiredOpenRoundIds: vi.fn(),
     };
+
+    const emitMock = vi.fn();
 
     beforeEach(() => {
         vi.clearAllMocks();
 
         service = new RoundService(
             repositoryMock as unknown as RoundRepository,
+            emitMock,
         );
     });
 
@@ -166,6 +171,57 @@ describe("RoundService", () => {
             await expect(
                 service.createNextRound("room-test-uuid", "host-test-uuid"),
             ).rejects.toThrow(PreviousRoundNotClosedError);
+        });
+    });
+
+    describe("closeRound & tryCloseRoundIfReady", () => {
+        it("closeRound (manual) deve autorizar allowBeforeExpiration true e emitir round:closed", async () => {
+            const closedRound = {
+                ...roundFixture,
+                status: "CLOSED" as const,
+                closedAt: new Date("2026-11-20T16:30:05.000Z"),
+                expiresAt: new Date("2026-11-20T16:30:30.000Z"),
+                game: {
+                    roomId: "room-test-uuid",
+                    players: [{ id: "gp-1", nickname: "Alice", score: 130 }],
+                },
+                answers: [],
+            };
+            repositoryMock.closeRound.mockResolvedValueOnce({
+                success: true,
+                round: closedRound,
+                alreadyClosed: false,
+                gameFinished: false,
+            });
+
+            const res = await service.closeRound("round-test-uuid", "host-test-uuid");
+
+            expect(repositoryMock.closeRound).toHaveBeenCalledWith(
+                "round-test-uuid",
+                "host-test-uuid",
+                { allowBeforeExpiration: true },
+            );
+            expect(emitMock).toHaveBeenCalledWith(
+                "room-test-uuid",
+                "round:closed",
+                expect.objectContaining({
+                    round: expect.objectContaining({ id: "round-test-uuid", status: "CLOSED" }),
+                }),
+            );
+            expect(res.alreadyClosed).toBe(false);
+        });
+
+        it("tryCloseRoundIfReady (automático) não passa allowBeforeExpiration e retorna null quando ROUND_NOT_READY", async () => {
+            repositoryMock.closeRound.mockResolvedValueOnce({
+                success: false,
+                reason: "ROUND_NOT_READY",
+            });
+
+            const res = await service.tryCloseRoundIfReady("round-test-uuid");
+
+            expect(repositoryMock.closeRound).toHaveBeenCalledWith("round-test-uuid");
+            expect(emitMock).not.toHaveBeenCalled();
+            expect(res).toBeNull();
         });
     });
 });

@@ -13,6 +13,9 @@ import { randomUUID } from "node:crypto";
 
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/database/prisma.js";
+import { setSocketServer } from "../../src/realtime/room-events.js";
+import { RoundExpirationWorker } from "../../src/rounds/round-expiration.worker.js";
+import { RoundService } from "../../src/rounds/round.service.js";
 
 const password = "12345678";
 const hostEmail = "round.close.host@email.com";
@@ -291,21 +294,143 @@ describe("POST /rounds/:id/close - Integração", () => {
         expect(response.body.round.answers).toHaveLength(0);
     });
 
-    it("não deve encerrar uma rodada antes do tempo e sem todas as respostas", async () => {
-        const { roundId, token } = await createStartedRoom();
+    it("deve encerrar manualmente a rodada pelo host mesmo antes do timer e com jogadores sem resposta, preservando pontos, emitindo eventos e permitindo avançar ou encerrar partida", async () => {
+        const { room, token } = await createRoom();
+        await createQuestions(room.id, 5);
 
-        const response = await request(app)
-            .post(`/rounds/${roundId}/close`)
+        const aliceJoin = await request(app)
+            .post("/rooms/join")
+            .send({ code: room.code, nickname: "Alice" });
+        const bobJoin = await request(app)
+            .post("/rooms/join")
+            .send({ code: room.code, nickname: "Bob" });
+
+        const startResponse = await request(app)
+            .post(`/rooms/${room.id}/start`)
             .set("Authorization", `Bearer ${token}`);
+        expect(startResponse.status).toBe(200);
 
-        expect(response.status).toBe(409);
+        const roundResponse = await request(app)
+            .post(`/rooms/${room.id}/rounds`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(roundResponse.status).toBe(201);
+        const roundId = roundResponse.body.round.id as string;
 
-        const round = await prisma.round.findUnique({
-            where: { id: roundId },
-        });
+        const alice = aliceJoin.body as {
+            player: { id: string; nickname: string };
+            sessionToken: string;
+        };
+        const bob = bobJoin.body as {
+            player: { id: string; nickname: string };
+            sessionToken: string;
+        };
 
-        expect(round?.status).toBe("OPEN");
-        expect(round?.closedAt).toBeNull();
+        const recordedEvents: Array<{ channel: string; event: string; payload: unknown }> = [];
+
+        setSocketServer({
+            to: (channel: string) => ({
+                emit: (event: string, payload: unknown) => {
+                    recordedEvents.push({ channel, event, payload });
+                },
+            }),
+        } as never);
+
+        try {
+            // Apenas Alice responde; Bob ainda não respondeu e o timer de 30s ainda está ativo.
+
+            const roundBefore = await prisma.round.findUniqueOrThrow({
+                where: { id: roundId },
+                include: {
+                    snapshotQuestion: {
+                        include: { options: { orderBy: { position: "asc" } } },
+                    },
+                },
+            });
+            const correctOption = roundBefore.snapshotQuestion.options.find((o) => o.isCorrect)!;
+            const wrongOption = roundBefore.snapshotQuestion.options.find((o) => !o.isCorrect)!;
+
+            const aliceAns = await request(app)
+                .post(`/rounds/${roundId}/answer`)
+                .set("Authorization", `Bearer ${alice.sessionToken}`)
+                .send({ optionId: correctOption.id });
+            expect(aliceAns.status).toBe(201);
+
+            const aliceScoreAfterAnswer = (
+                await prisma.gamePlayer.findUniqueOrThrow({ where: { id: alice.player.id } })
+            ).score;
+            expect(aliceScoreAfterAnswer).toBeGreaterThanOrEqual(100);
+
+            // Verificação automática sem host ainda recusa fechar antes do tempo/respostas
+            const roundService = new RoundService();
+            await expect(roundService.tryCloseRoundIfReady(roundId)).resolves.toBeNull();
+
+            recordedEvents.length = 0;
+
+            // Host clica em "Encerrar Rodada" antes do fim do timer
+            const [manualRes, duplicateManualRes] = await Promise.all([
+                request(app)
+                    .post(`/rounds/${roundId}/close`)
+                    .set("Authorization", `Bearer ${token}`),
+                request(app)
+                    .post(`/rounds/${roundId}/close`)
+                    .set("Authorization", `Bearer ${token}`),
+            ]);
+
+            expect(manualRes.status).toBe(200);
+            expect(duplicateManualRes.status).toBe(200);
+            expect(manualRes.body.round.status).toBe("CLOSED");
+            expect(manualRes.body.round.answers).toHaveLength(1);
+            expect(manualRes.body.round.unansweredPlayers).toEqual([
+                { id: bob.player.id, nickname: "Bob" },
+            ]);
+            expect(manualRes.body.round.ranking).toEqual([
+                { id: alice.player.id, nickname: "Alice", score: aliceScoreAfterAnswer },
+                { id: bob.player.id, nickname: "Bob", score: 0 },
+            ]);
+
+            // Evento round:closed emitido exatamente uma vez
+            const closedEvents = recordedEvents.filter((e) => e.event === "round:closed");
+            expect(closedEvents).toHaveLength(1);
+            expect(closedEvents[0]?.channel).toBe(`room:${room.id}`);
+
+            // Worker rodando após expiração simulada não reabre nem duplica pontuação
+            await prisma.round.update({
+                where: { id: roundId },
+                data: { expiresAt: new Date(Date.now() - 1000) },
+            });
+            const worker = new RoundExpirationWorker(new RoundService(), 5000);
+            expect(await worker.runCycle()).toBe(0);
+
+            // Resposta tardia após encerramento manual é rejeitada (409)
+            const lateBobAns = await request(app)
+                .post(`/rounds/${roundId}/answer`)
+                .set("Authorization", `Bearer ${bob.sessionToken}`)
+                .send({ optionId: wrongOption.id });
+            expect(lateBobAns.status).toBe(409);
+
+            // Pontuações preservadas
+            expect(
+                (await prisma.gamePlayer.findUniqueOrThrow({ where: { id: alice.player.id } })).score,
+            ).toBe(aliceScoreAfterAnswer);
+            expect(
+                (await prisma.gamePlayer.findUniqueOrThrow({ where: { id: bob.player.id } })).score,
+            ).toBe(0);
+
+            // Continuidade: host pode abrir a próxima rodada ou encerrar partida
+            const nextRoundRes = await request(app)
+                .post(`/rooms/${room.id}/rounds`)
+                .set("Authorization", `Bearer ${token}`);
+            expect(nextRoundRes.status).toBe(201);
+            expect(nextRoundRes.body.round.roundNumber).toBe(2);
+
+            const finishRes = await request(app)
+                .post(`/rooms/${room.id}/finish`)
+                .set("Authorization", `Bearer ${token}`);
+            expect(finishRes.status).toBe(200);
+            expect(finishRes.body.room.status).toBe("FINISHED");
+        } finally {
+            setSocketServer(null as never);
+        }
     });
 
     it("não deve permitir que outro usuário encerre a rodada", async () => {

@@ -43,6 +43,7 @@ describe("RoomController", () => {
         startRoom: ReturnType<typeof vi.fn>;
         playAgain: ReturnType<typeof vi.fn>;
         archiveRoom: ReturnType<typeof vi.fn>;
+        finishRoom: ReturnType<typeof vi.fn>;
         joinRoom: ReturnType<typeof vi.fn>;
         checkRoomAvailability: ReturnType<typeof vi.fn>;
         getRoomLobby: ReturnType<typeof vi.fn>;
@@ -104,6 +105,7 @@ describe("RoomController", () => {
             startRoom: vi.fn(),
             playAgain: vi.fn(),
             archiveRoom: vi.fn(),
+            finishRoom: vi.fn(),
             joinRoom: vi.fn(),
             checkRoomAvailability: vi.fn(),
             getRoomLobby: vi.fn(),
@@ -508,6 +510,94 @@ describe("RoomController", () => {
             const notFoundRes = createResponseMock();
             await controller.archive(notFoundReq, notFoundRes);
             expect(notFoundRes.status).toHaveBeenCalledWith(404);
+        });
+    });
+
+    describe("finish", () => {
+        it("deve encerrar partida em andamento, emitir round:closed e game:finished com ranking", async () => {
+            const finishedAt = new Date("2026-11-20T16:10:00.000Z");
+            const finishedRoom = {
+                ...projectedRoomFixture,
+                status: "FINISHED" as const,
+            };
+            const closedRoundPayload = {
+                round: {
+                    id: "round-1",
+                    roundNumber: 1,
+                    status: "CLOSED",
+                },
+            };
+            const ranking = [{ id: "player-uuid", nickname: "Alice", score: 150, position: 1 }];
+
+            roomServiceMock.finishRoom.mockResolvedValue({
+                room: finishedRoom,
+                gameId: "game-test-uuid",
+                finishedAt,
+                alreadyFinished: false,
+                closedRoundPayload,
+                ranking,
+            });
+
+            const req = {
+                params: { id: projectedRoomFixture.id },
+                user: { id: "user-host-uuid" },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.finish(req, res);
+
+            expect(emitRoomEventMock).toHaveBeenNthCalledWith(
+                1,
+                projectedRoomFixture.id,
+                "round:closed",
+                closedRoundPayload,
+            );
+            expect(emitRoomEventMock).toHaveBeenNthCalledWith(
+                2,
+                projectedRoomFixture.id,
+                "game:finished",
+                {
+                    roomId: projectedRoomFixture.id,
+                    gameId: "game-test-uuid",
+                    finishedAt,
+                    ranking,
+                },
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
+        });
+
+        it("não deve reemitir eventos quando alreadyFinished for true e deve mapear 401/403/409", async () => {
+            roomServiceMock.finishRoom.mockResolvedValueOnce({
+                room: { ...projectedRoomFixture, status: "FINISHED" },
+                gameId: "game-test-uuid",
+                finishedAt: baseDate,
+                alreadyFinished: true,
+                closedRoundPayload: null,
+                ranking: [],
+            });
+            const req = {
+                params: { id: projectedRoomFixture.id },
+                user: { id: "user-host-uuid" },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.finish(req, res);
+            expect(emitRoomEventMock).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(200);
+
+            roomServiceMock.finishRoom.mockRejectedValueOnce(new RoomNotEditableError());
+            const conflictRes = createResponseMock();
+            await controller.finish(req, conflictRes);
+            expect(conflictRes.status).toHaveBeenCalledWith(409);
+
+            const unauthRes = createResponseMock();
+            await controller.finish({ params: { id: "room-test-uuid" } } as unknown as Request, unauthRes);
+            expect(unauthRes.status).toHaveBeenCalledWith(401);
+
+            roomServiceMock.finishRoom.mockRejectedValueOnce(new RoomAccessDeniedError());
+            const forbiddenRes = createResponseMock();
+            await controller.finish(req, forbiddenRes);
+            expect(forbiddenRes.status).toHaveBeenCalledWith(403);
         });
     });
 });

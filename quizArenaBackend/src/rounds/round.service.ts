@@ -245,6 +245,7 @@ export class RoundService {
         const result = await this.roundRepository.closeRound(
             roundId,
             hostId,
+            { allowBeforeExpiration: true },
         );
 
         if (result.success) {

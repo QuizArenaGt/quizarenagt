@@ -10,6 +10,10 @@ const { prismaMock, transactionClient } = vi.hoisted(() => {
         },
         gamePlayer: {
             count: vi.fn(),
+            findMany: vi.fn(),
+        },
+        round: {
+            update: vi.fn(),
         },
         question: {
             findMany: vi.fn(),
@@ -581,6 +585,103 @@ describe("RoomRepository", () => {
             await expect(
                 repository.archiveByHost(roomFixture.id, "outro-host"),
             ).resolves.toEqual({ success: false, reason: "ACCESS_DENIED" });
+        });
+    });
+
+    describe("finishActiveGame", () => {
+        it("deve encerrar partida IN_PROGRESS com rodada OPEN pendente, preservar pontuações e marcar Game como FINISHED", async () => {
+            const dbNow = new Date("2026-11-20T16:00:00.000Z");
+            const players = [
+                { id: "gp-1", nickname: "Alice", score: 240, joinedAt: new Date("2026-11-20T15:50:00.000Z") },
+                { id: "gp-2", nickname: "Bob", score: 110, joinedAt: new Date("2026-11-20T15:51:00.000Z") },
+            ];
+            const inProgressGame = {
+                ...gameFixture,
+                status: "IN_PROGRESS" as const,
+                startedAt: new Date("2026-11-20T15:55:00.000Z"),
+                players,
+            };
+
+            transactionClient.room.findUnique.mockResolvedValue({
+                ...roomFixture,
+                games: [inProgressGame],
+            });
+            transactionClient.$queryRaw
+                .mockResolvedValueOnce([]) // FOR UPDATE room
+                .mockResolvedValueOnce([{ id: "round-open-1" }]) // FOR UPDATE open rounds
+                .mockResolvedValueOnce([{ now: dbNow }]); // NOW()
+
+            const closedRound = {
+                id: "round-open-1",
+                roundNumber: 2,
+                status: "CLOSED",
+                openedAt: new Date("2026-11-20T15:59:40.000Z"),
+                expiresAt: new Date("2026-11-20T16:00:10.000Z"),
+                closedAt: dbNow,
+                timeLimit: 30,
+                snapshotQuestion: { id: "sq-2", statement: "Pergunta 2", options: [] },
+                answers: [],
+            };
+            transactionClient.round.update.mockResolvedValue(closedRound);
+            const finishedGame = {
+                ...inProgressGame,
+                status: "FINISHED" as const,
+                finishedAt: dbNow,
+            };
+            transactionClient.game.update.mockResolvedValue(finishedGame);
+            transactionClient.gamePlayer.findMany.mockResolvedValue(players);
+
+            const result = await repository.finishActiveGame(
+                roomFixture.id,
+                roomFixture.hostId,
+            );
+
+            expect(transactionClient.round.update).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: { id: "round-open-1" },
+                    data: { status: "CLOSED", closedAt: dbNow },
+                }),
+            );
+            expect(transactionClient.game.update).toHaveBeenCalledWith({
+                where: { id: inProgressGame.id },
+                data: { status: "FINISHED", finishedAt: dbNow },
+            });
+            expect(result).toMatchObject({
+                success: true,
+                alreadyFinished: false,
+                closedRound,
+                players,
+            });
+        });
+
+        it("deve ser idempotente quando a partida já estiver FINISHED e rejeitar WAITING", async () => {
+            const finishedGame = {
+                ...gameFixture,
+                status: "FINISHED" as const,
+                finishedAt: new Date("2026-11-20T16:00:00.000Z"),
+                players: [],
+            };
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                games: [finishedGame],
+            });
+            const idempotent = await repository.finishActiveGame(
+                roomFixture.id,
+                roomFixture.hostId,
+            );
+            expect(transactionClient.game.update).not.toHaveBeenCalled();
+            expect(idempotent).toMatchObject({
+                success: true,
+                alreadyFinished: true,
+            });
+
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                games: [{ ...gameFixture, status: "WAITING" as const, players: [] }],
+            });
+            await expect(
+                repository.finishActiveGame(roomFixture.id, roomFixture.hostId),
+            ).resolves.toEqual({ success: false, reason: "GAME_NOT_IN_PROGRESS" });
         });
     });
 });

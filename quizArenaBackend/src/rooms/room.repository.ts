@@ -4,7 +4,9 @@ import type {
     Game,
     GameMode,
     GameStatus,
+    Prisma,
     QuestionType,
+    RoundStatus,
 } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
@@ -87,6 +89,86 @@ export type ArchiveRoomResult =
         success: false;
         reason: "ROOM_NOT_FOUND" | "ACCESS_DENIED";
     };
+
+export type FinishGameClosedRound = {
+    id: string;
+    roundNumber: number;
+    status: RoundStatus;
+    openedAt: Date;
+    expiresAt: Date;
+    closedAt: Date | null;
+    timeLimit: number;
+    snapshotQuestion: {
+        id: string;
+        statement: string;
+        options: {
+            id: string;
+            text: string;
+            isCorrect: boolean;
+        }[];
+    };
+    answers: {
+        id: string;
+        isCorrect: boolean;
+        points: number;
+        answeredAt: Date;
+        gamePlayer: {
+            id: string;
+            nickname: string;
+        };
+        option: {
+            id: string;
+            text: string;
+        };
+    }[];
+};
+
+export type FinishGameResult =
+    | {
+        success: true;
+        room: Room & {
+            games: (Game & {
+                players: {
+                    id: string;
+                    nickname: string;
+                    score: number;
+                    joinedAt: Date;
+                }[];
+            })[];
+        };
+        game: Game;
+        closedRound: FinishGameClosedRound | null;
+        players: {
+            id: string;
+            nickname: string;
+            score: number;
+            joinedAt: Date;
+        }[];
+        alreadyFinished: boolean;
+    }
+    | {
+        success: false;
+        reason:
+        | "ROOM_NOT_FOUND"
+        | "ACCESS_DENIED"
+        | "ROOM_ARCHIVED"
+        | "GAME_NOT_FOUND"
+        | "GAME_NOT_IN_PROGRESS";
+    };
+
+async function getTransactionNow(tx: {
+    $queryRaw: Prisma.TransactionClient["$queryRaw"];
+}): Promise<Date> {
+    const rows = await tx.$queryRaw<{ now: Date }[]>`
+        SELECT NOW() AS now
+    `;
+
+    if (Array.isArray(rows) && rows[0]?.now instanceof Date) {
+        return rows[0].now;
+    }
+
+    return new Date();
+}
 
 export function selectCurrentGame<
     TGame extends { status: GameStatus },
@@ -658,6 +740,185 @@ export class RoomRepository {
                 success: true,
                 room: updatedRoom,
                 alreadyArchived: false,
+            };
+        });
+    }
+
+    async finishActiveGame(
+        roomId: string,
+        hostId: string,
+    ): Promise<FinishGameResult> {
+        return prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT id
+                FROM rooms
+                WHERE id = ${roomId}
+                FOR UPDATE
+            `;
+
+            const room = await tx.room.findUnique({
+                where: { id: roomId },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                        include: {
+                            players: {
+                                select: {
+                                    id: true,
+                                    nickname: true,
+                                    score: true,
+                                    joinedAt: true,
+                                },
+                                orderBy: [
+                                    { score: "desc" },
+                                    { joinedAt: "asc" },
+                                    { id: "asc" },
+                                ],
+                            },
+                        },
+                    },
+                },
+            });
+
+            if (!room) {
+                return {
+                    success: false,
+                    reason: "ROOM_NOT_FOUND",
+                };
+            }
+
+            if (room.hostId !== hostId) {
+                return {
+                    success: false,
+                    reason: "ACCESS_DENIED",
+                };
+            }
+
+            if (room.status !== "ACTIVE") {
+                return {
+                    success: false,
+                    reason: "ROOM_ARCHIVED",
+                };
+            }
+
+            const currentGame = selectCurrentGame(room.games);
+
+            if (!currentGame) {
+                return {
+                    success: false,
+                    reason: "GAME_NOT_FOUND",
+                };
+            }
+
+            if (currentGame.status === "FINISHED") {
+                return {
+                    success: true,
+                    room,
+                    game: currentGame,
+                    closedRound: null,
+                    players: currentGame.players,
+                    alreadyFinished: true,
+                };
+            }
+
+            if (currentGame.status !== "IN_PROGRESS") {
+                return {
+                    success: false,
+                    reason: "GAME_NOT_IN_PROGRESS",
+                };
+            }
+
+            // Mantém ordem de lock rooms -> rounds para evitar corrida com envio de respostas e worker.
+            const openRounds = await tx.$queryRaw<{ id: string }[]>`
+                SELECT id
+                FROM rounds
+                WHERE "gameId" = ${currentGame.id}
+                  AND status = 'OPEN'
+                ORDER BY "roundNumber" ASC
+                FOR UPDATE
+            `;
+
+            const now = await getTransactionNow(tx);
+            let closedRound: FinishGameClosedRound | null = null;
+
+            for (const openRound of openRounds) {
+                closedRound = (await tx.round.update({
+                    where: { id: openRound.id },
+                    data: {
+                        status: "CLOSED",
+                        closedAt: now,
+                    },
+                    include: {
+                        snapshotQuestion: {
+                            include: {
+                                options: {
+                                    orderBy: { position: "asc" },
+                                },
+                            },
+                        },
+                        answers: {
+                            include: {
+                                gamePlayer: {
+                                    select: {
+                                        id: true,
+                                        nickname: true,
+                                    },
+                                },
+                                option: {
+                                    select: {
+                                        id: true,
+                                        text: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                })) as FinishGameClosedRound;
+            }
+
+            const finishedGame = await tx.game.update({
+                where: { id: currentGame.id },
+                data: {
+                    status: "FINISHED",
+                    finishedAt: now,
+                },
+            });
+
+            // Reconsulta jogadores após travar/fechar rodadas abertas para refletir todas as respostas comitadas.
+            const players = await tx.gamePlayer.findMany({
+                where: { gameId: currentGame.id },
+                select: {
+                    id: true,
+                    nickname: true,
+                    score: true,
+                    joinedAt: true,
+                },
+                orderBy: [
+                    { score: "desc" },
+                    { joinedAt: "asc" },
+                    { id: "asc" },
+                ],
+            });
+
+            const updatedRoom = {
+                ...room,
+                games: room.games.map((g) =>
+                    g.id === finishedGame.id
+                        ? { ...g, ...finishedGame, players }
+                        : g,
+                ),
+            };
+
+            return {
+                success: true,
+                room: updatedRoom,
+                game: finishedGame,
+                closedRound,
+                players,
+                alreadyFinished: false,
             };
         });
     }

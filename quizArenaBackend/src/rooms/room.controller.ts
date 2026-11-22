@@ -278,6 +278,85 @@ export class RoomController {
         }
     }
 
+    async finish(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+
+        if (typeof roomId !== "string" || !roomId.trim()) {
+            res.status(400).json({
+                message: "Identificador da sala inválido.",
+            });
+            return;
+        }
+
+        try {
+            const result = await this.roomService.finishRoom(
+                roomId,
+                req.user.id,
+            );
+
+            if (!result.alreadyFinished) {
+                if (result.closedRoundPayload) {
+                    emitRoomEvent(
+                        result.room.id,
+                        "round:closed",
+                        result.closedRoundPayload,
+                    );
+                }
+
+                emitRoomEvent(result.room.id, "game:finished", {
+                    roomId: result.room.id,
+                    gameId: result.gameId,
+                    finishedAt: result.finishedAt,
+                    ranking: result.ranking,
+                });
+            }
+
+            res.status(200).json({
+                message: "Partida encerrada com sucesso.",
+                room: result.room,
+                ranking: result.ranking,
+                alreadyFinished: result.alreadyFinished,
+            });
+        } catch (error: unknown) {
+            if (
+                error instanceof RoomNotFoundError ||
+                error instanceof RoomGameNotFoundError
+            ) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomNotEditableError) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao encerrar partida.");
+
+            res.status(500).json({
+                message: "Erro interno ao encerrar partida.",
+            });
+        }
+    }
+
     async join(req: Request, res: Response): Promise<void> {
         try {
             const result = await this.roomService.joinRoom(req.body);

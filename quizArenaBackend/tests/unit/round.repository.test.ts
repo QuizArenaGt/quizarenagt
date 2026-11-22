@@ -403,5 +403,42 @@ describe("RoundRepository", () => {
                 gameFinished: false,
             });
         });
+
+        it("deve encerrar manualmente antes do timer com allowBeforeExpiration true e exigir tempo/respostas quando false", async () => {
+            const futureOpenRound = {
+                ...openRoundFixture,
+                openedAt: new Date(),
+                expiresAt: new Date(Date.now() + 25_000),
+                answers: [],
+            };
+            transactionClient.round.findUnique.mockResolvedValue(futureOpenRound);
+
+            const autoBlocked = await repository.closeRound("round-1");
+            expect(transactionClient.round.update).not.toHaveBeenCalled();
+            expect(autoBlocked).toEqual({
+                success: false,
+                reason: "ROUND_NOT_READY",
+            });
+
+            const closed = {
+                ...futureOpenRound,
+                status: "CLOSED" as const,
+                closedAt: new Date(),
+            };
+            transactionClient.round.update.mockResolvedValueOnce(closed);
+
+            const manualAllowed = await repository.closeRound(
+                "round-1",
+                roomFixture.hostId,
+                { allowBeforeExpiration: true },
+            );
+            expect(transactionClient.round.update).toHaveBeenCalledTimes(1);
+            expect(manualAllowed).toEqual({
+                success: true,
+                round: closed,
+                alreadyClosed: false,
+                gameFinished: false,
+            });
+        });
     });
 });

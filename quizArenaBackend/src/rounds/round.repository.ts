@@ -207,6 +207,7 @@ export class RoundRepository {
     async closeRound(
         roundId: string,
         hostId?: string,
+        options?: { allowBeforeExpiration?: boolean },
     ): Promise<CloseRoundResult> {
         return prisma.$transaction(async (tx) => {
             await tx.$queryRaw`
@@ -256,12 +257,13 @@ export class RoundRepository {
                 round.expiresAt ??
                 new Date(round.openedAt.getTime() + round.timeLimit * 1000);
 
+            const allowBeforeExpiration = options?.allowBeforeExpiration ?? false;
             const timeExpired = now.getTime() >= expiresAt.getTime();
             const allPlayersAnswered =
                 game.players.length > 0 &&
                 round.answers.length >= game.players.length;
 
-            if (!timeExpired && !allPlayersAnswered) {
+            if (!allowBeforeExpiration && !timeExpired && !allPlayersAnswered) {
                 return { success: false, reason: "ROUND_NOT_READY" };
             }
 

@@ -59,6 +59,7 @@ describe("RoomService", () => {
         startIfReady: ReturnType<typeof vi.fn>;
         createNextGame: ReturnType<typeof vi.fn>;
         archiveByHost: ReturnType<typeof vi.fn>;
+        finishActiveGame: ReturnType<typeof vi.fn>;
         findGamesByRoomId: ReturnType<typeof vi.fn>;
         findGameResultsById: ReturnType<typeof vi.fn>;
     };
@@ -90,6 +91,7 @@ describe("RoomService", () => {
             startIfReady: vi.fn(),
             createNextGame: vi.fn(),
             archiveByHost: vi.fn(),
+            finishActiveGame: vi.fn(),
             findGamesByRoomId: vi.fn(),
             findGameResultsById: vi.fn(),
         };
@@ -782,6 +784,60 @@ describe("RoomService", () => {
 
             await expect(
                 service.getRoomLobby("ABC123", "jwt-token"),
+            ).rejects.toThrow(RoomNotEditableError);
+        });
+    });
+
+    describe("finishRoom", () => {
+        it("deve projetar sala FINISHED, ranking ordenado e closedRoundPayload quando havia rodada aberta", async () => {
+            const finishedAt = new Date("2026-11-20T16:10:00.000Z");
+            const players = [
+                { id: "p2", nickname: "Bob", score: 100, joinedAt: new Date("2026-11-20T16:00:05.000Z") },
+                { id: "p1", nickname: "Alice", score: 250, joinedAt: baseDate },
+            ];
+            const finishedGame = {
+                ...baseGameFixture,
+                status: "FINISHED" as const,
+                startedAt: baseDate,
+                finishedAt,
+            };
+
+            roomRepositoryMock.finishActiveGame.mockResolvedValue({
+                success: true,
+                alreadyFinished: false,
+                room: { ...roomFixture, games: [finishedGame] },
+                game: finishedGame,
+                closedRound: null,
+                players,
+            });
+
+            const res = await service.finishRoom(roomFixture.id, roomFixture.hostId);
+
+            expect(res.room.status).toBe("FINISHED");
+            expect(res.finishedAt).toEqual(finishedAt);
+            expect(res.alreadyFinished).toBe(false);
+            expect(res.closedRoundPayload).toBeNull();
+            expect(res.ranking).toEqual([
+                { id: "p1", nickname: "Alice", score: 250, position: 1 },
+                { id: "p2", nickname: "Bob", score: 100, position: 2 },
+            ]);
+        });
+
+        it("deve lançar erros de domínio adequados quando partida não estiver em andamento ou usuário não for host", async () => {
+            roomRepositoryMock.finishActiveGame.mockResolvedValueOnce({
+                success: false,
+                reason: "ACCESS_DENIED",
+            });
+            await expect(
+                service.finishRoom(roomFixture.id, "outro"),
+            ).rejects.toThrow(RoomAccessDeniedError);
+
+            roomRepositoryMock.finishActiveGame.mockResolvedValueOnce({
+                success: false,
+                reason: "GAME_NOT_IN_PROGRESS",
+            });
+            await expect(
+                service.finishRoom(roomFixture.id, roomFixture.hostId),
             ).rejects.toThrow(RoomNotEditableError);
         });
     });
