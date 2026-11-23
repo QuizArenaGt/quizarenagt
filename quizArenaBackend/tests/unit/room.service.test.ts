@@ -391,10 +391,36 @@ describe("RoomService", () => {
             roomRepositoryMock.startIfReady.mockResolvedValueOnce({
                 success: false,
                 reason: "NOT_ENOUGH_PLAYERS",
+                details: {
+                    currentPlayers: 1,
+                    requiredPlayers: 2,
+                    currentQuestions: 5,
+                    requiredQuestions: 5,
+                    missingPlayers: true,
+                    missingQuestions: false,
+                },
             });
             await expect(
                 service.startRoom(roomFixture.id, roomFixture.hostId),
             ).rejects.toThrow(RoomStartRequirementsError);
+
+            roomRepositoryMock.startIfReady.mockResolvedValueOnce({
+                success: false,
+                reason: "START_REQUIREMENTS_NOT_MET",
+                details: {
+                    currentPlayers: 0,
+                    requiredPlayers: 2,
+                    currentQuestions: 2,
+                    requiredQuestions: 5,
+                    missingPlayers: true,
+                    missingQuestions: true,
+                },
+            });
+            await expect(
+                service.startRoom(roomFixture.id, roomFixture.hostId),
+            ).rejects.toThrow(
+                /2 jogadores ativos \(atual: 0\).*5 perguntas ativas \(atual: 2\)/,
+            );
         });
     });
 

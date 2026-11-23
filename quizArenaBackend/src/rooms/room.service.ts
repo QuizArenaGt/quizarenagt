@@ -710,7 +710,11 @@ export class RoomService {
 
             case "NOT_ENOUGH_PLAYERS":
             case "NOT_ENOUGH_QUESTIONS":
-                throw new RoomStartRequirementsError(result.reason);
+            case "START_REQUIREMENTS_NOT_MET":
+                throw new RoomStartRequirementsError(
+                    result.reason,
+                    result.details,
+                );
         }
     }
 

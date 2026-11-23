@@ -208,15 +208,23 @@ export function mapApiRoomToModel(
             : 'currentGame' in apiRoom && Array.isArray(apiRoom.currentGame?.players)
               ? apiRoom.currentGame.players
               : [];
-    const apiName = 'name' in apiRoom ? apiRoom.name : undefined;
-    const apiTheme = 'theme' in apiRoom ? apiRoom.theme : undefined;
+    const apiName =
+        'name' in apiRoom && typeof apiRoom.name === 'string'
+            ? apiRoom.name.trim()
+            : '';
+    const metaName = typeof meta?.name === 'string' ? meta.name.trim() : '';
+    const apiTheme =
+        'theme' in apiRoom && typeof apiRoom.theme === 'string'
+            ? apiRoom.theme.trim()
+            : '';
+    const metaTheme = typeof meta?.theme === 'string' ? meta.theme.trim() : '';
     const currentGameId =
         'currentGame' in apiRoom ? (apiRoom.currentGame?.id ?? null) : undefined;
     return {
         id: apiRoom.id,
         code: apiRoom.code,
-        name: meta?.name?.trim() || apiName?.trim() || `Sala ${apiRoom.code}`,
-        theme: meta?.theme?.trim() || apiTheme?.trim() || 'Geral',
+        name: apiName || metaName || `Sala ${apiRoom.code}`,
+        theme: apiTheme || metaTheme || 'Geral',
         timeLimit: apiRoom.questionTime,
         maxPlayers: apiRoom.maxPlayers,
         gameMode: apiRoom.gameMode,

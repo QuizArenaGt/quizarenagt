@@ -242,9 +242,20 @@ describe("RoomController", () => {
             expect(res.json).toHaveBeenCalledWith(started);
         });
 
-        it("deve retornar 409 quando requisitos mínimos não forem atingidos", async () => {
+        it("deve retornar 409 com código e detalhes quando requisitos mínimos não forem atingidos", async () => {
+            const details = {
+                currentPlayers: 1,
+                requiredPlayers: 2,
+                currentQuestions: 3,
+                requiredQuestions: 5,
+                missingPlayers: true,
+                missingQuestions: true,
+            };
             roomServiceMock.startRoom.mockRejectedValue(
-                new RoomStartRequirementsError("NOT_ENOUGH_PLAYERS"),
+                new RoomStartRequirementsError(
+                    "START_REQUIREMENTS_NOT_MET",
+                    details,
+                ),
             );
             const req = {
                 user: { id: "user-host-uuid" },
@@ -255,6 +266,12 @@ describe("RoomController", () => {
             await controller.start(req, res);
 
             expect(res.status).toHaveBeenCalledWith(409);
+            expect(res.json).toHaveBeenCalledWith({
+                message:
+                    "Não é possível iniciar a partida: são necessários pelo menos 2 jogadores ativos (atual: 1) e pelo menos 5 perguntas ativas (atual: 3).",
+                code: "START_REQUIREMENTS_NOT_MET",
+                requirements: details,
+            });
         });
     });
 

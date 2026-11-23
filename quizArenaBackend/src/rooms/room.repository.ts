@@ -39,6 +39,8 @@ type UpdateRoomData = {
     gameMode?: GameMode;
 };
 
+import type { RoomStartRequirementsDetails } from "./room.errors.js";
+
 export type StartRoomResult =
     | {
         success: true;
@@ -50,9 +52,15 @@ export type StartRoomResult =
         reason:
         | "ROOM_NOT_FOUND"
         | "ACCESS_DENIED"
-        | "ROOM_NOT_WAITING"
+        | "ROOM_NOT_WAITING";
+    }
+    | {
+        success: false;
+        reason:
         | "NOT_ENOUGH_PLAYERS"
-        | "NOT_ENOUGH_QUESTIONS";
+        | "NOT_ENOUGH_QUESTIONS"
+        | "START_REQUIREMENTS_NOT_MET";
+        details: RoomStartRequirementsDetails;
     };
 
 export type CreateNextGameResult =
@@ -506,13 +514,6 @@ export class RoomRepository {
                 },
             });
 
-            if (playerCount < 2) {
-                return {
-                    success: false,
-                    reason: "NOT_ENOUGH_PLAYERS",
-                };
-            }
-
             const questions = await tx.question.findMany({
                 where: {
                     roomId,
@@ -529,10 +530,30 @@ export class RoomRepository {
                 },
             });
 
-            if (questions.length < 5) {
+            const missingPlayers = playerCount < 2;
+            const missingQuestions = questions.length < 5;
+
+            if (missingPlayers || missingQuestions) {
+                const details: RoomStartRequirementsDetails = {
+                    currentPlayers: playerCount,
+                    requiredPlayers: 2,
+                    currentQuestions: questions.length,
+                    requiredQuestions: 5,
+                    missingPlayers,
+                    missingQuestions,
+                };
+
+                const reason =
+                    missingPlayers && missingQuestions
+                        ? "START_REQUIREMENTS_NOT_MET"
+                        : missingPlayers
+                          ? "NOT_ENOUGH_PLAYERS"
+                          : "NOT_ENOUGH_QUESTIONS";
+
                 return {
                     success: false,
-                    reason: "NOT_ENOUGH_QUESTIONS",
+                    reason,
+                    details,
                 };
             }
 

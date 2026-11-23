@@ -78,20 +78,54 @@ export class RoomAuthenticationError extends Error {
 
 export type RoomStartRequirement =
     | "NOT_ENOUGH_PLAYERS"
-    | "NOT_ENOUGH_QUESTIONS";
+    | "NOT_ENOUGH_QUESTIONS"
+    | "START_REQUIREMENTS_NOT_MET";
+
+export type RoomStartRequirementsDetails = {
+    currentPlayers: number;
+    requiredPlayers: number;
+    currentQuestions: number;
+    requiredQuestions: number;
+    missingPlayers: boolean;
+    missingQuestions: boolean;
+};
+
+function formatStartRequirementsMessage(
+    reason: RoomStartRequirement,
+    details?: RoomStartRequirementsDetails,
+): string {
+    if (details) {
+        if (details.missingPlayers && details.missingQuestions) {
+            return `Não é possível iniciar a partida: são necessários pelo menos ${details.requiredPlayers} jogadores ativos (atual: ${details.currentPlayers}) e pelo menos ${details.requiredQuestions} perguntas ativas (atual: ${details.currentQuestions}).`;
+        }
+
+        if (details.missingPlayers) {
+            return `São necessários pelo menos ${details.requiredPlayers} jogadores ativos para iniciar a partida (atual: ${details.currentPlayers}).`;
+        }
+
+        if (details.missingQuestions) {
+            return `São necessárias pelo menos ${details.requiredQuestions} perguntas ativas para iniciar a partida (atual: ${details.currentQuestions}).`;
+        }
+    }
+
+    const fallbackMessages: Record<RoomStartRequirement, string> = {
+        NOT_ENOUGH_PLAYERS:
+            "A partida precisa de pelo menos 2 jogadores.",
+        NOT_ENOUGH_QUESTIONS:
+            "A partida precisa de pelo menos 5 perguntas ativas.",
+        START_REQUIREMENTS_NOT_MET:
+            "A partida precisa de pelo menos 2 jogadores ativos e pelo menos 5 perguntas ativas.",
+    };
+
+    return fallbackMessages[reason];
+}
 
 export class RoomStartRequirementsError extends Error {
     constructor(
         public readonly reason: RoomStartRequirement,
+        public readonly details?: RoomStartRequirementsDetails,
     ) {
-        const messages: Record<RoomStartRequirement, string> = {
-            NOT_ENOUGH_PLAYERS:
-                "A partida precisa de pelo menos 2 jogadores.",
-            NOT_ENOUGH_QUESTIONS:
-                "A partida precisa de pelo menos 5 perguntas ativas.",
-        };
-
-        super(messages[reason]);
+        super(formatStartRequirementsMessage(reason, details));
         this.name = "RoomStartRequirementsError";
     }
 }

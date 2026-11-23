@@ -202,12 +202,18 @@ export class RoomController {
                 return;
             }
 
-            if (
-                error instanceof RoomNotEditableError ||
-                error instanceof RoomStartRequirementsError
-            ) {
+            if (error instanceof RoomNotEditableError) {
                 res.status(409).json({
                     message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomStartRequirementsError) {
+                res.status(409).json({
+                    message: error.message,
+                    code: error.reason,
+                    ...(error.details ? { requirements: error.details } : {}),
                 });
                 return;
             }

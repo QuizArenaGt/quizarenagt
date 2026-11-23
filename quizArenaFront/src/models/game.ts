@@ -38,6 +38,37 @@ export interface GameRoom {
     isDemo: boolean;
 }
 
+export interface PlayerLobbyRoomSource {
+    id: string;
+    code: string;
+    name?: string | null;
+    questionTime: number;
+    host: {
+        name: string;
+    };
+}
+
+/**
+ * Converte os dados do lobby retornados pela API no modelo `GameRoom` exibido ao jogador,
+ * usando o nome real da sala e recorrendo a "Sala de <anfitrião>" somente quando ausente.
+ */
+export function mapLobbyToPlayerGameRoom(lobby: PlayerLobbyRoomSource): GameRoom {
+    const resolvedName =
+        typeof lobby.name === 'string' && lobby.name.trim().length > 0
+            ? lobby.name.trim()
+            : `Sala de ${lobby.host.name}`;
+
+    return {
+        pin: lobby.code,
+        roomId: lobby.id,
+        title: resolvedName,
+        timePerQuestion: lobby.questionTime,
+        questions: [],
+        opponents: [],
+        isDemo: false,
+    };
+}
+
 /** Linha do ranking. */
 export interface RankingEntry {
     position: number;

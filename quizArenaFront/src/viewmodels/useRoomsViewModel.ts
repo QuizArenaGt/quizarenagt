@@ -18,12 +18,14 @@ import {
     executeLoadHostRooms,
     executeLoadRoomByCode,
     executePlayAgain,
+    executeStartMatch,
     executeSubmitRoom,
     extractHostMatchRecoveryState,
     mapBackendRoomStatus,
     upsertRoomInList,
     type HostSessionTracker,
     type Room,
+    type StartMatchErrorKind,
 } from '../models/room';
 import {
     buildRoomReport,
@@ -84,6 +86,10 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const [isLoadingRoom, setIsLoadingRoom] = useState(false);
     const [isLoadingHostRooms, setIsLoadingHostRooms] = useState(false);
     const [roomActionError, setRoomActionError] = useState<string | null>(null);
+    const [startMatchError, setStartMatchError] = useState<string | null>(null);
+    const [startMatchErrorKind, setStartMatchErrorKind] =
+        useState<StartMatchErrorKind | null>(null);
+    const [hasAttemptedStart, setHasAttemptedStart] = useState(false);
     const [hostRoomsError, setHostRoomsError] = useState<string | null>(null);
     const [isStartingMatch, setIsStartingMatch] = useState(false);
     const [isClosingRound, setIsClosingRound] = useState(false);
@@ -138,6 +144,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const closingRoundIdRef = useRef<string | null>(null);
     const activeRoundIdRef = useRef<string | null>(null);
     const isSubmittingRoomRef = useRef(false);
+    const isStartingMatchRef = useRef(false);
     const isPlayingAgainRef = useRef(false);
     const isArchivingRoomRef = useRef(false);
     const isFinishingMatchRef = useRef(false);
@@ -185,6 +192,12 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         [],
     );
 
+    const clearStartMatchFeedback = useCallback(() => {
+        setHasAttemptedStart(false);
+        setStartMatchError(null);
+        setStartMatchErrorKind(null);
+    }, []);
+
     const resetSessionState = useCallback(() => {
         roomsRef.current = [];
         closingRoundIdRef.current = null;
@@ -202,6 +215,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setAnsweredPlayers([]);
         setRoundRemainingSeconds(0);
         setRoomActionError(null);
+        clearStartMatchFeedback();
         setHostRoomsError(null);
         setDisplayedRoom(null);
         setRoomPendingDeletion(null);
@@ -213,7 +227,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setReportView(null);
         setLookupCode('');
         clearAllRoomResults();
-    }, []);
+    }, [clearStartMatchFeedback]);
 
     const refreshRoomGames = useCallback(
         async (targetRoomId?: string | null) => {
@@ -277,6 +291,9 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                     });
 
                     applyHostRoundRecovery(lobby);
+                    if (lobby.id !== currentRoomId || lobby.status !== 'WAITING') {
+                        clearStartMatchFeedback();
+                    }
                     setActiveRoomId(lobby.id);
                     setSearchParams((prev) => {
                         const next = new URLSearchParams(prev);
@@ -288,7 +305,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 },
             });
         },
-        [applyHostRoundRecovery, setSearchParams],
+        [applyHostRoundRecovery, clearStartMatchFeedback, currentRoomId, setSearchParams],
     );
 
     const selectRoom = useCallback(
@@ -306,6 +323,9 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 return room.id;
             });
             setRoomActionError(null);
+            if (currentRoomId !== room.id) {
+                clearStartMatchFeedback();
+            }
             setSearchParams((prev) => {
                 const next = new URLSearchParams(prev);
                 next.set('sala', room.code);
@@ -319,7 +339,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 });
             }
         },
-        [loadRoomByCode, setSearchParams],
+        [clearStartMatchFeedback, currentRoomId, loadRoomByCode, setSearchParams],
     );
 
     const reloadHostRooms = useCallback(async () => {
@@ -621,63 +641,58 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const startMatch = useCallback(
         async (roomToStart?: Room) => {
             const targetRoom = roomToStart ?? activeRoom;
-            if (!targetRoom) return;
 
-            setIsStartingMatch(true);
-            setRoomActionError(null);
+            await executeStartMatch({
+                room: targetRoom,
+                lockRef: isStartingMatchRef,
+                requestStart: startRoomApi,
+                onAttemptStart: () => setHasAttemptedStart(true),
+                onStartingChange: setIsStartingMatch,
+                onError: (message, kind = null) => {
+                    setStartMatchError(message);
+                    setStartMatchErrorKind(kind);
+                },
+                onStarted: async (startedRoom, originalRoom) => {
+                    clearStartMatchFeedback();
+                    setRoomActionError(null);
+                    const freshLobby = await getRoomLobbyApi(originalRoom.code);
 
-            try {
-                const freshLobby = await getRoomLobbyApi(targetRoom.code);
-                if (freshLobby.players.length < MIN_ROOM_PLAYERS) {
-                    throw new Error(
-                        `São necessários pelo menos ${MIN_ROOM_PLAYERS} jogadores na sala para iniciar (atual: ${freshLobby.players.length}).`,
-                    );
-                }
-
-                const startedRoom = await startRoomApi(targetRoom.id);
-                setRooms((current) =>
-                    current.map((r) =>
-                        r.id === targetRoom.id
-                            ? {
-                                  ...r,
-                                  players: freshLobby.players,
-                                  backendStatus: startedRoom.status,
-                                  status: mapBackendRoomStatus(startedRoom.status),
-                                  ...(startedRoom.currentGame?.id
-                                      ? { currentGameId: startedRoom.currentGame.id }
-                                      : {}),
-                              }
-                            : r,
-                    ),
-                );
-
-                // Abre imediatamente a 1ª rodada
-                const nextRoundResponse = await createNextRoundApi(targetRoom.id);
-                if (!nextRoundResponse.finished) {
-                    closingRoundIdRef.current = null;
-                    activeRoundIdRef.current = nextRoundResponse.round.id;
-                    setActiveRound(nextRoundResponse.round);
-                    setClosedRound(null);
-                    setAnsweredPlayers([]);
-                    setRoundRemainingSeconds(
-                        computeRemainingSecondsFromDeadline(
-                            nextRoundResponse.round.expiresAt,
-                            nextRoundResponse.round.openedAt,
-                            nextRoundResponse.round.timeLimit,
+                    setRooms((current) =>
+                        current.map((r) =>
+                            r.id === originalRoom.id
+                                ? {
+                                      ...r,
+                                      players: freshLobby.players,
+                                      backendStatus: startedRoom.status,
+                                      status: mapBackendRoomStatus(startedRoom.status),
+                                      ...(startedRoom.currentGame?.id
+                                          ? { currentGameId: startedRoom.currentGame.id }
+                                          : {}),
+                                  }
+                                : r,
                         ),
                     );
-                }
-            } catch (err) {
-                setRoomActionError(
-                    err instanceof Error
-                        ? err.message
-                        : 'Não foi possível iniciar a partida.',
-                );
-            } finally {
-                setIsStartingMatch(false);
-            }
+
+                    // Abre imediatamente a 1ª rodada
+                    const nextRoundResponse = await createNextRoundApi(originalRoom.id);
+                    if (!nextRoundResponse.finished) {
+                        closingRoundIdRef.current = null;
+                        activeRoundIdRef.current = nextRoundResponse.round.id;
+                        setActiveRound(nextRoundResponse.round);
+                        setClosedRound(null);
+                        setAnsweredPlayers([]);
+                        setRoundRemainingSeconds(
+                            computeRemainingSecondsFromDeadline(
+                                nextRoundResponse.round.expiresAt,
+                                nextRoundResponse.round.openedAt,
+                                nextRoundResponse.round.timeLimit,
+                            ),
+                        );
+                    }
+                },
+            });
         },
-        [activeRoom],
+        [activeRoom, clearStartMatchFeedback],
     );
 
     const advanceToNextRound = useCallback(async () => {
@@ -751,6 +766,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                     setClosedRound(null);
                     setAnsweredPlayers([]);
                     setRoundRemainingSeconds(0);
+                    clearStartMatchFeedback();
                     deleteRoomResults(mappedRoom.id);
                     setRooms((current) => upsertRoomInList(current, mappedRoom));
                     setActiveRoomId(mappedRoom.id);
@@ -765,7 +781,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
 
             return updated !== null;
         },
-        [activeRoom, refreshRoomGames, setSearchParams],
+        [activeRoom, clearStartMatchFeedback, refreshRoomGames, setSearchParams],
     );
 
     const openCreate = useCallback(() => {
@@ -829,18 +845,24 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             onSuccess: (apiRoom, validInput) => {
                 if (editingRoom) {
                     setRooms((current) =>
-                        current.map((room) =>
-                            room.id === editingRoom.id
-                                ? {
-                                      ...room,
-                                      name: validInput.name.trim(),
-                                      theme: validInput.theme.trim() || DEFAULT_THEME,
-                                      timeLimit: apiRoom.questionTime,
-                                      maxPlayers: apiRoom.maxPlayers,
-                                      gameMode: apiRoom.gameMode,
-                                  }
-                                : room,
-                        ),
+                        current.map((room) => {
+                            if (room.id !== editingRoom.id) {
+                                return room;
+                            }
+                            const mappedRoom = mapApiRoomToModel(apiRoom, {
+                                name: validInput.name.trim(),
+                                theme: validInput.theme.trim() || DEFAULT_THEME,
+                                questionIds: room.questionIds,
+                            });
+                            return {
+                                ...room,
+                                ...mappedRoom,
+                                players:
+                                    'players' in apiRoom && Array.isArray(apiRoom.players)
+                                        ? mappedRoom.players
+                                        : room.players,
+                            };
+                        }),
                     );
                     setIsCreateOpen(false);
                     return;
@@ -853,6 +875,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 });
 
                 // A navegação e fechamento do modal só ocorrem após confirmação válida do backend
+                clearStartMatchFeedback();
                 setRooms((current) => upsertRoomInList(current, newRoom));
                 setActiveRoomId(newRoom.id);
                 setActiveRound(null);
@@ -912,6 +935,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                     setRoundRemainingSeconds(0);
                     setRoomGames([]);
                     setRoomGamesError(null);
+                    clearStartMatchFeedback();
                 }
                 if (urlRoomCodeRef.current === targetRoom.code) {
                     setSearchParams((prev) => {
@@ -924,7 +948,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 setRoomPendingDeletion(null);
             },
         });
-    }, [activeRoomId, roomPendingDeletion, setSearchParams]);
+    }, [activeRoomId, clearStartMatchFeedback, roomPendingDeletion, setSearchParams]);
 
     const openGameReport = useCallback(async (room: Room, gameId: string) => {
         await executeOpenGameResults({
@@ -1011,6 +1035,10 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         isLoadingRoom,
         isLoadingHostRooms,
         roomActionError,
+        startMatchError,
+        startMatchErrorKind,
+        hasAttemptedStart,
+        clearStartMatchFeedback,
         hostRoomsError,
         clearRoomActionError: () => setRoomActionError(null),
         reloadHostRooms,

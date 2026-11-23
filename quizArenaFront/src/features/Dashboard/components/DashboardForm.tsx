@@ -1,4 +1,4 @@
-import { useState, type ClipboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import './DashboardForm.css';
 import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog/ConfirmDialog';
@@ -12,9 +12,12 @@ import {
     ROOM_TIME_OPTIONS,
     canPlayAgain,
     countEligiblePlayers,
+    evaluateStartMatchRequirements,
     formatNullableDateTime,
     formatRoomCode,
     getClipboardRoomCode,
+    resolveStartMatchFeedback,
+    shouldClearStartMatchFeedbackOnRequirementsMet,
 } from '../../../models/room';
 import {
     formatGameDuration,
@@ -58,11 +61,50 @@ export default function DashboardForm({
     }
 
     const activeRoom = roomsVm.activeRoom;
-    const canStartMatch =
-        activeRoom !== null &&
-        activeRoom.backendStatus === 'WAITING' &&
-        activeRoom.players.length >= MIN_ROOM_PLAYERS &&
-        questionBank.activeCount >= MIN_ROOM_QUESTIONS;
+    const activeRoomId = activeRoom?.id ?? null;
+    const activeLobbyPlayersCount = activeRoom
+        ? countEligiblePlayers(activeRoom.players)
+        : 0;
+    const startRequirements = evaluateStartMatchRequirements(
+        activeLobbyPlayersCount,
+        questionBank.activeCount,
+    );
+    const { clearStartMatchFeedback, startMatchErrorKind } = roomsVm;
+    const startMatchFeedback = resolveStartMatchFeedback({
+        hasAttemptedStart: roomsVm.hasAttemptedStart,
+        startMatchError: roomsVm.startMatchError,
+        startMatchErrorKind,
+    });
+
+    const prevStartStateRef = useRef<{ roomId: string | null; canStart: boolean }>({
+        roomId: null,
+        canStart: false,
+    });
+
+    useEffect(() => {
+        const previous = prevStartStateRef.current;
+
+        if (
+            previous.roomId === activeRoomId &&
+            shouldClearStartMatchFeedbackOnRequirementsMet({
+                previousCanStart: previous.canStart,
+                currentCanStart: startRequirements.canStart,
+                startMatchErrorKind,
+            })
+        ) {
+            clearStartMatchFeedback();
+        }
+
+        prevStartStateRef.current = {
+            roomId: activeRoomId,
+            canStart: startRequirements.canStart,
+        };
+    }, [
+        activeRoomId,
+        startRequirements.canStart,
+        startMatchErrorKind,
+        clearStartMatchFeedback,
+    ]);
 
     return (
         <div className="dashboard-container">
@@ -506,45 +548,49 @@ export default function DashboardForm({
                                                         <ul style={{ margin: 0, paddingLeft: '20px', lineHeight: 1.7 }}>
                                                             <li
                                                                 style={{
-                                                                    color:
-                                                                        questionBank.activeCount >= MIN_ROOM_QUESTIONS
-                                                                            ? '#15803d'
-                                                                            : '#b45309',
+                                                                    color: !startRequirements.missingQuestions
+                                                                        ? '#15803d'
+                                                                        : '#b45309',
                                                                 }}
                                                             >
-                                                                Perguntas na sala:{' '}
+                                                                Perguntas ativas na sala:{' '}
                                                                 <strong>
-                                                                    {questionBank.activeCount} / mín.{' '}
+                                                                    {startRequirements.currentQuestions} / mín.{' '}
                                                                     {MIN_ROOM_QUESTIONS}
                                                                 </strong>{' '}
-                                                                {questionBank.activeCount >= MIN_ROOM_QUESTIONS
-                                                                    ? '✓'
-                                                                    : '(cadastre abaixo)'}
+                                                                {!startRequirements.missingQuestions
+                                                                    ? '✓ Atendido'
+                                                                    : `(falta${startRequirements.missingQuestionsCount === 1 ? '' : 'm'} ${startRequirements.missingQuestionsCount} — cadastre ou importe abaixo)`}
                                                             </li>
                                                             <li
                                                                 style={{
-                                                                    color:
-                                                                        activeRoom.players.length >= MIN_ROOM_PLAYERS
-                                                                            ? '#15803d'
-                                                                            : '#b45309',
+                                                                    color: !startRequirements.missingPlayers
+                                                                        ? '#15803d'
+                                                                        : '#b45309',
                                                                 }}
                                                             >
-                                                                Jogadores conectados:{' '}
+                                                                Jogadores ativos no lobby:{' '}
                                                                 <strong>
-                                                                    {activeRoom.players.length} / mín.{' '}
+                                                                    {startRequirements.currentPlayers} / mín.{' '}
                                                                     {MIN_ROOM_PLAYERS}
                                                                 </strong>{' '}
-                                                                {activeRoom.players.length >= MIN_ROOM_PLAYERS
-                                                                    ? '✓'
-                                                                    : '(aguardando jogadores)'}
+                                                                {!startRequirements.missingPlayers
+                                                                    ? '✓ Atendido'
+                                                                    : `(falta${startRequirements.missingPlayersCount === 1 ? '' : 'm'} ${startRequirements.missingPlayersCount} — aguardando jogadores)`}
                                                             </li>
                                                         </ul>
                                                     </div>
 
+                                                    {startMatchFeedback && (
+                                                        <p className="room-form-error" role="alert" style={{ margin: 0 }}>
+                                                            {startMatchFeedback}
+                                                        </p>
+                                                    )}
+
                                                     <button
                                                         type="button"
                                                         className="primary-btn"
-                                                        disabled={!canStartMatch || roomsVm.isStartingMatch}
+                                                        disabled={roomsVm.isStartingMatch}
                                                         onClick={() => void roomsVm.startMatch(activeRoom)}
                                                         style={{ width: '100%', padding: '12px' }}
                                                     >

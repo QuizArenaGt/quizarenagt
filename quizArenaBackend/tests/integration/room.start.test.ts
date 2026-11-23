@@ -324,7 +324,7 @@ describe("POST /rooms/:id/start - Integração", () => {
         expect(persistedGame?.status).toBe("WAITING");
     });
 
-    it("não deve iniciar com menos de 2 jogadores", async () => {
+    it("não deve iniciar quando faltarem jogadores E perguntas, informando ambos os requisitos", async () => {
         const { room, token } = await createRoom();
 
         await createPlayers(room.id, 1);
@@ -334,6 +334,16 @@ describe("POST /rooms/:id/start - Integração", () => {
             .set("Authorization", `Bearer ${token}`);
 
         expect(response.status).toBe(409);
+        expect(response.body.code).toBe("START_REQUIREMENTS_NOT_MET");
+        expect(response.body.message).toMatch(/2 jogadores ativos.*5 perguntas ativas/i);
+        expect(response.body.requirements).toEqual({
+            currentPlayers: 1,
+            requiredPlayers: 2,
+            currentQuestions: 0,
+            requiredQuestions: 5,
+            missingPlayers: true,
+            missingQuestions: true,
+        });
 
         const persistedGame = await prisma.game.findFirst({
             where: { roomId: room.id },
@@ -341,6 +351,31 @@ describe("POST /rooms/:id/start - Integração", () => {
         });
 
         expect(persistedGame?.status).toBe("WAITING");
+    });
+
+    it("não deve iniciar com menos de 2 jogadores mesmo com perguntas suficientes", async () => {
+        const { room, token } = await createRoom();
+
+        await createPlayers(room.id, 1);
+        await createQuestions(room.id, token, 5);
+
+        const response = await request(app)
+            .post(`/rooms/${room.id}/start`)
+            .set("Authorization", `Bearer ${token}`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.code).toBe("NOT_ENOUGH_PLAYERS");
+        expect(response.body.message).toBe(
+            "São necessários pelo menos 2 jogadores ativos para iniciar a partida (atual: 1).",
+        );
+        expect(response.body.requirements).toEqual({
+            currentPlayers: 1,
+            requiredPlayers: 2,
+            currentQuestions: 5,
+            requiredQuestions: 5,
+            missingPlayers: true,
+            missingQuestions: false,
+        });
     });
 
     it("não deve iniciar com menos de 5 perguntas ativas", async () => {
@@ -354,6 +389,18 @@ describe("POST /rooms/:id/start - Integração", () => {
             .set("Authorization", `Bearer ${token}`);
 
         expect(response.status).toBe(409);
+        expect(response.body.code).toBe("NOT_ENOUGH_QUESTIONS");
+        expect(response.body.message).toBe(
+            "São necessárias pelo menos 5 perguntas ativas para iniciar a partida (atual: 4).",
+        );
+        expect(response.body.requirements).toEqual({
+            currentPlayers: 2,
+            requiredPlayers: 2,
+            currentQuestions: 4,
+            requiredQuestions: 5,
+            missingPlayers: false,
+            missingQuestions: true,
+        });
 
         const snapshot = await prisma.roomQuestionSnapshot.findFirst({
             where: { game: { roomId: room.id } },

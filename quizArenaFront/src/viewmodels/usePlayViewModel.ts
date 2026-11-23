@@ -6,6 +6,7 @@ import {
     executeRecoverPlayerSession,
     executeVerifyRoomCode,
     formatRoomAvailabilityError,
+    mapLobbyToPlayerGameRoom,
     NICKNAME_MAX_LENGTH,
     NICKNAME_MIN_LENGTH,
     normalizeRoomCodeInput,
@@ -163,15 +164,7 @@ export function usePlayViewModel() {
             setLobbyPlayers(session.lobby.players);
             setTotalQuestions(session.lobby.currentGame?.totalQuestions ?? 0);
             setCurrentTimeLimit(session.lobby.questionTime);
-            setRoom({
-                pin: session.lobby.code,
-                roomId: session.lobby.id,
-                title: `Sala de ${session.lobby.host.name}`,
-                timePerQuestion: session.lobby.questionTime,
-                questions: [],
-                opponents: [],
-                isDemo: false,
-            });
+            setRoom(mapLobbyToPlayerGameRoom(session.lobby));
             setCanConnectSocket(true);
             setSessionToken(session.sessionToken);
             setIsGameCancelled(false);
@@ -306,15 +299,7 @@ export function usePlayViewModel() {
             setLobbyPlayers(lobby.players);
             setCurrentTimeLimit(lobby.questionTime);
             setPinState(lobby.code);
-            setRoom({
-                pin: lobby.code,
-                roomId: lobby.id,
-                title: `Sala de ${lobby.host.name}`,
-                timePerQuestion: lobby.questionTime,
-                questions: [],
-                opponents: [],
-                isDemo: false,
-            });
+            setRoom(mapLobbyToPlayerGameRoom(lobby));
 
             const cg = lobby.currentGame;
             if (!cg) {

@@ -1055,3 +1055,202 @@ export function applyPlayerLeftToRooms(
         };
     });
 }
+
+export interface StartMatchRequirementsEvaluation {
+    canStart: boolean;
+    currentPlayers: number;
+    requiredPlayers: number;
+    missingPlayers: boolean;
+    missingPlayersCount: number;
+    currentQuestions: number;
+    requiredQuestions: number;
+    missingQuestions: boolean;
+    missingQuestionsCount: number;
+    summaryMessage: string | null;
+}
+
+/**
+ * Avalia no lobby o status visual dos requisitos mínimos para iniciar uma partida.
+ * A validação autoritativa permanece no backend em `POST /rooms/:id/start`.
+ */
+export function evaluateStartMatchRequirements(
+    playerCount: number,
+    questionCount: number,
+): StartMatchRequirementsEvaluation {
+    const safePlayers = Math.max(0, playerCount);
+    const safeQuestions = Math.max(0, questionCount);
+    const missingPlayersCount = Math.max(0, MIN_ROOM_PLAYERS - safePlayers);
+    const missingQuestionsCount = Math.max(
+        0,
+        MIN_ROOM_QUESTIONS - safeQuestions,
+    );
+    const missingPlayers = missingPlayersCount > 0;
+    const missingQuestions = missingQuestionsCount > 0;
+
+    const missingParts: string[] = [];
+    if (missingQuestions) {
+        missingParts.push(
+            `faltam ${missingQuestionsCount} pergunta${missingQuestionsCount === 1 ? '' : 's'} ativa${missingQuestionsCount === 1 ? '' : 's'} (mínimo ${MIN_ROOM_QUESTIONS})`,
+        );
+    }
+    if (missingPlayers) {
+        missingParts.push(
+            `falta${missingPlayersCount === 1 ? '' : 'm'} ${missingPlayersCount} jogador${missingPlayersCount === 1 ? '' : 'es'} ativo${missingPlayersCount === 1 ? '' : 's'} (mínimo ${MIN_ROOM_PLAYERS})`,
+        );
+    }
+
+    const summaryMessage =
+        missingParts.length === 0
+            ? null
+            : `Não é possível iniciar a partida: ${missingParts.join(' e ')}.`;
+
+    return {
+        canStart: !missingPlayers && !missingQuestions,
+        currentPlayers: safePlayers,
+        requiredPlayers: MIN_ROOM_PLAYERS,
+        missingPlayers,
+        missingPlayersCount,
+        currentQuestions: safeQuestions,
+        requiredQuestions: MIN_ROOM_QUESTIONS,
+        missingQuestions,
+        missingQuestionsCount,
+        summaryMessage,
+    };
+}
+
+/**
+ * Formata falhas de início de partida preservando o feedback detalhado do backend (409)
+ * e tratando erros de autenticação, rede ou falhas inesperadas.
+ */
+export function formatStartMatchError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 409) {
+            return (
+                error.message ||
+                'Não é possível iniciar a partida porque os requisitos mínimos não foram atendidos.'
+            );
+        }
+
+        if (error.status === 401 || error.status === 403) {
+            return 'Sua sessão expirou ou você não tem permissão para iniciar esta partida.';
+        }
+
+        if (error.status === 404) {
+            return 'Sala não encontrada.';
+        }
+
+        if (error.status >= 500) {
+            return 'Não foi possível iniciar a partida devido a uma falha no servidor. Tente novamente em instantes.';
+        }
+
+        return error.message || 'Não foi possível iniciar a partida.';
+    }
+
+    if (error instanceof Error) {
+        const msg = error.message || '';
+        if (
+            msg.includes('Não foi possível conectar ao servidor') ||
+            msg.includes('Failed to fetch') ||
+            msg.includes('NetworkError')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão.';
+        }
+
+        if (msg.trim()) {
+            return msg;
+        }
+    }
+
+    return 'Não foi possível iniciar a partida.';
+}
+
+export type StartMatchErrorKind = 'requirements' | 'api';
+
+export interface StartMatchFeedbackInput {
+    hasAttemptedStart: boolean;
+    startMatchError: string | null;
+    startMatchErrorKind?: StartMatchErrorKind | null;
+}
+
+/**
+ * Classifica o erro de tentativa de início entre pendência de requisitos (HTTP 409)
+ * e falha de API/autenticação/rede.
+ */
+export function classifyStartMatchError(error: unknown): StartMatchErrorKind {
+    if (isHttpErrorLike(error) && error.status === 409) {
+        return 'requirements';
+    }
+    return 'api';
+}
+
+/**
+ * Retorna a mensagem de feedback visível na seção de requisitos somente após
+ * uma tentativa explícita de iniciar a partida, evitando avisos precoces ao abrir a sala.
+ */
+export function resolveStartMatchFeedback(
+    input: StartMatchFeedbackInput,
+): string | null {
+    if (!input.hasAttemptedStart || !input.startMatchError) {
+        return null;
+    }
+
+    return input.startMatchError;
+}
+
+/**
+ * Indica se o alerta de pendências deve ser limpo automaticamente quando os
+ * requisitos da sala passam de incompletos para completos após uma tentativa prévia.
+ */
+export function shouldClearStartMatchFeedbackOnRequirementsMet(params: {
+    previousCanStart: boolean;
+    currentCanStart: boolean;
+    startMatchErrorKind: StartMatchErrorKind | null;
+}): boolean {
+    return (
+        !params.previousCanStart &&
+        params.currentCanStart &&
+        params.startMatchErrorKind === 'requirements'
+    );
+}
+
+export interface StartMatchDependencies<TApiRoom> {
+    room: Room | null;
+    lockRef: { current: boolean };
+    requestStart: (roomId: string) => Promise<TApiRoom>;
+    onStartingChange?: (isStarting: boolean) => void;
+    onAttemptStart?: () => void;
+    onError: (message: string | null, kind?: StartMatchErrorKind | null) => void;
+    onStarted: (startedRoom: TApiRoom, originalRoom: Room) => Promise<void> | void;
+}
+
+/**
+ * Executa o início de partida delegando a validação final ao backend (POST /rooms/:id/start)
+ * e impedindo duplo envio enquanto a requisição estiver em andamento.
+ */
+export async function executeStartMatch<TApiRoom>(
+    deps: StartMatchDependencies<TApiRoom>,
+): Promise<boolean> {
+    if (!deps.room || deps.lockRef.current) {
+        return false;
+    }
+
+    deps.lockRef.current = true;
+    deps.onAttemptStart?.();
+    deps.onStartingChange?.(true);
+    deps.onError(null, null);
+
+    try {
+        const startedRoom = await deps.requestStart(deps.room.id);
+        await deps.onStarted(startedRoom, deps.room);
+        return true;
+    } catch (error) {
+        deps.onError(
+            formatStartMatchError(error),
+            classifyStartMatchError(error),
+        );
+        return false;
+    } finally {
+        deps.lockRef.current = false;
+        deps.onStartingChange?.(false);
+    }
+}

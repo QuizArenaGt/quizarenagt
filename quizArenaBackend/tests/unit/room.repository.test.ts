@@ -396,12 +396,15 @@ describe("RoomRepository", () => {
             });
         });
 
-        it("deve retornar NOT_ENOUGH_PLAYERS quando houver menos de 2 jogadores no Game", async () => {
+        it("deve retornar NOT_ENOUGH_PLAYERS quando apenas os jogadores forem insuficientes", async () => {
             transactionClient.room.findUnique.mockResolvedValue({
                 ...roomFixture,
                 games: [gameFixture],
             });
             transactionClient.gamePlayer.count.mockResolvedValue(1);
+            transactionClient.question.findMany.mockResolvedValue(
+                questionsFixture,
+            );
 
             const result = await repository.startIfReady(
                 roomFixture.id,
@@ -411,10 +414,18 @@ describe("RoomRepository", () => {
             expect(result).toEqual({
                 success: false,
                 reason: "NOT_ENOUGH_PLAYERS",
+                details: {
+                    currentPlayers: 1,
+                    requiredPlayers: 2,
+                    currentQuestions: 5,
+                    requiredQuestions: 5,
+                    missingPlayers: true,
+                    missingQuestions: false,
+                },
             });
         });
 
-        it("deve retornar NOT_ENOUGH_QUESTIONS quando houver menos de 5 perguntas ativas", async () => {
+        it("deve retornar NOT_ENOUGH_QUESTIONS quando apenas as perguntas ativas forem insuficientes", async () => {
             transactionClient.room.findUnique.mockResolvedValue({
                 ...roomFixture,
                 games: [gameFixture],
@@ -432,6 +443,43 @@ describe("RoomRepository", () => {
             expect(result).toEqual({
                 success: false,
                 reason: "NOT_ENOUGH_QUESTIONS",
+                details: {
+                    currentPlayers: 2,
+                    requiredPlayers: 2,
+                    currentQuestions: 4,
+                    requiredQuestions: 5,
+                    missingPlayers: false,
+                    missingQuestions: true,
+                },
+            });
+        });
+
+        it("deve retornar START_REQUIREMENTS_NOT_MET quando faltarem jogadores E perguntas", async () => {
+            transactionClient.room.findUnique.mockResolvedValue({
+                ...roomFixture,
+                games: [gameFixture],
+            });
+            transactionClient.gamePlayer.count.mockResolvedValue(1);
+            transactionClient.question.findMany.mockResolvedValue(
+                questionsFixture.slice(0, 2),
+            );
+
+            const result = await repository.startIfReady(
+                roomFixture.id,
+                roomFixture.hostId,
+            );
+
+            expect(result).toEqual({
+                success: false,
+                reason: "START_REQUIREMENTS_NOT_MET",
+                details: {
+                    currentPlayers: 1,
+                    requiredPlayers: 2,
+                    currentQuestions: 2,
+                    requiredQuestions: 5,
+                    missingPlayers: true,
+                    missingQuestions: true,
+                },
             });
         });
     });

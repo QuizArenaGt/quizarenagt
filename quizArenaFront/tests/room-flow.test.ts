@@ -1,12 +1,16 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     MAX_ROOM_CODE_INPUT_LENGTH,
     PIN_LENGTH,
     buildPlayRouteWithPin,
+    executeRecoverPlayerSession,
     executeVerifyRoomCode,
     formatRoomAvailabilityError,
     isValidRoomCode,
+    mapLobbyToPlayerGameRoom,
     normalizeRoomCode,
     normalizeRoomCodeInput,
     sanitizePin,
@@ -35,6 +39,7 @@ import {
     isValidApiRoom,
     listHostRoomsApi,
     mapApiRoomToModel,
+    updateRoomApi,
     type ApiHostRoom,
     type ApiRoom,
     type ApiRoomLobby,
@@ -1120,5 +1125,278 @@ describe('BUG 05 — Persistência, recuperação automática e isolamento de sa
         assert.equal(mapped.backendStatus, 'WAITING');
         assert.equal(mapped.players.length, 1);
         assert.equal(mapped.players[0].nickname, 'Mariana');
+    });
+});
+
+describe('Preservação dos nomes das salas (Mapeamento, Edição e Lobby do Jogador)', () => {
+    const baseApiRoom: ApiHostRoom = {
+        id: 'room-name-1',
+        code: 'NME123',
+        name: '  Arena de Redes  ',
+        theme: '  Infraestrutura  ',
+        hostId: 'host-1',
+        maxPlayers: 15,
+        questionTime: 30,
+        gameMode: 'CLASSIC',
+        status: 'WAITING',
+        createdAt: '2026-11-23T00:00:00.000Z',
+        updatedAt: '2026-11-23T00:00:00.000Z',
+        players: [],
+    };
+
+    it('1. Mapeamento: prioriza nome válido da API, recorre a meta.name quando ausente/vazio/espaços e usa Sala ${code} apenas como último recurso', async () => {
+        // API com nome válido prevalece sobre meta.name local (incluindo fallback antigo)
+        const fromApi = mapApiRoomToModel(baseApiRoom, {
+            name: 'Sala NME123',
+            theme: 'Geral',
+        });
+        assert.equal(fromApi.name, 'Arena de Redes');
+        assert.equal(fromApi.theme, 'Infraestrutura');
+        assert.equal(fromApi.code, 'NME123');
+
+        // API com string vazia ou apenas espaços usa fallback local meta.name
+        const fromMetaOnEmpty = mapApiRoomToModel(
+            { ...baseApiRoom, name: '   ' },
+            { name: '  Quiz de Algoritmos  ' },
+        );
+        assert.equal(fromMetaOnEmpty.name, 'Quiz de Algoritmos');
+
+        // API com nome nulo ou ausente usa fallback local meta.name
+        const fromMetaOnNull = mapApiRoomToModel(
+            { ...baseApiRoom, name: null },
+            { name: 'Quiz de Banco de Dados' },
+        );
+        assert.equal(fromMetaOnNull.name, 'Quiz de Banco de Dados');
+
+        const fromMetaOnUndefined = mapApiRoomToModel(
+            { ...baseApiRoom, name: undefined },
+            { name: 'Quiz de Engenharia' },
+        );
+        assert.equal(fromMetaOnUndefined.name, 'Quiz de Engenharia');
+
+        // Sem nome válido nem na API nem em meta.name -> fallback Sala ${code}
+        const fallbackCode = mapApiRoomToModel(
+            { ...baseApiRoom, name: '   ' },
+            { name: '   ' },
+        );
+        assert.equal(fallbackCode.name, 'Sala NME123');
+
+        // Ao recarregar salas do host (executeLoadHostRooms), fallback antigo em memória não sobrescreve nome real vindo da API
+        const trackerRef = {
+            current: { activeSessionKey: 'host-1', requestSeq: 0 } as HostSessionTracker,
+        };
+        const existingFallbackRoom: Room = {
+            ...fromApi,
+            name: 'Sala NME123',
+        };
+        let reloadedRooms: Room[] = [];
+
+        await executeLoadHostRooms({
+            sessionKey: 'host-1',
+            expectedHostId: 'host-1',
+            trackerRef,
+            existingRooms: [existingFallbackRoom],
+            fetchHostRooms: async () => [baseApiRoom],
+            mapRoom: (apiRoom, existing) =>
+                mapApiRoomToModel(apiRoom, {
+                    name: existing?.name,
+                    theme: existing?.theme,
+                }),
+            onResetSessionState: () => {},
+            onError: () => {},
+            onSuccess: (result) => {
+                reloadedRooms = result.rooms;
+            },
+        });
+
+        assert.equal(reloadedRooms.length, 1);
+        assert.equal(reloadedRooms[0].name, 'Arena de Redes');
+    });
+
+    it('2. Edição: usa resposta do PATCH para atualizar lista e sala ativa sem ser sobrescrita pelo nome anterior', async () => {
+        const originalFetch = globalThis.fetch;
+        const lockRef = { current: false };
+        let rooms: Room[] = [
+            {
+                id: 'room-name-1',
+                code: 'NME123',
+                name: 'Nome Antigo',
+                theme: 'Tema Antigo',
+                timeLimit: 30,
+                maxPlayers: 10,
+                gameMode: 'CLASSIC',
+                status: 'Aguardando',
+                backendStatus: 'WAITING',
+                questionIds: ['q1', 'q2'],
+                players: [
+                    {
+                        id: 'p-1',
+                        nickname: 'Ana',
+                        score: 0,
+                        joinedAt: '2026-11-23T00:01:00.000Z',
+                    },
+                ],
+            },
+        ];
+        const activeRoomId = 'room-name-1';
+
+        try {
+            globalThis.fetch = (async () =>
+                new Response(
+                    JSON.stringify({
+                        id: 'room-name-1',
+                        code: 'NME123',
+                        name: 'Nome Normalizado Backend',
+                        theme: 'Redes Avançadas',
+                        hostId: 'host-1',
+                        maxPlayers: 25,
+                        questionTime: 45,
+                        gameMode: 'HARDCORE',
+                        status: 'WAITING',
+                        createdAt: '2026-11-23T00:00:00.000Z',
+                        updatedAt: '2026-11-23T00:05:00.000Z',
+                    }),
+                    {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' },
+                    },
+                )) as typeof fetch;
+
+            const ok = await executeSubmitRoom({
+                input: {
+                    name: 'Novo Nome Digitado',
+                    theme: 'Redes',
+                    maxPlayers: 25,
+                    timeLimit: 45,
+                    gameMode: 'HARDCORE',
+                },
+                lockRef,
+                executeRequest: (validInput) =>
+                    updateRoomApi('room-name-1', {
+                        name: validInput.name.trim(),
+                        theme: validInput.theme.trim(),
+                        maxPlayers: validInput.maxPlayers,
+                        questionTime: validInput.timeLimit,
+                        gameMode: validInput.gameMode,
+                    }),
+                onError: () => {},
+                onSuccess: (apiRoom, validInput) => {
+                    rooms = rooms.map((room) => {
+                        if (room.id !== activeRoomId) return room;
+                        const mappedRoom = mapApiRoomToModel(apiRoom, {
+                            name: validInput.name.trim(),
+                            theme: validInput.theme.trim(),
+                            questionIds: room.questionIds,
+                        });
+                        return {
+                            ...room,
+                            ...mappedRoom,
+                            players:
+                                'players' in apiRoom && Array.isArray(apiRoom.players)
+                                    ? mappedRoom.players
+                                    : room.players,
+                        };
+                    });
+                },
+            });
+
+            assert.equal(ok, true);
+            const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? null;
+            assert.equal(rooms[0].name, 'Nome Normalizado Backend');
+            assert.equal(activeRoom?.name, 'Nome Normalizado Backend');
+            assert.equal(activeRoom?.theme, 'Redes Avançadas');
+            assert.equal(activeRoom?.code, 'NME123');
+            assert.deepEqual(activeRoom?.questionIds, ['q1', 'q2']);
+            assert.equal(activeRoom?.players.length, 1);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        const roomsVmSource = readFileSync(
+            path.resolve(import.meta.dirname, '../src/viewmodels/useRoomsViewModel.ts'),
+            'utf8',
+        );
+        assert.match(roomsVmSource, /if\s*\(editingRoom\)\s*\{[\s\S]*mapApiRoomToModel\(apiRoom/);
+    });
+
+    it('3. Lobby do jogador: usa lobby.name, faz fallback para Sala de ${host.name} e preserva após recuperação/snapshot', async () => {
+        const lobbyWithName: ApiRoomLobby = {
+            id: 'room-name-1',
+            code: 'NME123',
+            name: '  Quiz Arquitetura  ',
+            theme: 'Computação',
+            status: 'WAITING',
+            roomStatus: 'ACTIVE',
+            gameMode: 'CLASSIC',
+            maxPlayers: 10,
+            questionTime: 30,
+            createdAt: '2026-11-23T00:00:00.000Z',
+            host: { id: 'host-1', name: 'Prof. Carlos' },
+            players: [],
+            playerCount: 0,
+            currentGame: {
+                id: 'game-1',
+                status: 'WAITING',
+                maxPlayers: 10,
+                questionTime: 30,
+                gameMode: 'CLASSIC',
+                startedAt: null,
+                finishedAt: null,
+                createdAt: '2026-11-23T00:00:00.000Z',
+            },
+        };
+
+        const mappedNamed = mapLobbyToPlayerGameRoom(lobbyWithName);
+        assert.equal(mappedNamed.title, 'Quiz Arquitetura');
+        assert.equal(mappedNamed.pin, 'NME123');
+
+        const mappedEmptyName = mapLobbyToPlayerGameRoom({
+            ...lobbyWithName,
+            name: '   ',
+        });
+        assert.equal(mappedEmptyName.title, 'Sala de Prof. Carlos');
+        assert.equal(mappedEmptyName.pin, 'NME123');
+
+        const mappedNullName = mapLobbyToPlayerGameRoom({
+            ...lobbyWithName,
+            name: null,
+        });
+        assert.equal(mappedNullName.title, 'Sala de Prof. Carlos');
+
+        // Recuperação de sessão (F5 / reconexão) preserva lobby.name no snapshot recuperado
+        let recoveredTitle = '';
+        let recoveredPin = '';
+        const lockRef = { current: false };
+        const status = await executeRecoverPlayerSession({
+            persistedSession: {
+                sessionToken: 'tok-1',
+                roomCode: 'NME123',
+                roomId: 'room-name-1',
+                gameId: 'game-1',
+                playerId: 'player-1',
+                nickname: 'Ana',
+            },
+            lockRef,
+            fetchLobby: async () => lobbyWithName,
+            setIsRecovering: () => {},
+            setError: () => {},
+            onRecovered: (lobby) => {
+                const gameRoom = mapLobbyToPlayerGameRoom(lobby);
+                recoveredTitle = gameRoom.title;
+                recoveredPin = gameRoom.pin;
+            },
+            onSessionInvalid: () => {},
+        });
+
+        assert.equal(status, 'recovered');
+        assert.equal(recoveredTitle, 'Quiz Arquitetura');
+        assert.equal(recoveredPin, 'NME123');
+
+        const playVmSource = readFileSync(
+            path.resolve(import.meta.dirname, '../src/viewmodels/usePlayViewModel.ts'),
+            'utf8',
+        );
+        const matches = playVmSource.match(/mapLobbyToPlayerGameRoom\(/g) ?? [];
+        assert.equal(matches.length, 2);
     });
 });
