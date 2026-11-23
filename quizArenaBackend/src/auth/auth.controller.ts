@@ -9,12 +9,16 @@ import { AuthService } from "./auth.service.js";
 import { JwtService } from "./jwt.service.js";
 import { validateRegisterUser } from "./register.dto.js";
 import { validateLogin } from "./login.dto.js";
+import { validateRecoverPassword } from "./recover.dto.js";
+import { validateResetPassword } from "./reset.dto.js";
+import { RecoverPasswordService } from "./recoverPasswordService.js";
 
 export class AuthController {
     constructor(
         private readonly userService = new UserService(),
         private readonly authService = new AuthService(),
         private readonly jwtService = new JwtService(),
+        private readonly recoverPasswordService = new RecoverPasswordService()
     ) {}
 
     async register(req: Request, res: Response): Promise<void> {
@@ -98,6 +102,81 @@ export class AuthController {
 
             res.status(500).json({
                 message: "Erro interno ao autenticar usuário.",
+            });
+        }
+    }
+
+    async recoverPassword(
+        req: Request,
+        res: Response,
+    ): Promise<void> {
+        const validation = validateRecoverPassword(req.body);
+
+        if (!validation.success) {
+            res.status(400).json({
+                message: "Dados inválidos.",
+                errors: validation.errors,
+            });
+
+            return;
+        }
+
+        try {
+            await this.recoverPasswordService.requestPasswordReset(
+                validation.data.email,
+            );
+            res.status(200).json({
+                message:
+                    "Se o e-mail estiver cadastrado, você receberá instruções para recuperar sua senha.",
+            });
+        } catch {
+            console.error("Erro interno ao solicitar recuperação de senha.");
+
+            res.status(500).json({
+                message:
+                    "Erro interno ao solicitar recuperação de senha.",
+            });
+        }
+    }
+
+    async resetPassword(
+        req: Request,
+        res: Response,
+    ): Promise<void> {
+        const validation = validateResetPassword(req.body);
+
+        if (!validation.success) {
+            res.status(400).json({
+                message: "Dados inválidos.",
+                errors: validation.errors,
+            });
+            return;
+        }
+
+        try {
+            await this.recoverPasswordService.resetPassword(
+                validation.data.token,
+                validation.data.newPassword,
+            );
+
+            res.status(200).json({
+                message: "Senha redefinida com sucesso!",
+            });
+        } catch (error: unknown) {
+            if (
+                error instanceof Error &&
+                error.message === "Token inválido ou expirado."
+            ) {
+                res.status(400).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao redefinir senha.");
+
+            res.status(500).json({
+                message: "Erro interno ao redefinir senha.",
             });
         }
     }

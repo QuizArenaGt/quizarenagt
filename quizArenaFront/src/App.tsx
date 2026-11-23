@@ -15,6 +15,7 @@ import LoginForm from "./features/auth/components/LoginForm/LoginForm";
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
 import DashboardForm from "./features/Dashboard/components/DashboardForm";
 import RecoverPasswordForm from "./features/auth/components/RecoverPasswordForm/RecoverPasswordForm";
+import ResetPasswordForm from "./features/auth/components/ResetPasswordForm/ResetPasswordForm";
 
 import { apiRequest, ApiError } from "./services/api";
 import SessionStatusCard from "./components/layout/SessionStatusCard/SessionStatusCard";
@@ -112,10 +113,6 @@ function AppRoutes() {
         navigate("/login");
     };
 
-    const handleRecoverPasswordSuccess = (): void => {
-        navigate("/login");
-    };
-
     return (
         <Routes>
             <Route
@@ -125,11 +122,12 @@ function AppRoutes() {
 
             <Route
                 path="/recover-password"
-                element={
-                    <RecoverPasswordForm
-                        onSuccess={handleRecoverPasswordSuccess}
-                    />
-                }
+                element={<RecoverPasswordForm />}
+            />
+
+            <Route
+                path="/reset-password"
+                element={<ResetPasswordForm />}
             />
 
             <Route

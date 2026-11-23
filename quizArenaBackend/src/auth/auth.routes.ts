@@ -2,6 +2,11 @@
 import { Router } from "express";
 import { AuthController } from "./auth.controller.js";
 import { authenticateToken } from "./auth.middleware.js";
+import {
+    recoverPasswordEmailLimiter,
+    recoverPasswordIpLimiter,
+    resetPasswordLimiter,
+} from "./rate-limit.middleware.js";
 
 const authRoutes = Router();
 const authController = new AuthController();
@@ -13,6 +18,23 @@ authRoutes.post("/register", (req, res) => {
 authRoutes.post("/login", (req, res) => {
     void authController.login(req, res);
 });
+
+authRoutes.post(
+    "/recover-password",
+    recoverPasswordIpLimiter.middleware,
+    recoverPasswordEmailLimiter.middleware,
+    (req, res) => {
+        void authController.recoverPassword(req, res);
+    },
+);
+
+authRoutes.post(
+    "/reset-password",
+    resetPasswordLimiter.middleware,
+    (req, res) => {
+        void authController.resetPassword(req, res);
+    },
+);
 
 authRoutes.get("/me", authenticateToken, (req, res) => {
     if (!req.user) {

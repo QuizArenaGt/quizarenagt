@@ -36,3 +36,12 @@ export interface RecoverPasswordRequest {
 export interface RecoverPasswordResponse {
     message: string;
 }
+
+export interface ResetPasswordRequest {
+    token: string;
+    newPassword: string;
+}
+
+export interface ResetPasswordResponse {
+    message: string;
+}
