@@ -1,3 +1,4 @@
+import { PlayerAvatar } from '../../../components/ui/PlayerAvatar/PlayerAvatar';
 import type { RankingEntry } from '../../../models/game';
 
 interface RankingListProps {
@@ -41,6 +42,12 @@ function RankingRow({ entry }: { entry: RankingEntry }) {
             <span className={`play-ranking__position play-ranking__position--${Math.min(entry.position, 4)}`}>
                 {entry.position}º
             </span>
+            <PlayerAvatar
+                avatarId={entry.avatarId}
+                nickname={entry.nickname}
+                size="sm"
+                decorative
+            />
             <span className="play-ranking__name">
                 <span className="play-ranking__name-text">{entry.nickname}</span>
                 {entry.isCurrentPlayer && <span className="play-ranking__you">você</span>}

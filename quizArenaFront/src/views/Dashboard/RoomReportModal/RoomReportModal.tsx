@@ -4,6 +4,7 @@ import Button from '../../../components/ui/Button/Button';
 import EmptyState from '../../../components/ui/EmptyState/EmptyState';
 import Icon from '../../../components/ui/Icon/Icon';
 import Modal from '../../../components/ui/Modal/Modal';
+import { PlayerAvatar } from '../../../components/ui/PlayerAvatar/PlayerAvatar';
 import { LoadingState } from '../../../components/ui/Skeleton/Skeleton';
 import { formatNullableDateTime, type Room } from '../../../models/room';
 import {
@@ -157,6 +158,12 @@ function GameMetadataBanner({ details }: { details: ApiGameDetailedResults }) {
                     {details.winner ? (
                         <span className="report-meta__winner">
                             <Icon name="trophy" size={14} />
+                            <PlayerAvatar
+                                avatarId={details.winner.avatarId}
+                                nickname={details.winner.nickname}
+                                size="xs"
+                                decorative
+                            />
                             <span>
                                 {details.winner.nickname} ({details.winner.score} pts)
                             </span>
@@ -514,6 +521,12 @@ function ReportContent({ report }: { report: RoomReport }) {
 function StudentName({ row }: { row: StudentReportRow }) {
     return (
         <span className="report-player-name">
+            <PlayerAvatar
+                avatarId={row.avatarId}
+                nickname={row.nickname}
+                size="xs"
+                decorative
+            />
             <span>{row.nickname}</span>
             {row.isTied && <span className="report-tag-tie">Empate</span>}
             {row.isSimulated && <span className="report-simulated">simulado</span>}

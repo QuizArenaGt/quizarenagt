@@ -102,7 +102,9 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     // Estado da partida em tempo real conduzida pelo anfitrião
     const [activeRound, setActiveRound] = useState<RoundStartedPayload['round'] | null>(null);
     const [closedRound, setClosedRound] = useState<RoundClosedPayload['round'] | null>(null);
-    const [answeredPlayers, setAnsweredPlayers] = useState<{ id: string; nickname: string }[]>([]);
+    const [answeredPlayers, setAnsweredPlayers] = useState<
+        { id: string; nickname: string; avatarId?: string }[]
+    >([]);
     const [roundRemainingSeconds, setRoundRemainingSeconds] = useState(0);
 
     // Formulário de criação/edição de sala

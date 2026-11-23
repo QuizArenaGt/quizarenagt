@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+    DEFAULT_PLAYER_AVATAR_ID,
+    resolvePlayerAvatarId,
+    type PlayerAvatarId,
+} from '../models/avatars';
+import {
     createCleanPlayerMatchState,
     executeLeaveRoom,
     executeRecoverPlayerSession,
@@ -53,6 +58,10 @@ export function usePlayViewModel() {
     const [phase, setPhase] = useState<PlayPhase>('join');
     const [pin, setPinState] = useState(() => normalizeRoomCodeInput(searchParams.get('codigo') ?? ''));
     const [nickname, setNickname] = useState('');
+    const [avatarId, setAvatarId] = useState<PlayerAvatarId>(() => {
+        const persisted = loadPlayerSession();
+        return persisted ? resolvePlayerAvatarId(persisted.avatarId) : DEFAULT_PLAYER_AVATAR_ID;
+    });
     const [room, setRoom] = useState<GameRoom | null>(null);
     const [playerId, setPlayerId] = useState<string | null>(null);
     const [sessionToken, setSessionToken] = useState<string | null>(null);
@@ -147,9 +156,10 @@ export function usePlayViewModel() {
         setError(null);
 
         try {
-            const session = await joinRoomWithNickname(pin, trimmedNickname);
+            const session = await joinRoomWithNickname(pin, trimmedNickname, avatarId);
             const resolvedGameId =
                 session.player.gameId ?? session.lobby.currentGame?.id ?? '';
+            const resolvedAvatar = resolvePlayerAvatarId(session.player.avatarId ?? avatarId);
 
             if (resolvedGameId) {
                 savePlayerSession({
@@ -159,10 +169,12 @@ export function usePlayViewModel() {
                     gameId: resolvedGameId,
                     playerId: session.player.id,
                     nickname: session.player.nickname,
+                    avatarId: resolvedAvatar,
                 });
             }
 
             setNickname(session.player.nickname);
+            setAvatarId(resolvedAvatar);
             setPlayerId(session.player.id);
             setLobbyPlayers(session.lobby.players);
             setTotalQuestions(session.lobby.currentGame?.totalQuestions ?? 0);
@@ -211,6 +223,7 @@ export function usePlayViewModel() {
             const updatedRanking: RankingEntry[] = round.ranking.map((entry, idx) => ({
                 position: idx + 1,
                 nickname: entry.nickname,
+                avatarId: resolvePlayerAvatarId(entry.avatarId),
                 score: entry.score,
                 isCurrentPlayer: entry.id === activePlayerId,
             }));
@@ -300,6 +313,12 @@ export function usePlayViewModel() {
     const applyLobbySnapshot = useCallback(
         (lobby: ApiRoomLobby, activePlayerId: string | null) => {
             setLobbyPlayers(lobby.players);
+            const meInLobby = activePlayerId
+                ? lobby.players.find((p) => p.id === activePlayerId)
+                : undefined;
+            if (meInLobby?.avatarId) {
+                setAvatarId(resolvePlayerAvatarId(meInLobby.avatarId));
+            }
             setCurrentTimeLimit(lobby.questionTime);
             setPinState(lobby.code);
             setRoom(mapLobbyToPlayerGameRoom(lobby));
@@ -364,6 +383,7 @@ export function usePlayViewModel() {
                     const updatedRanking: RankingEntry[] = sorted.map((entry, idx) => ({
                         position: idx + 1,
                         nickname: entry.nickname,
+                        avatarId: resolvePlayerAvatarId(entry.avatarId),
                         score: entry.score,
                         isCurrentPlayer: entry.id === activePlayerId,
                     }));
@@ -408,6 +428,14 @@ export function usePlayViewModel() {
                 setNickname(
                     lobby.currentGame?.players?.find((p) => p.id === recovered.playerId)
                         ?.nickname ?? recovered.nickname,
+                );
+                setAvatarId(
+                    resolvePlayerAvatarId(
+                        lobby.players.find((p) => p.id === recovered.playerId)?.avatarId ??
+                            lobby.currentGame?.players?.find((p) => p.id === recovered.playerId)
+                                ?.avatarId ??
+                            recovered.avatarId,
+                    ),
                 );
                 applyLobbySnapshot(lobby, recovered.playerId);
 
@@ -518,6 +546,7 @@ export function usePlayViewModel() {
                 const updatedRanking: RankingEntry[] = payload.ranking.map((entry, idx) => ({
                     position: entry.position ?? idx + 1,
                     nickname: entry.nickname,
+                    avatarId: resolvePlayerAvatarId(entry.avatarId),
                     score: entry.score,
                     isCurrentPlayer: entry.id === playerId,
                 }));
@@ -632,6 +661,7 @@ export function usePlayViewModel() {
         setServerRanking(clean.serverRanking);
         setServerTotalScore(clean.serverTotalScore);
         setIsGameCancelled(false);
+        setAvatarId(DEFAULT_PLAYER_AVATAR_ID);
         setPinState(clean.pin);
         setError(clean.error);
         setLeaveError(null);
@@ -653,12 +683,18 @@ export function usePlayViewModel() {
         });
     }, [navigate, phase, resetToJoin, sessionToken]);
 
+    function selectAvatar(nextAvatarId: PlayerAvatarId) {
+        setAvatarId(resolvePlayerAvatarId(nextAvatarId));
+        setError(null);
+    }
+
     const socketStatus: PlayerSocketStatus = canConnectSocket ? rawSocketStatus : 'idle';
 
     return {
         phase,
         room,
         playerId,
+        avatarId,
         lobbyPlayers,
         socketStatus,
         error,
@@ -688,6 +724,7 @@ export function usePlayViewModel() {
         setPin,
         submitPin,
         changeNickname,
+        selectAvatar,
         submitNickname,
         answer,
         playAgain: resetToJoin,

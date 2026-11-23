@@ -69,6 +69,7 @@ export interface PlayerReconnectedPayload {
 export interface LobbyPlayerDto {
     id: string;
     nickname: string;
+    avatarId?: string;
     status?: PlayerStatus;
     score: number;
     joinedAt: string;
@@ -86,6 +87,7 @@ export interface PlayerLeftPayload {
     player: {
         id: string;
         nickname: string;
+        avatarId?: string;
         status: PlayerStatus;
         score: number;
     };
@@ -124,6 +126,7 @@ export interface RoundClosedAnswerDto {
     player: {
         id: string;
         nickname: string;
+        avatarId?: string;
     };
     option: {
         id: string;
@@ -137,6 +140,7 @@ export interface RoundClosedAnswerDto {
 export interface RoundClosedRankingEntryDto {
     id: string;
     nickname: string;
+    avatarId?: string;
     score: number;
 }
 
@@ -161,6 +165,7 @@ export interface RoundClosedPayload {
         unansweredPlayers: {
             id: string;
             nickname: string;
+            avatarId?: string;
         }[];
         ranking: RoundClosedRankingEntryDto[];
     };
@@ -171,12 +176,14 @@ export interface RoundAnswerSubmittedPayload {
     player: {
         id: string;
         nickname: string;
+        avatarId?: string;
     };
 }
 
 export interface GameFinishedRankingEntryDto {
     id: string;
     nickname: string;
+    avatarId?: string;
     score: number;
     position?: number;
 }

@@ -1,0 +1,60 @@
+.qa-player-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    overflow: hidden;
+    background: radial-gradient(
+        circle at 30% 25%,
+        var(--avatar-bg-from, #dbeafe) 0%,
+        var(--avatar-bg-to, #93c5fd) 100%
+    );
+    border: 2px solid color-mix(in srgb, var(--avatar-ring, #2563eb) 36%, #ffffff);
+    box-shadow:
+        inset 0 2px 4px rgba(255, 255, 255, 0.72),
+        0 2px 6px rgba(15, 23, 42, 0.08);
+    user-select: none;
+}
+
+.qa-player-avatar-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.qa-player-avatar--xs {
+    width: 26px;
+    height: 26px;
+    border-width: 1.5px;
+}
+
+.qa-player-avatar--sm {
+    width: 34px;
+    height: 34px;
+}
+
+.qa-player-avatar--md {
+    width: 44px;
+    height: 44px;
+}
+
+.qa-player-avatar--lg {
+    width: 64px;
+    height: 64px;
+    border-width: 2.5px;
+}
+
+.qa-player-avatar--xl {
+    width: 84px;
+    height: 84px;
+    border-width: 3px;
+}
+
+.qa-player-avatar--selected {
+    border-color: var(--avatar-ring, #2563eb);
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--avatar-ring, #2563eb) 24%, transparent),
+        0 6px 14px rgba(15, 23, 42, 0.12);
+}

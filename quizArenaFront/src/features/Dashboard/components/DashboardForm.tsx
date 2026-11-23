@@ -13,6 +13,7 @@ import ConfirmDialog from '../../../components/ui/ConfirmDialog/ConfirmDialog';
 import EmptyState from '../../../components/ui/EmptyState/EmptyState';
 import Icon from '../../../components/ui/Icon/Icon';
 import Modal from '../../../components/ui/Modal/Modal';
+import { PlayerAvatar } from '../../../components/ui/PlayerAvatar/PlayerAvatar';
 import { LoadingState } from '../../../components/ui/Skeleton/Skeleton';
 import type { Question } from '../../../models/question';
 import {
@@ -530,12 +531,27 @@ export default function DashboardForm({
                                                                 />
                                                             </div>
                                                             {roomsVm.answeredPlayers.length > 0 && (
-                                                                <p className="room-round-panel__responses">
-                                                                    Responderam:{' '}
-                                                                    {roomsVm.answeredPlayers
-                                                                        .map((p) => p.nickname)
-                                                                        .join(', ')}
-                                                                </p>
+                                                                <div className="room-round-panel__responses">
+                                                                    <span className="room-round-panel__responses-label">
+                                                                        Responderam:
+                                                                    </span>
+                                                                    <ul className="room-round-panel__responses-list">
+                                                                        {roomsVm.answeredPlayers.map((p) => (
+                                                                            <li
+                                                                                key={p.id}
+                                                                                className="room-round-panel__response-chip"
+                                                                            >
+                                                                                <PlayerAvatar
+                                                                                    avatarId={p.avatarId}
+                                                                                    nickname={p.nickname}
+                                                                                    size="xs"
+                                                                                    decorative
+                                                                                />
+                                                                                <span>{p.nickname}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
                                                             )}
                                                         </div>
 
@@ -1012,6 +1028,12 @@ export default function DashboardForm({
                                                                         {game.winner ? (
                                                                             <div className="game-history__winner">
                                                                                 <Icon name="trophy" size={14} />
+                                                                                <PlayerAvatar
+                                                                                    avatarId={game.winner.avatarId}
+                                                                                    nickname={game.winner.nickname}
+                                                                                    size="xs"
+                                                                                    decorative
+                                                                                />
                                                                                 <span className="game-history__winner-name">
                                                                                     {game.winner.nickname}
                                                                                 </span>

@@ -1,6 +1,6 @@
 import Badge from '../../../components/ui/Badge/Badge';
 import Icon from '../../../components/ui/Icon/Icon';
-import { getInitials } from '../../../models/profile';
+import { PlayerAvatar } from '../../../components/ui/PlayerAvatar/PlayerAvatar';
 import { MIN_ROOM_PLAYERS } from '../../../models/room';
 import type { BackendRoomStatus, LobbyPlayerDto } from '../../../services/socket';
 
@@ -108,13 +108,24 @@ export default function RoomPlayersCard({
                                 <li key={player.id} className="room-players-list__item">
                                     <div className="room-players-list__identity">
                                         {isWaiting ? (
-                                            <span className="room-player-avatar" aria-hidden="true">
-                                                {getInitials(player.nickname)}
-                                            </span>
+                                            <PlayerAvatar
+                                                avatarId={player.avatarId}
+                                                nickname={player.nickname}
+                                                size="sm"
+                                                decorative
+                                            />
                                         ) : (
-                                            <span className={`room-player-rank${index === 0 ? ' is-leader' : ''}`}>
-                                                #{index + 1}
-                                            </span>
+                                            <>
+                                                <span className={`room-player-rank${index === 0 ? ' is-leader' : ''}`}>
+                                                    #{index + 1}
+                                                </span>
+                                                <PlayerAvatar
+                                                    avatarId={player.avatarId}
+                                                    nickname={player.nickname}
+                                                    size="xs"
+                                                    decorative
+                                                />
+                                            </>
                                         )}
                                         <div className="room-player-meta">
                                             <strong className="room-player-name">{player.nickname}</strong>
