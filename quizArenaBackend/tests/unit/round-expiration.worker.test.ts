@@ -95,8 +95,8 @@ describe("RoundExpirationWorker & RoundService auto-close (Unit)", () => {
             game: {
                 roomId: "room-uuid-1",
                 players: [
-                    { id: "gp-1", nickname: "Alice", score: 250 },
-                    { id: "gp-2", nickname: "Bob", score: 100 },
+                    { id: "gp-1", nickname: "Alice", status: "ACTIVE" as const, score: 250 },
+                    { id: "gp-2", nickname: "Bob", status: "ACTIVE" as const, score: 100 },
                 ],
             },
             snapshotQuestion: {

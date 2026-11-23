@@ -3,6 +3,8 @@ import type { Request, Response, NextFunction } from "express";
 
 import { RoomPlayerRepository } from "./room-player.repository.js";
 import { hashRoomPlayerSessionToken } from "./room-player-session-token.js";
+import { isGamePlayerActive } from "./game-player-eligibility.js";
+import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
 
 const roomPlayerRepository = new RoomPlayerRepository();
 
@@ -42,10 +44,24 @@ export async function authenticateRoomPlayer(
             !gamePlayer.sessionTokenHash ||
             !gamePlayer.game ||
             !gamePlayer.game.room ||
-            gamePlayer.game.room.status !== "ACTIVE"
+            gamePlayer.game.room.status !== "ACTIVE" ||
+            !isGamePlayerActive(gamePlayer)
         ) {
             res.status(401).json({
                 message: "Sessão de participante inválida.",
+            });
+            return;
+        }
+
+        if (
+            gamePlayer.reconnectDeadlineAt &&
+            gamePlayer.reconnectDeadlineAt.getTime() <= Date.now() &&
+            (getPlayerPresenceRegistry()?.getActiveSocketCount(
+                gamePlayer.id,
+            ) ?? 0) === 0
+        ) {
+            res.status(401).json({
+                message: "Prazo de reconexão expirado.",
             });
             return;
         }

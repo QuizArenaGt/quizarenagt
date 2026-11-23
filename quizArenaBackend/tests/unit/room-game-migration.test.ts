@@ -26,7 +26,7 @@ describe("Consolidação estática — Schema Prisma e Migration Room 1:N Game",
     it("deve modelar Room 1:N Game, GamePlayer, RoomQuestionSnapshot por Game e timestamps nullable em Game", () => {
         expect(schema).toContain("games        Game[]");
         expect(schema).toContain("model GamePlayer {");
-        expect(schema).toContain("@@unique([gameId, nickname])");
+        expect(schema).toContain("game_players_active_gameId_nickname_key");
         expect(schema).toContain("@@unique([gameId, userId])");
         expect(schema).toContain('@@map("game_players")');
         expect(schema).toContain("startedAt        DateTime?");

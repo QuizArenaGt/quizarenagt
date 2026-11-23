@@ -102,6 +102,25 @@
   background: rgba(255, 255, 255, 0.15);
 }
 
+.play__leave:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.play__leave-error {
+  position: relative;
+  z-index: 1;
+  width: min(440px, calc(100% - var(--space-8)));
+  margin: var(--space-2) auto 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(220, 38, 38, 0.92);
+  color: var(--color-white);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-align: center;
+}
+
 /* ===== Palco ===== */
 .play__stage {
   position: relative;

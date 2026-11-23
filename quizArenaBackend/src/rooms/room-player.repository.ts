@@ -1,7 +1,40 @@
 
-import type { GamePlayer } from "@prisma/client";
+import type { GamePlayer, GamePlayerStatus } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+import { isGamePlayerActive } from "./game-player-eligibility.js";
+import { selectCurrentGame } from "./room.repository.js";
+
+import {
+    cancelInProgressGameIfInsufficientPlayersTx,
+    type CancelledGameSummary,
+} from "./game-cancellation.js";
+
+export type LeaveRoomResult =
+    | {
+        success: true;
+        roomId: string;
+        gameId: string;
+        gameStatus: "WAITING" | "IN_PROGRESS";
+        player: {
+            id: string;
+            nickname: string;
+            status: GamePlayerStatus;
+            score: number;
+        };
+        eligiblePlayerCount: number;
+        openRoundId: string | null;
+        cancelledGame?: CancelledGameSummary | null;
+    }
+    | {
+        success: false;
+        reason:
+        | "ROOM_NOT_FOUND"
+        | "ROOM_ARCHIVED"
+        | "GAME_NOT_FOUND"
+        | "GAME_NOT_LEAVABLE"
+        | "PLAYER_NOT_ACTIVE";
+    };
 
 type CreateGamePlayerData = {
     gameId: string;
@@ -55,12 +88,11 @@ export class RoomPlayerRepository {
         gameId: string,
         nickname: string,
     ): Promise<GamePlayer | null> {
-        return prisma.gamePlayer.findUnique({
+        return prisma.gamePlayer.findFirst({
             where: {
-                gameId_nickname: {
-                    gameId,
-                    nickname,
-                },
+                gameId,
+                nickname,
+                status: "ACTIVE",
             },
         });
     }
@@ -152,12 +184,11 @@ export class RoomPlayerRepository {
                 throw new Error("ROOM_NOT_JOINABLE");
             }
 
-            const existingPlayer = await tx.gamePlayer.findUnique({
+            const existingPlayer = await tx.gamePlayer.findFirst({
                 where: {
-                    gameId_nickname: {
-                        gameId: currentGame.id,
-                        nickname: data.nickname,
-                    },
+                    gameId: currentGame.id,
+                    nickname: data.nickname,
+                    status: "ACTIVE",
                 },
             });
 
@@ -166,7 +197,10 @@ export class RoomPlayerRepository {
             }
 
             const playerCount = await tx.gamePlayer.count({
-                where: { gameId: currentGame.id },
+                where: {
+                    gameId: currentGame.id,
+                    status: "ACTIVE",
+                },
             });
 
             if (playerCount >= currentGame.maxPlayers) {
@@ -185,6 +219,163 @@ export class RoomPlayerRepository {
             return {
                 ...createdPlayer,
                 roomId: room.id,
+            };
+        });
+    }
+
+    async leaveRoom(
+        gamePlayerId: string,
+        roomId: string,
+    ): Promise<LeaveRoomResult> {
+        return prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT id
+                FROM rooms
+                WHERE id = ${roomId}
+                FOR UPDATE
+            `;
+
+            const room = await tx.room.findUnique({
+                where: { id: roomId },
+                include: {
+                    games: {
+                        orderBy: [
+                            { createdAt: "desc" },
+                            { id: "desc" },
+                        ],
+                    },
+                },
+            });
+
+            if (!room) {
+                return {
+                    success: false,
+                    reason: "ROOM_NOT_FOUND",
+                };
+            }
+
+            if (room.status !== "ACTIVE") {
+                return {
+                    success: false,
+                    reason: "ROOM_ARCHIVED",
+                };
+            }
+
+            const currentGame = selectCurrentGame(room.games);
+
+            if (!currentGame) {
+                return {
+                    success: false,
+                    reason: "GAME_NOT_FOUND",
+                };
+            }
+
+            const player = await tx.gamePlayer.findUnique({
+                where: { id: gamePlayerId },
+                select: {
+                    id: true,
+                    gameId: true,
+                    nickname: true,
+                    status: true,
+                    score: true,
+                },
+            });
+
+            if (
+                !player ||
+                player.gameId !== currentGame.id ||
+                !isGamePlayerActive(player)
+            ) {
+                return {
+                    success: false,
+                    reason: "PLAYER_NOT_ACTIVE",
+                };
+            }
+
+            if (currentGame.status === "WAITING") {
+                await tx.gamePlayer.delete({
+                    where: { id: player.id },
+                });
+
+                const eligiblePlayerCount = await tx.gamePlayer.count({
+                    where: {
+                        gameId: currentGame.id,
+                        status: "ACTIVE",
+                    },
+                });
+
+                return {
+                    success: true,
+                    roomId: room.id,
+                    gameId: currentGame.id,
+                    gameStatus: "WAITING",
+                    player: {
+                        id: player.id,
+                        nickname: player.nickname,
+                        status: "LEFT",
+                        score: player.score,
+                    },
+                    eligiblePlayerCount,
+                    openRoundId: null,
+                };
+            }
+
+            if (currentGame.status === "IN_PROGRESS") {
+                const updatedPlayer = await tx.gamePlayer.update({
+                    where: { id: player.id },
+                    data: {
+                        status: "LEFT",
+                        sessionTokenHash: null,
+                    },
+                    select: {
+                        id: true,
+                        nickname: true,
+                        status: true,
+                        score: true,
+                    },
+                });
+
+                const eligiblePlayerCount = await tx.gamePlayer.count({
+                    where: {
+                        gameId: currentGame.id,
+                        status: "ACTIVE",
+                    },
+                });
+
+                const cancelledGame =
+                    await cancelInProgressGameIfInsufficientPlayersTx(
+                        tx,
+                        currentGame.id,
+                        eligiblePlayerCount,
+                    );
+
+                const openRound = cancelledGame
+                    ? null
+                    : await tx.round.findFirst({
+                        where: {
+                            gameId: currentGame.id,
+                            status: "OPEN",
+                        },
+                        select: {
+                            id: true,
+                        },
+                    });
+
+                return {
+                    success: true,
+                    roomId: room.id,
+                    gameId: currentGame.id,
+                    gameStatus: "IN_PROGRESS",
+                    player: updatedPlayer,
+                    eligiblePlayerCount,
+                    openRoundId: openRound?.id ?? null,
+                    cancelledGame,
+                };
+            }
+
+            return {
+                success: false,
+                reason: "GAME_NOT_LEAVABLE",
             };
         });
     }

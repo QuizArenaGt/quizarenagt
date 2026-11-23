@@ -4,6 +4,7 @@ import type {
     GameCreatedPayload,
     GameMode,
     LobbyPlayerDto,
+    PlayerLeftPayload,
     RoundClosedPayload,
     RoundStartedPayload,
 } from '../services/socket.ts';
@@ -648,6 +649,184 @@ export async function executeArchiveRoom({
     }
 }
 
+export function formatFinishMatchError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 401) {
+            return 'Sua sessão expirou. Faça login novamente para encerrar a partida.';
+        }
+
+        if (error.status === 403) {
+            return 'Você não tem permissão para encerrar esta partida.';
+        }
+
+        if (error.status === 404) {
+            return 'Sala ou partida não encontrada.';
+        }
+
+        if (error.status === 409) {
+            return error.message?.trim() || 'Esta partida não está em andamento.';
+        }
+
+        if (error.status >= 500) {
+            return 'Não foi possível encerrar a partida devido a uma falha no servidor. Tente novamente.';
+        }
+
+        if (error.message?.trim()) {
+            return error.message.trim();
+        }
+    }
+
+    if (error instanceof Error) {
+        const msg = error.message.trim();
+        const lower = msg.toLowerCase();
+        if (
+            lower.includes('conectar ao servidor') ||
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror') ||
+            lower.includes('network request failed') ||
+            lower.includes('load failed')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
+        }
+        if (msg) {
+            return msg;
+        }
+    }
+
+    return 'Não foi possível encerrar a partida. Tente novamente.';
+}
+
+export interface ExecuteFinishMatchDependencies<TResponse> {
+    room: Room | null;
+    lockRef: { current: boolean };
+    requestFinish: (roomId: string) => Promise<TResponse>;
+    onFinishingChange?: (finishing: boolean) => void;
+    onError: (message: string | null) => void;
+    onSuccess: (response: TResponse, originalRoom: Room) => void;
+}
+
+/**
+ * Encerra antecipadamente a partida em andamento (`POST /rooms/:id/finish`),
+ * impedindo múltiplos cliques e atualizando o estado somente após resposta do servidor.
+ */
+export async function executeFinishMatch<TResponse>({
+    room,
+    lockRef,
+    requestFinish,
+    onFinishingChange,
+    onError,
+    onSuccess,
+}: ExecuteFinishMatchDependencies<TResponse>): Promise<boolean> {
+    if (!room || lockRef.current) {
+        return false;
+    }
+
+    lockRef.current = true;
+    onFinishingChange?.(true);
+    onError(null);
+
+    try {
+        const response = await requestFinish(room.id);
+        onSuccess(response, room);
+        return true;
+    } catch (error) {
+        onError(formatFinishMatchError(error));
+        return false;
+    } finally {
+        lockRef.current = false;
+        onFinishingChange?.(false);
+    }
+}
+
+export function formatCloseRoundError(error: unknown): string {
+    if (isHttpErrorLike(error)) {
+        if (error.status === 401) {
+            return 'Sua sessão expirou. Faça login novamente para encerrar a rodada.';
+        }
+
+        if (error.status === 403) {
+            return 'Você não tem permissão para encerrar esta rodada.';
+        }
+
+        if (error.status === 404) {
+            return 'Rodada não encontrada.';
+        }
+
+        if (error.status === 409) {
+            return error.message?.trim() || 'A rodada não está disponível para encerramento.';
+        }
+
+        if (error.status >= 500) {
+            return 'Não foi possível encerrar a rodada devido a uma falha no servidor. Tente novamente.';
+        }
+
+        if (error.message?.trim()) {
+            return error.message.trim();
+        }
+    }
+
+    if (error instanceof Error) {
+        const msg = error.message.trim();
+        const lower = msg.toLowerCase();
+        if (
+            lower.includes('conectar ao servidor') ||
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror') ||
+            lower.includes('network request failed') ||
+            lower.includes('load failed')
+        ) {
+            return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
+        }
+        if (msg) {
+            return msg;
+        }
+    }
+
+    return 'Não foi possível encerrar a rodada. Tente novamente.';
+}
+
+export interface ExecuteCloseRoundDependencies<TResponse> {
+    roundId: string | null | undefined;
+    closingRoundIdRef: { current: string | null };
+    requestClose: (roundId: string) => Promise<TResponse>;
+    onClosingChange?: (closing: boolean) => void;
+    onError: (message: string | null) => void;
+    onSuccess: (response: TResponse, roundId: string) => void;
+}
+
+/**
+ * Encerra manualmente a rodada ativa no servidor (`POST /rounds/:id/close`)
+ * com proteção contra cliques duplicados e sem depender do timer local.
+ */
+export async function executeCloseRound<TResponse>({
+    roundId,
+    closingRoundIdRef,
+    requestClose,
+    onClosingChange,
+    onError,
+    onSuccess,
+}: ExecuteCloseRoundDependencies<TResponse>): Promise<boolean> {
+    if (!roundId || closingRoundIdRef.current === roundId) {
+        return false;
+    }
+
+    closingRoundIdRef.current = roundId;
+    onClosingChange?.(true);
+    onError(null);
+
+    try {
+        const response = await requestClose(roundId);
+        onSuccess(response, roundId);
+        return true;
+    } catch (error) {
+        closingRoundIdRef.current = null;
+        onError(formatCloseRoundError(error));
+        return false;
+    } finally {
+        onClosingChange?.(false);
+    }
+}
+
 export interface ExecutePlayAgainDependencies<TApiRoom> {
     room: Room | null;
     lockRef: { current: boolean };
@@ -835,4 +1014,44 @@ export function extractHostMatchRecoveryState(
         answeredPlayers: [],
         remainingSeconds: 0,
     };
+}
+
+/**
+ * Retorna apenas os participantes elegíveis (exclui LEFT e ABANDONED).
+ */
+export function countEligiblePlayers(players: readonly LobbyPlayerDto[]): number {
+    return players.filter(
+        (player) => player.status !== 'LEFT' && player.status !== 'ABANDONED',
+    ).length;
+}
+
+/**
+ * Atualiza a lista de participantes da sala ao receber `player:left`.
+ * Em WAITING remove o participante; em IN_PROGRESS marca LEFT preservando o score histórico.
+ */
+export function applyPlayerLeftToRooms(
+    rooms: readonly Room[],
+    payload: PlayerLeftPayload,
+): Room[] {
+    return rooms.map((room) => {
+        if (room.id !== payload.roomId) {
+            return room;
+        }
+
+        if (payload.gameStatus === 'WAITING') {
+            return {
+                ...room,
+                players: room.players.filter((player) => player.id !== payload.player.id),
+            };
+        }
+
+        return {
+            ...room,
+            players: room.players.map((player) =>
+                player.id === payload.player.id
+                    ? { ...player, status: payload.player.status }
+                    : player,
+            ),
+        };
+    });
 }

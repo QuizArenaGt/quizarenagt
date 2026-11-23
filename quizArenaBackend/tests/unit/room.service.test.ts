@@ -71,6 +71,7 @@ describe("RoomService", () => {
     let roomPlayerRepositoryMock: {
         createIfRoomHasCapacity: ReturnType<typeof vi.fn>;
         findBySessionTokenHash: ReturnType<typeof vi.fn>;
+        leaveRoom: ReturnType<typeof vi.fn>;
     };
 
     let jwtServiceMock: {
@@ -103,6 +104,7 @@ describe("RoomService", () => {
         roomPlayerRepositoryMock = {
             createIfRoomHasCapacity: vi.fn(),
             findBySessionTokenHash: vi.fn(),
+            leaveRoom: vi.fn(),
         };
 
         jwtServiceMock = {
@@ -182,6 +184,7 @@ describe("RoomService", () => {
             const player = {
                 id: "p-1",
                 nickname: "Alice",
+                status: "ACTIVE" as const,
                 score: 100,
                 joinedAt: baseDate,
             };
@@ -279,9 +282,9 @@ describe("RoomService", () => {
                     {
                         ...baseGameFixture,
                         players: [
-                            { id: "p1", nickname: "A", score: 0, joinedAt: baseDate },
-                            { id: "p2", nickname: "B", score: 0, joinedAt: baseDate },
-                            { id: "p3", nickname: "C", score: 0, joinedAt: baseDate },
+                            { id: "p1", nickname: "A", status: "ACTIVE" as const, score: 0, joinedAt: baseDate },
+                            { id: "p2", nickname: "B", status: "ACTIVE" as const, score: 0, joinedAt: baseDate },
+                            { id: "p3", nickname: "C", status: "ACTIVE" as const, score: 0, joinedAt: baseDate },
                         ],
                     },
                 ],
@@ -577,6 +580,7 @@ describe("RoomService", () => {
                         {
                             id: "player-uuid",
                             nickname: "Alice",
+                            status: "ACTIVE" as const,
                             score: 0,
                             joinedAt: baseDate,
                         },
@@ -607,6 +611,7 @@ describe("RoomService", () => {
             roomPlayerRepositoryMock.findBySessionTokenHash.mockResolvedValue({
                 id: "old-player-uuid",
                 gameId: "game-1-old",
+                status: "ACTIVE",
                 game: {
                     id: "game-1-old",
                     roomId: roomFixture.id,
@@ -786,6 +791,111 @@ describe("RoomService", () => {
                 service.getRoomLobby("ABC123", "jwt-token"),
             ).rejects.toThrow(RoomNotEditableError);
         });
+
+        it.each(["LEFT", "ABANDONED"] as const)(
+            "deve rejeitar token de participante com status %s com RoomAuthenticationError",
+            async (status) => {
+                jwtServiceMock.verify.mockImplementation(() => {
+                    throw new Error("not jwt");
+                });
+                roomPlayerRepositoryMock.findBySessionTokenHash.mockResolvedValue({
+                    id: "inactive-player-uuid",
+                    gameId: baseGameFixture.id,
+                    status,
+                    game: {
+                        id: baseGameFixture.id,
+                        roomId: roomFixture.id,
+                        status: "IN_PROGRESS",
+                        room: {
+                            id: roomFixture.id,
+                            status: "ACTIVE",
+                            games: [
+                                { id: baseGameFixture.id, status: "IN_PROGRESS" },
+                            ],
+                        },
+                    },
+                });
+
+                await expect(
+                    service.getRoomLobby("ABC123", "inactive-player-token"),
+                ).rejects.toThrow(RoomAuthenticationError);
+            },
+        );
+
+        it("em WAITING deve contar e listar apenas ACTIVE, enquanto em IN_PROGRESS preserva histórico e expõe eligiblePlayerCount", async () => {
+            jwtServiceMock.verify.mockReturnValue({ sub: roomFixture.hostId });
+
+            const lobbyBase = {
+                ...roomFixture,
+                host: { id: roomFixture.hostId, name: "Host Teste" },
+            };
+
+            roomRepositoryMock.findByCodeWithLobby.mockResolvedValueOnce({
+                ...lobbyBase,
+                games: [
+                    {
+                        ...baseGameFixture,
+                        status: "WAITING",
+                        players: [
+                            { id: "p1", nickname: "Ana", status: "ACTIVE", score: 0, joinedAt: baseDate },
+                            { id: "p2", nickname: "Bob", status: "LEFT", score: 0, joinedAt: baseDate },
+                        ],
+                    },
+                ],
+            });
+
+            const waitingLobby = await service.getRoomLobby("ABC123", "jwt-token");
+            expect(waitingLobby.playerCount).toBe(1);
+            expect(waitingLobby.currentGame?.eligiblePlayerCount).toBe(1);
+            expect(waitingLobby.players.map((p) => p.id)).toEqual(["p1"]);
+
+            roomRepositoryMock.findByCodeWithLobby.mockResolvedValueOnce({
+                ...lobbyBase,
+                games: [
+                    {
+                        ...baseGameFixture,
+                        status: "IN_PROGRESS",
+                        players: [
+                            { id: "p1", nickname: "Ana", status: "ACTIVE", score: 120, joinedAt: baseDate },
+                            { id: "p2", nickname: "Bob", status: "ABANDONED", score: 95, joinedAt: baseDate },
+                        ],
+                    },
+                ],
+            });
+
+            const activeGameLobby = await service.getRoomLobby("ABC123", "jwt-token");
+            expect(activeGameLobby.playerCount).toBe(2);
+            expect(activeGameLobby.currentGame?.eligiblePlayerCount).toBe(1);
+            expect(activeGameLobby.players.map((p) => p.id)).toEqual(["p1", "p2"]);
+        });
+    });
+
+    describe("checkRoomAvailability - elegibilidade", () => {
+        it("não deve contabilizar jogadores LEFT ou ABANDONED na lotação da sala", async () => {
+            roomRepositoryMock.findByCodeWithLobby.mockResolvedValue({
+                ...roomFixture,
+                games: [
+                    {
+                        ...baseGameFixture,
+                        maxPlayers: 2,
+                        players: [
+                            { id: "p1", nickname: "Ana", status: "ACTIVE", score: 0, joinedAt: baseDate },
+                            { id: "p2", nickname: "Bob", status: "LEFT", score: 0, joinedAt: baseDate },
+                            { id: "p3", nickname: "Caio", status: "ABANDONED", score: 0, joinedAt: baseDate },
+                        ],
+                    },
+                ],
+            });
+
+            const availability = await service.checkRoomAvailability("ABC123");
+
+            expect(availability).toEqual({
+                code: roomFixture.code,
+                status: "WAITING",
+                roomStatus: "ACTIVE",
+                available: true,
+            });
+        });
     });
 
     describe("finishRoom", () => {
@@ -839,6 +949,107 @@ describe("RoomService", () => {
             await expect(
                 service.finishRoom(roomFixture.id, roomFixture.hostId),
             ).rejects.toThrow(RoomNotEditableError);
+        });
+    });
+
+    describe("leaveRoom", () => {
+        it("deve delegar saída e mapear motivos de falha para erros de domínio", async () => {
+            roomPlayerRepositoryMock.leaveRoom.mockResolvedValueOnce({
+                success: true,
+                roomId: "room-test-uuid",
+                gameId: "game-test-uuid",
+                gameStatus: "WAITING",
+                player: {
+                    id: "gp-1",
+                    nickname: "Alice",
+                    status: "LEFT",
+                    score: 0,
+                },
+                eligiblePlayerCount: 1,
+                openRoundId: null,
+            });
+
+            const res = await service.leaveRoom("gp-1", "room-test-uuid");
+            expect(res.gameStatus).toBe("WAITING");
+            expect(res.eligiblePlayerCount).toBe(1);
+
+            roomPlayerRepositoryMock.leaveRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "PLAYER_NOT_ACTIVE",
+            });
+            await expect(
+                service.leaveRoom("gp-1", "room-test-uuid"),
+            ).rejects.toThrow(RoomAuthenticationError);
+
+            roomPlayerRepositoryMock.leaveRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "GAME_NOT_LEAVABLE",
+            });
+            await expect(
+                service.leaveRoom("gp-1", "room-test-uuid"),
+            ).rejects.toThrow(RoomNotEditableError);
+        });
+    });
+
+    describe("ranking competitivo vs histórico na projeção da sala", () => {
+        it("lastClosedRound reconstruído em getRoomLobby deve excluir LEFT e ABANDONED do ranking mantendo ACTIVE e preservando histórico completo", async () => {
+            jwtServiceMock.verify.mockReturnValue({ sub: roomFixture.hostId });
+            roomRepositoryMock.findByCodeWithLobby.mockResolvedValue({
+                ...roomFixture,
+                host: { id: roomFixture.hostId, name: "Host Teste" },
+                games: [
+                    {
+                        ...baseGameFixture,
+                        status: "IN_PROGRESS" as const,
+                        players: [
+                            { id: "p1", nickname: "Ana", status: "ACTIVE" as const, score: 120, joinedAt: baseDate },
+                            { id: "p2", nickname: "Bob", status: "ACTIVE" as const, score: 180, joinedAt: baseDate },
+                            { id: "p3", nickname: "Carol", status: "LEFT" as const, score: 220, joinedAt: baseDate },
+                            { id: "p4", nickname: "Dave", status: "ABANDONED" as const, score: 210, joinedAt: baseDate },
+                        ],
+                        rounds: [
+                            {
+                                id: "round-1",
+                                roundNumber: 1,
+                                status: "CLOSED" as const,
+                                openedAt: baseDate,
+                                expiresAt: new Date(baseDate.getTime() + 30_000),
+                                closedAt: new Date(baseDate.getTime() + 10_000),
+                                timeLimit: 30,
+                                snapshotQuestion: {
+                                    id: "sq-1",
+                                    statement: "Pergunta 1",
+                                    type: "MULTIPLE_CHOICE" as const,
+                                    position: 0,
+                                    options: [
+                                        { id: "opt-1", text: "Correta", isCorrect: true, position: 0 },
+                                    ],
+                                },
+                                answers: [
+                                    {
+                                        id: "ans-3",
+                                        isCorrect: true,
+                                        points: 220,
+                                        answeredAt: baseDate,
+                                        gamePlayer: { id: "p3", nickname: "Carol" },
+                                        option: { id: "opt-1", text: "Correta", isCorrect: true },
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            });
+
+            const lobby = await service.getRoomLobby("ABC123", "jwt-token");
+
+            expect(lobby.currentGame?.lastClosedRound?.ranking).toEqual([
+                { id: "p2", nickname: "Bob", score: 180 },
+                { id: "p1", nickname: "Ana", score: 120 },
+            ]);
+            // Histórico de respostas da rodada e lista de jogadores da partida seguem preservados
+            expect(lobby.currentGame?.lastClosedRound?.answers).toHaveLength(1);
+            expect(lobby.players).toHaveLength(4);
         });
     });
 });

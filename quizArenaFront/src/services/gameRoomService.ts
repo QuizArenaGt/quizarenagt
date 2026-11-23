@@ -3,10 +3,12 @@ import {
     checkRoomAvailabilityApi,
     getRoomLobbyApi,
     joinRoomApi,
+    leaveRoomApi,
     submitRoundAnswerApi,
     type ApiRoomAvailability,
     type ApiRoomLobby,
     type JoinRoomApiResponse,
+    type LeaveRoomApiResponse,
     type SubmitAnswerApiResponse,
 } from './roomStorageService.ts';
 
@@ -57,4 +59,10 @@ export async function submitPlayerRoundAnswer(
     sessionToken: string,
 ): Promise<SubmitAnswerApiResponse> {
     return submitRoundAnswerApi(roundId, optionId, sessionToken);
+}
+
+export async function leaveRoomSession(
+    sessionToken: string,
+): Promise<LeaveRoomApiResponse> {
+    return leaveRoomApi(sessionToken);
 }

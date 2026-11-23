@@ -1,8 +1,11 @@
+import type { GamePlayerStatus } from "@prisma/client";
+
 import {
     RoundRepository,
     type CreateNextRoundResult,
     type RoundWithQuestion,
 } from "./round.repository.js";
+import { filterActiveGamePlayers } from "../rooms/game-player-eligibility.js";
 
 import {
     RoundRoomNotFoundError,
@@ -133,13 +136,19 @@ export type RoundClosedSource = {
 
 export function buildRoundClosedPayload(
     round: RoundClosedSource,
-    players: { id: string; nickname: string; score: number }[],
+    players: {
+        id: string;
+        nickname: string;
+        status?: GamePlayerStatus;
+        score: number;
+    }[],
 ): RoundClosedWirePayload {
     const answeredPlayerIds = new Set(
         round.answers.map((answer) => answer.gamePlayer.id),
     );
+    const activePlayers = filterActiveGamePlayers(players);
 
-    const ranking = [...players]
+    const ranking = [...activePlayers]
         .sort((a, b) => b.score - a.score)
         .map((player) => ({
             id: player.id,
@@ -180,7 +189,7 @@ export function buildRoundClosedPayload(
                 points: answer.points,
                 answeredAt: answer.answeredAt,
             })),
-            unansweredPlayers: players
+            unansweredPlayers: activePlayers
                 .filter((player) => !answeredPlayerIds.has(player.id))
                 .map((player) => ({
                     id: player.id,

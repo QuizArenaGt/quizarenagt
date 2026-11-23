@@ -14,6 +14,7 @@ interface ResultStepProps {
     correctCount: number;
     ranking: RankingEntry[];
     playerPosition: number | null;
+    isGameCancelled?: boolean;
     onPlayAgain: () => void;
     onLeave: () => void;
 }
@@ -26,33 +27,56 @@ export default function ResultStep({
     correctCount,
     ranking,
     playerPosition,
+    isGameCancelled = false,
     onPlayAgain,
     onLeave,
 }: ResultStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
-    const isOnPodium = playerPosition !== null && playerPosition <= 3;
+    const isOnPodium = !isGameCancelled && playerPosition !== null && playerPosition <= 3;
 
     return (
         <section className="play-card play-card--wide" aria-labelledby="play-result-title">
             <div className="play-result__header">
                 <h1 id="play-result-title" ref={titleRef} tabIndex={-1} className="play-card__title">
-                    {isOnPodium ? `Parabéns, ${nickname}!` : `Fim de jogo, ${nickname}!`}
+                    {isGameCancelled
+                        ? `Partida cancelada, ${nickname}`
+                        : isOnPodium
+                          ? `Parabéns, ${nickname}!`
+                          : `Fim de jogo, ${nickname}!`}
                 </h1>
-                <p className="play-card__text">
-                    {playerPosition !== null && (
-                        <>
-                            Você terminou em <strong>{playerPosition}º lugar</strong> com{' '}
-                        </>
-                    )}
-                    <strong>{totalScore} pontos</strong> e acertou <strong>{correctCount}</strong> de{' '}
-                    <strong>{questions.length}</strong> perguntas.
-                </p>
+                {isGameCancelled ? (
+                    <p className="play-card__text">
+                        A partida foi encerrada automaticamente porque restaram menos de 2 jogadores ativos. Não houve vencedor automático. Você acumulou{' '}
+                        <strong>{totalScore} pontos</strong>
+                        {questions.length > 0 && (
+                            <>
+                                {' '}e acertou <strong>{correctCount}</strong> de{' '}
+                                <strong>{questions.length}</strong> perguntas
+                            </>
+                        )}
+                        .
+                    </p>
+                ) : (
+                    <p className="play-card__text">
+                        {playerPosition !== null && (
+                            <>
+                                Você terminou em <strong>{playerPosition}º lugar</strong> com{' '}
+                            </>
+                        )}
+                        <strong>{totalScore} pontos</strong> e acertou <strong>{correctCount}</strong> de{' '}
+                        <strong>{questions.length}</strong> perguntas.
+                    </p>
+                )}
             </div>
 
-            <Podium ranking={ranking} />
+            {!isGameCancelled && (
+                <>
+                    <Podium ranking={ranking} />
 
-            <h2 className="play-result__subtitle">Classificação Final</h2>
-            <RankingList entries={ranking} />
+                    <h2 className="play-result__subtitle">Classificação Final</h2>
+                    <RankingList entries={ranking} />
+                </>
+            )}
 
             {questions.length > 0 && (
                 <>

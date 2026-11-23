@@ -3,6 +3,7 @@ import { normalizeRoomCode } from '../models/game.ts';
 import { mapBackendRoomStatus, type Room } from '../models/room.ts';
 import type {
     BackendRoomStatus,
+    GameFinishedRankingEntryDto,
     GameMode,
     LobbyPlayerDto,
     RoundClosedPayload,
@@ -161,10 +162,25 @@ export interface JoinRoomApiResponse {
         roomId: string;
         userId: string | null;
         nickname: string;
+        status?: 'ACTIVE' | 'LEFT' | 'ABANDONED';
         score: number;
         joinedAt: string;
     };
     sessionToken: string;
+}
+
+export interface LeaveRoomApiResponse {
+    message: string;
+    roomId: string;
+    gameId: string;
+    gameStatus: BackendRoomStatus;
+    player: {
+        id: string;
+        nickname: string;
+        status: 'ACTIVE' | 'LEFT' | 'ABANDONED';
+        score: number;
+    };
+    eligiblePlayerCount: number;
 }
 
 export type CreateNextRoundApiResponse =
@@ -356,6 +372,13 @@ export async function joinRoomApi(input: {
     });
 }
 
+export async function leaveRoomApi(sessionToken: string): Promise<LeaveRoomApiResponse> {
+    return apiRequest<LeaveRoomApiResponse>('/rooms/leave', {
+        method: 'POST',
+        token: sessionToken,
+    });
+}
+
 export async function startRoomApi(roomId: string): Promise<ApiHostRoom> {
     return apiRequest<ApiHostRoom>(`/rooms/${roomId}/start`, {
         method: 'POST',
@@ -369,6 +392,28 @@ export async function playAgainApi(roomId: string): Promise<ApiHostRoom> {
 
     if (!isValidApiRoom(response)) {
         throw new Error('Resposta inválida ao criar nova partida.');
+    }
+
+    return response;
+}
+
+export interface FinishRoomApiResponse {
+    message?: string;
+    room: ApiHostRoom;
+    ranking?: GameFinishedRankingEntryDto[];
+    alreadyFinished?: boolean;
+}
+
+export async function finishRoomApi(roomId: string): Promise<FinishRoomApiResponse> {
+    const response = await apiRequest<FinishRoomApiResponse>(
+        `/rooms/${encodeURIComponent(roomId)}/finish`,
+        {
+            method: 'POST',
+        },
+    );
+
+    if (!response || typeof response !== 'object' || !isValidApiRoom(response.room)) {
+        throw new Error('Resposta inválida ao encerrar partida.');
     }
 
     return response;

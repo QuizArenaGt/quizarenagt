@@ -11,6 +11,7 @@ import {
     MIN_ROOM_QUESTIONS,
     ROOM_TIME_OPTIONS,
     canPlayAgain,
+    countEligiblePlayers,
     formatNullableDateTime,
     formatRoomCode,
     getClipboardRoomCode,
@@ -337,6 +338,16 @@ export default function DashboardForm({
                                                     >
                                                         {isSelected ? 'Sala Selecionada' : 'Gerenciar Sala'}
                                                     </button>
+                                                    {room.backendStatus === 'IN_PROGRESS' && (
+                                                        <button
+                                                            type="button"
+                                                            className="action-btn finish"
+                                                            disabled={roomsVm.isFinishingMatch}
+                                                            onClick={() => roomsVm.requestFinishMatch(room)}
+                                                        >
+                                                            Encerrar Partida
+                                                        </button>
+                                                    )}
                                                     {room.status === 'Finalizado' && (
                                                         <>
                                                             <button
@@ -411,13 +422,6 @@ export default function DashboardForm({
                                             <button
                                                 type="button"
                                                 className="secondary-btn"
-                                                onClick={() => void roomsVm.refreshActiveRoomLobby()}
-                                            >
-                                                Atualizar Lobby
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="secondary-btn"
                                                 onCopy={(e) => handleCopyRoomCode(e, activeRoom.code)}
                                                 onClick={() => roomsVm.showCode(activeRoom)}
                                             >
@@ -466,7 +470,14 @@ export default function DashboardForm({
                                                                     borderBottom: '1px solid #e2e8f0',
                                                                 }}
                                                             >
-                                                                <strong>{player.nickname}</strong>
+                                                                <strong>
+                                                                    {player.nickname}
+                                                                    {player.status === 'LEFT'
+                                                                        ? ' (saiu)'
+                                                                        : player.status === 'ABANDONED'
+                                                                          ? ' (abandonou)'
+                                                                          : ''}
+                                                                </strong>
                                                                 <span>{player.score} pts</span>
                                                             </li>
                                                         ))}
@@ -579,7 +590,7 @@ export default function DashboardForm({
                                                                 Respostas recebidas:{' '}
                                                                 <strong>
                                                                     {roomsVm.answeredPlayers.length} de{' '}
-                                                                    {activeRoom.players.length}
+                                                                    {countEligiblePlayers(activeRoom.players)}
                                                                 </strong>
                                                                 {roomsVm.answeredPlayers.length > 0 && (
                                                                     <>
@@ -596,14 +607,12 @@ export default function DashboardForm({
                                                                 type="button"
                                                                 className="secondary-btn"
                                                                 onClick={() => void roomsVm.closeCurrentRound()}
-                                                                disabled={
-                                                                    roomsVm.roundRemainingSeconds > 0 &&
-                                                                    roomsVm.answeredPlayers.length <
-                                                                        activeRoom.players.length
-                                                                }
+                                                                disabled={roomsVm.isClosingRound}
                                                                 style={{ width: '100%', marginTop: '8px' }}
                                                             >
-                                                                Encerrar Rodada
+                                                                {roomsVm.isClosingRound
+                                                                    ? 'Encerrando Rodada…'
+                                                                    : 'Encerrar Rodada'}
                                                             </button>
                                                         </div>
                                                     ) : roomsVm.closedRound ? (
@@ -652,19 +661,41 @@ export default function DashboardForm({
                                                             </button>
                                                         </div>
                                                     )}
+                                                    <button
+                                                        type="button"
+                                                        className="action-btn finish"
+                                                        disabled={roomsVm.isFinishingMatch}
+                                                        onClick={() => roomsVm.requestFinishMatch(activeRoom)}
+                                                        style={{ width: '100%', padding: '10px', marginTop: '4px' }}
+                                                    >
+                                                        {roomsVm.isFinishingMatch
+                                                            ? 'Encerrando Partida…'
+                                                            : 'Encerrar Partida'}
+                                                    </button>
                                                 </>
                                             )}
 
                                             {canPlayAgain(activeRoom) && (
                                                 <div>
-                                                    <h3 style={{ marginTop: 0, color: '#15803d' }}>
+                                                    <h3
+                                                        style={{
+                                                            marginTop: 0,
+                                                            color:
+                                                                activeRoom.backendStatus === 'CANCELLED'
+                                                                    ? '#b45309'
+                                                                    : '#15803d',
+                                                        }}
+                                                    >
                                                         {activeRoom.backendStatus === 'FINISHED'
                                                             ? '🏁 Partida Finalizada!'
-                                                            : 'Partida Encerrada'}
+                                                            : activeRoom.backendStatus === 'CANCELLED'
+                                                              ? 'Partida Cancelada'
+                                                              : 'Partida Encerrada'}
                                                     </h3>
                                                     <p>
-                                                        Todas as rodadas foram concluídas e a pontuação final está
-                                                        consolidada no placar ao lado.
+                                                        {activeRoom.backendStatus === 'CANCELLED'
+                                                            ? 'A partida foi cancelada porque o número de jogadores ativos ficou abaixo do mínimo de 2 participantes. Não houve vencedor automático.'
+                                                            : 'Todas as rodadas foram concluídas e a pontuação final está consolidada no placar ao lado.'}
                                                     </p>
                                                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                                                         <button
@@ -1197,6 +1228,35 @@ export default function DashboardForm({
                 {roomsVm.archiveRoomError && (
                     <p className="room-form-error" role="alert" style={{ marginTop: '12px' }}>
                         {roomsVm.archiveRoomError}
+                    </p>
+                )}
+            </ConfirmDialog>
+
+            {/* Confirmação antes de encerrar antecipadamente uma partida em andamento */}
+            <ConfirmDialog
+                isOpen={roomsVm.roomPendingFinish !== null}
+                title="Encerrar partida agora?"
+                confirmLabel="Encerrar Partida"
+                loadingLabel="Encerrando…"
+                isLoading={roomsVm.isFinishingMatch}
+                tone="danger"
+                onConfirm={roomsVm.confirmFinishMatch}
+                onCancel={roomsVm.cancelFinishMatch}
+            >
+                <p>
+                    A partida em andamento na sala <strong>{roomsVm.roomPendingFinish?.name}</strong> (código{' '}
+                    <strong>
+                        {roomsVm.roomPendingFinish && formatRoomCode(roomsVm.roomPendingFinish.code)}
+                    </strong>
+                    ) será finalizada imediatamente.
+                </p>
+                <p style={{ marginTop: '8px' }}>
+                    As pontuações atuais dos jogadores serão preservadas, qualquer rodada aberta será encerrada e todos
+                    serão direcionados aos resultados finais.
+                </p>
+                {roomsVm.finishMatchError && (
+                    <p className="room-form-error" role="alert" style={{ marginTop: '12px' }}>
+                        {roomsVm.finishMatchError}
                     </p>
                 )}
             </ConfirmDialog>

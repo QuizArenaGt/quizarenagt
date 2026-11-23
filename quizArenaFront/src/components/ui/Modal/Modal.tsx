@@ -1,5 +1,21 @@
-import { useEffect, useId, useRef, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
+import {
+    useEffect,
+    useId,
+    useRef,
+    type MouseEvent,
+    type PointerEvent,
+    type ReactNode,
+    type SyntheticEvent,
+} from 'react';
 import Icon from '../Icon/Icon';
+import {
+    consumeBackdropClick,
+    createBackdropPointerState,
+    recordBackdropPointerDown,
+    recordBackdropPointerUp,
+    resetBackdropPointerState,
+    type BackdropPointerState,
+} from './modalBackdrop.ts';
 import './Modal.css';
 
 interface ModalProps {
@@ -26,6 +42,7 @@ interface ModalProps {
  */
 export default function Modal({ isOpen, onClose, title, description, header, size = 'md', children }: ModalProps) {
     const dialogRef = useRef<HTMLDialogElement>(null);
+    const backdropPointerStateRef = useRef<BackdropPointerState>(createBackdropPointerState());
     const titleId = useId();
     const descriptionId = useId();
 
@@ -38,6 +55,10 @@ export default function Modal({ isOpen, onClose, title, description, header, siz
             dialog.showModal();
         } else if (!isOpen && dialog.open) {
             dialog.close();
+        }
+
+        if (!isOpen) {
+            resetBackdropPointerState(backdropPointerStateRef.current);
         }
     }, [isOpen]);
 
@@ -57,13 +78,26 @@ export default function Modal({ isOpen, onClose, title, description, header, siz
     // Esc dispara "cancel"; delegamos o fechamento ao estado React.
     function handleCancel(event: SyntheticEvent<HTMLDialogElement>) {
         event.preventDefault();
+        resetBackdropPointerState(backdropPointerStateRef.current);
         onClose();
     }
 
-    // Um clique cujo alvo é o próprio <dialog> só acontece na área do fundo
-    // (backdrop), pois todo o conteúdo fica dentro de .ui-modal__panel.
+    function handleBackdropPointerDown(event: PointerEvent<HTMLDialogElement>) {
+        recordBackdropPointerDown(backdropPointerStateRef.current, event);
+    }
+
+    function handleBackdropPointerUp(event: PointerEvent<HTMLDialogElement>) {
+        recordBackdropPointerUp(backdropPointerStateRef.current, event);
+    }
+
+    function handleBackdropPointerCancel() {
+        resetBackdropPointerState(backdropPointerStateRef.current);
+    }
+
+    // Fecha apenas quando pressionamento inicial, liberação e clique aconteceram
+    // diretamente no <dialog> (backdrop), impedindo fechamento após arrastes.
     function handleBackdropClick(event: MouseEvent<HTMLDialogElement>) {
-        if (event.target === event.currentTarget) {
+        if (consumeBackdropClick(backdropPointerStateRef.current, event)) {
             onClose();
         }
     }
@@ -75,6 +109,9 @@ export default function Modal({ isOpen, onClose, title, description, header, siz
             aria-labelledby={titleId}
             aria-describedby={description ? descriptionId : undefined}
             onCancel={handleCancel}
+            onPointerDown={handleBackdropPointerDown}
+            onPointerUp={handleBackdropPointerUp}
+            onPointerCancel={handleBackdropPointerCancel}
             onClick={handleBackdropClick}
         >
             {isOpen && (

@@ -5,8 +5,10 @@ import { Server } from "socket.io";
 import { JwtService } from "../auth/jwt.service.js";
 import { isValidRoomCode, normalizeRoomCode } from "../rooms/join-room.dto.js";
 import { hashRoomPlayerSessionToken } from "../rooms/room-player-session-token.js";
+import { isGamePlayerActive } from "../rooms/game-player-eligibility.js";
 import { selectCurrentGame } from "../rooms/room.repository.js";
 import { prisma } from "../database/prisma.js";
+import { PlayerPresenceRegistry } from "./player-presence.js";
 import { setSocketServer } from "./room-events.js";
 
 type SocketIdentity =
@@ -21,9 +23,13 @@ type SocketIdentity =
         nickname: string;
         gameId: string;
         roomId: string;
+        wasDisconnectedInDb: boolean;
     };
 
-export function createSocketServer(httpServer: HttpServer): Server {
+export function createSocketServer(
+    httpServer: HttpServer,
+    presenceRegistry = new PlayerPresenceRegistry(),
+): Server {
     const jwtService = new JwtService();
 
     const io = new Server(httpServer, {
@@ -33,7 +39,7 @@ export function createSocketServer(httpServer: HttpServer): Server {
         },
     });
     
-    setSocketServer(io);
+    setSocketServer(io, presenceRegistry);
 
     io.use(async (socket, next) => {
         try {
@@ -140,7 +146,8 @@ export function createSocketServer(httpServer: HttpServer): Server {
                 !player.sessionTokenHash ||
                 !player.game ||
                 !player.game.room ||
-                player.game.room.status !== "ACTIVE"
+                player.game.room.status !== "ACTIVE" ||
+                !isGamePlayerActive(player)
             ) {
                 return next(new Error("Sessão de participante inválida."));
             }
@@ -156,12 +163,34 @@ export function createSocketServer(httpServer: HttpServer): Server {
                 return next(new Error("Sessão de participante expirada."));
             }
 
+            if (
+                player.reconnectDeadlineAt &&
+                player.reconnectDeadlineAt.getTime() <= Date.now() &&
+                presenceRegistry.getActiveSocketCount(player.id) === 0
+            ) {
+                return next(new Error("Prazo de reconexão expirado."));
+            }
+
+            const wasDisconnectedInDb =
+                player.disconnectedAt !== null &&
+                player.disconnectedAt !== undefined;
+
+            if (wasDisconnectedInDb) {
+                presenceRegistry.markReconnecting(
+                    player.id,
+                    typeof socket.id === "string" && socket.id
+                        ? socket.id
+                        : "handshake",
+                );
+            }
+
             const identity: SocketIdentity = {
                 type: "PLAYER",
                 playerId: player.id,
                 nickname: player.nickname,
                 gameId: player.gameId,
                 roomId: player.game.roomId,
+                wasDisconnectedInDb,
             };
 
             socket.data.identity = identity;
@@ -176,6 +205,21 @@ export function createSocketServer(httpServer: HttpServer): Server {
         const identity = socket.data.identity as SocketIdentity;
 
         socket.join(`room:${identity.roomId}`);
+
+        if (identity.type === "PLAYER") {
+            presenceRegistry.handleSocketConnected({
+                playerId: identity.playerId,
+                nickname: identity.nickname,
+                gameId: identity.gameId,
+                roomId: identity.roomId,
+                socketId: socket.id,
+                wasDisconnectedInDb: identity.wasDisconnectedInDb,
+                onRejected: () => {
+                    socket.leave(`room:${identity.roomId}`);
+                    socket.disconnect(true);
+                },
+            });
+        }
 
         socket.emit("realtime:connected", {
             roomId: identity.roomId,
@@ -195,6 +239,16 @@ export function createSocketServer(httpServer: HttpServer): Server {
         );
 
         socket.on("disconnect", (reason) => {
+            if (identity.type === "PLAYER") {
+                presenceRegistry.handleSocketDisconnected({
+                    playerId: identity.playerId,
+                    nickname: identity.nickname,
+                    gameId: identity.gameId,
+                    roomId: identity.roomId,
+                    socketId: socket.id,
+                });
+            }
+
             console.log(
                 `Socket desconectado: ${socket.id} - ${reason}`,
             );

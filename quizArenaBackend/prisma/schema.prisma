@@ -86,6 +86,12 @@ enum RoundStatus {
   CLOSED
 }
 
+enum GamePlayerStatus {
+  ACTIVE
+  LEFT
+  ABANDONED
+}
+
 model Room {
   id           String       @id @default(uuid())
   code         String       @unique
@@ -109,21 +115,27 @@ model Room {
 }
 
 model GamePlayer {
-  id               String        @id @default(uuid())
-  gameId           String
-  userId           String?
-  nickname         String
-  score            Int           @default(0)
-  joinedAt         DateTime      @default(now())
-  sessionTokenHash String?       @unique
+  id                  String           @id @default(uuid())
+  gameId              String
+  userId              String?
+  nickname            String
+  status              GamePlayerStatus @default(ACTIVE)
+  score               Int              @default(0)
+  joinedAt            DateTime         @default(now())
+  disconnectedAt      DateTime?
+  reconnectDeadlineAt DateTime?
+  sessionTokenHash    String?          @unique
 
   game    Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
   user    User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   answers RoundAnswer[]
 
-  @@unique([gameId, nickname])
+  // Índice único parcial criado via migration SQL: game_players_active_gameId_nickname_key em ("gameId", "nickname") WHERE status = 'ACTIVE'
+  @@index([gameId, nickname])
   @@unique([gameId, userId])
   @@index([gameId, joinedAt(sort: Asc)])
+  @@index([gameId, status])
+  @@index([status, reconnectDeadlineAt])
   @@map("game_players")
 }
 

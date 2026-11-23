@@ -53,6 +53,11 @@ export class RoundAnswerService {
             case "PLAYER_NOT_IN_ROOM":
                 throw new RoundAnswerPlayerNotInRoomError();
 
+            case "PLAYER_INACTIVE":
+                throw new RoundAnswerPlayerNotInRoomError(
+                    "Participante inativo não pode enviar respostas.",
+                );
+
             case "ROUND_NOT_OPEN":
                 throw new RoundAnswerRoundNotOpenError();
 

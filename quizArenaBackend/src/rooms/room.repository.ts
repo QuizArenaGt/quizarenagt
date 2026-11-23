@@ -188,6 +188,7 @@ const gameLobbyInclude = {
         select: {
             id: true,
             nickname: true,
+            status: true,
             score: true,
             joinedAt: true,
         },
@@ -261,6 +262,7 @@ export class RoomRepository {
                             select: {
                                 id: true,
                                 nickname: true,
+                                status: true,
                                 score: true,
                                 joinedAt: true,
                             },
@@ -367,6 +369,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    status: true,
                                     score: true,
                                     joinedAt: true,
                                 },
@@ -430,6 +433,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    status: true,
                                     score: true,
                                     joinedAt: true,
                                 },
@@ -496,7 +500,10 @@ export class RoomRepository {
             }
 
             const playerCount = await tx.gamePlayer.count({
-                where: { gameId: currentGame.id },
+                where: {
+                    gameId: currentGame.id,
+                    status: "ACTIVE",
+                },
             });
 
             if (playerCount < 2) {
@@ -672,6 +679,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    status: true,
                                     score: true,
                                     joinedAt: true,
                                 },
@@ -724,6 +732,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    status: true,
                                     score: true,
                                     joinedAt: true,
                                 },
@@ -893,6 +902,7 @@ export class RoomRepository {
                 select: {
                     id: true,
                     nickname: true,
+                    status: true,
                     score: true,
                     joinedAt: true,
                 },

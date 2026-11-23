@@ -152,6 +152,7 @@ describe("RoomRepository", () => {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    status: true,
                                     score: true,
                                     joinedAt: true,
                                 },
@@ -319,7 +320,10 @@ describe("RoomRepository", () => {
             );
 
             expect(transactionClient.gamePlayer.count).toHaveBeenCalledWith({
-                where: { gameId: gameFixture.id },
+                where: {
+                    gameId: gameFixture.id,
+                    status: "ACTIVE",
+                },
             });
             expect(
                 transactionClient.roomQuestionSnapshot.create,

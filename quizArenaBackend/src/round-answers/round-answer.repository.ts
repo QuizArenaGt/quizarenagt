@@ -2,6 +2,8 @@
 import type { RoundAnswer } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+import { isGamePlayerActive } from "../rooms/game-player-eligibility.js";
+import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
 
 export type SubmitRoundAnswerResult =
     | {
@@ -13,6 +15,7 @@ export type SubmitRoundAnswerResult =
         reason:
         | "ROUND_NOT_FOUND"
         | "PLAYER_NOT_IN_ROOM"
+        | "PLAYER_INACTIVE"
         | "ROUND_NOT_OPEN"
         | "GAME_NOT_IN_PROGRESS"
         | "OPTION_NOT_VALID"
@@ -67,6 +70,8 @@ export class RoundAnswerRepository {
                 where: { id: gamePlayerId },
                 select: {
                     gameId: true,
+                    status: true,
+                    reconnectDeadlineAt: true,
                 },
             });
 
@@ -75,6 +80,36 @@ export class RoundAnswerRepository {
                     success: false,
                     reason: "PLAYER_NOT_IN_ROOM",
                 };
+            }
+
+            if (!isGamePlayerActive(player)) {
+                return {
+                    success: false,
+                    reason: "PLAYER_INACTIVE",
+                };
+            }
+
+            if (
+                player.reconnectDeadlineAt instanceof Date &&
+                (getPlayerPresenceRegistry()?.getActiveSocketCount(
+                    gamePlayerId,
+                ) ?? 0) === 0
+            ) {
+                const deadlineNowRows = await tx.$queryRaw<{ now: Date }[]>`
+                    SELECT NOW() AS now
+                `;
+                const currentNow =
+                    Array.isArray(deadlineNowRows) &&
+                    deadlineNowRows[0]?.now instanceof Date
+                        ? deadlineNowRows[0].now
+                        : new Date();
+
+                if (player.reconnectDeadlineAt.getTime() <= currentNow.getTime()) {
+                    return {
+                        success: false,
+                        reason: "PLAYER_INACTIVE",
+                    };
+                }
             }
 
             if (round.status !== "OPEN") {
