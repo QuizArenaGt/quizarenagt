@@ -20,6 +20,7 @@ import {
     emitRoomEvent,
 } from "../realtime/room-events.js";
 import { RoundService } from "../rounds/round.service.js";
+import { resolvePlayerAvatarId } from "./player-avatar.js";
 
 type RoundAutoCloseContract = Pick<RoundService, "tryCloseRoundIfReady">;
 
@@ -381,6 +382,7 @@ export class RoomController {
                 player: {
                     id: result.player.id,
                     nickname: result.player.nickname,
+                    avatarId: resolvePlayerAvatarId(result.player.avatarId),
                     score: result.player.score,
                     joinedAt: result.player.joinedAt,
                 },

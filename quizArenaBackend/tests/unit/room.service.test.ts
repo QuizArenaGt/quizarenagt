@@ -184,6 +184,7 @@ describe("RoomService", () => {
             const player = {
                 id: "p-1",
                 nickname: "Alice",
+                avatarId: "explorer",
                 status: "ACTIVE" as const,
                 score: 100,
                 joinedAt: baseDate,
@@ -484,6 +485,8 @@ describe("RoomService", () => {
                 roomId: roomFixture.id,
                 userId: null,
                 nickname: "Alice",
+                avatarId: "explorer",
+                status: "ACTIVE",
                 sessionTokenHash: "secret-hash",
                 score: 0,
                 joinedAt: baseDate,
@@ -501,6 +504,8 @@ describe("RoomService", () => {
                 roomId: roomFixture.id,
                 userId: null,
                 nickname: "Alice",
+                avatarId: "explorer",
+                status: "ACTIVE",
                 score: 0,
                 joinedAt: baseDate,
             });
@@ -738,6 +743,7 @@ describe("RoomService", () => {
             expect(games[0]?.winner).toEqual({
                 id: "p1",
                 nickname: "Alice",
+                avatarId: "explorer",
                 score: 250,
             });
             expect(games[0]?.ranking.map((r) => [r.position, r.nickname, r.score, r.correctCount, r.wrongCount])).toEqual([
@@ -1094,8 +1100,8 @@ describe("RoomService", () => {
             expect(res.alreadyFinished).toBe(false);
             expect(res.closedRoundPayload).toBeNull();
             expect(res.ranking).toEqual([
-                { id: "p1", nickname: "Alice", score: 250, position: 1 },
-                { id: "p2", nickname: "Bob", score: 100, position: 2 },
+                { id: "p1", nickname: "Alice", avatarId: "explorer", score: 250, position: 1 },
+                { id: "p2", nickname: "Bob", avatarId: "explorer", score: 100, position: 2 },
             ]);
         });
 
@@ -1210,8 +1216,8 @@ describe("RoomService", () => {
             const lobby = await service.getRoomLobby("ABC123", "jwt-token");
 
             expect(lobby.currentGame?.lastClosedRound?.ranking).toEqual([
-                { id: "p2", nickname: "Bob", score: 180 },
-                { id: "p1", nickname: "Ana", score: 120 },
+                { id: "p2", nickname: "Bob", avatarId: "explorer", score: 180 },
+                { id: "p1", nickname: "Ana", avatarId: "explorer", score: 120 },
             ]);
             // Histórico de respostas da rodada e lista de jogadores da partida seguem preservados
             expect(lobby.currentGame?.lastClosedRound?.answers).toHaveLength(1);

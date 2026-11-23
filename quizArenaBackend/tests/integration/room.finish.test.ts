@@ -216,12 +216,14 @@ describe("POST /rooms/:id/finish (Encerrar Partida Antecipadamente) - Integra√ß√
             {
                 id: alice.player.id,
                 nickname: "Alice",
+                avatarId: "explorer",
                 score: aliceAfterAnswer.score,
                 position: 1,
             },
             {
                 id: bob.player.id,
                 nickname: "Bob",
+                avatarId: "explorer",
                 score: 0,
                 position: 2,
             },

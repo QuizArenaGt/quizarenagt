@@ -381,11 +381,11 @@ describe("POST /rounds/:id/close - Integração", () => {
             expect(manualRes.body.round.status).toBe("CLOSED");
             expect(manualRes.body.round.answers).toHaveLength(1);
             expect(manualRes.body.round.unansweredPlayers).toEqual([
-                { id: bob.player.id, nickname: "Bob" },
+                { id: bob.player.id, nickname: "Bob", avatarId: "explorer" },
             ]);
             expect(manualRes.body.round.ranking).toEqual([
-                { id: alice.player.id, nickname: "Alice", score: aliceScoreAfterAnswer },
-                { id: bob.player.id, nickname: "Bob", score: 0 },
+                { id: alice.player.id, nickname: "Alice", avatarId: "explorer", score: aliceScoreAfterAnswer },
+                { id: bob.player.id, nickname: "Bob", avatarId: "explorer", score: 0 },
             ]);
 
             // Evento round:closed emitido exatamente uma vez

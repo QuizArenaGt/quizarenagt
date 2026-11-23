@@ -288,6 +288,7 @@ describe("RoomPlayerRepository", () => {
                     gameId: "game-test-uuid",
                     userId: playerFixture.userId,
                     nickname: playerFixture.nickname,
+                    avatarId: "explorer",
                     sessionTokenHash: playerFixture.sessionTokenHash,
                 },
             });
@@ -397,6 +398,7 @@ describe("RoomPlayerRepository", () => {
                 player: {
                     id: "gp-1",
                     nickname: "Alice",
+                    avatarId: "explorer",
                     status: "LEFT",
                     score: 0,
                 },
@@ -437,6 +439,7 @@ describe("RoomPlayerRepository", () => {
                 select: {
                     id: true,
                     nickname: true,
+                    avatarId: true,
                     status: true,
                     score: true,
                 },
@@ -450,6 +453,7 @@ describe("RoomPlayerRepository", () => {
                 player: {
                     id: "gp-1",
                     nickname: "Alice",
+                    avatarId: "explorer",
                     status: "LEFT",
                     score: 140,
                 },
@@ -511,6 +515,7 @@ describe("RoomPlayerRepository", () => {
                 player: {
                     id: "gp-1",
                     nickname: "Alice",
+                    avatarId: "explorer",
                     status: "LEFT",
                     score: 80,
                 },
@@ -521,7 +526,7 @@ describe("RoomPlayerRepository", () => {
                     status: "CANCELLED",
                     reason: "INSUFFICIENT_PLAYERS",
                     finishedAt,
-                    ranking: [{ id: "gp-2", nickname: "Bob", score: 100, position: 1 }],
+                    ranking: [{ id: "gp-2", nickname: "Bob", avatarId: "explorer", score: 100, position: 1 }],
                 },
             });
         });

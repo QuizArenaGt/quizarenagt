@@ -275,11 +275,11 @@ describe("RoundService", () => {
             const payload = buildRoundClosedPayload(closedRound, players);
 
             expect(payload.round.unansweredPlayers).toEqual([
-                { id: "gp-2", nickname: "Bob" },
+                { id: "gp-2", nickname: "Bob", avatarId: "explorer" },
             ]);
             expect(payload.round.ranking).toEqual([
-                { id: "gp-2", nickname: "Bob", score: 150 },
-                { id: "gp-1", nickname: "Alice", score: 120 },
+                { id: "gp-2", nickname: "Bob", avatarId: "explorer", score: 150 },
+                { id: "gp-1", nickname: "Alice", avatarId: "explorer", score: 120 },
             ]);
             // Dados históricos de LEFT e ABANDONED não foram modificados
             expect(players[2]?.score).toBe(200);

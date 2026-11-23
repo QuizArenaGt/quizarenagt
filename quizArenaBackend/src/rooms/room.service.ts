@@ -54,6 +54,10 @@ import {
 } from "./game-player-eligibility.js";
 import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
 import { JwtService } from "../auth/jwt.service.js";
+import {
+    resolvePlayerAvatarId,
+    type PlayerAvatarId,
+} from "./player-avatar.js";
 
 
 type RoomRepositoryContract = Pick<
@@ -130,6 +134,7 @@ export type FinishRoomResult = {
     ranking: {
         id: string;
         nickname: string;
+        avatarId: PlayerAvatarId;
         score: number;
         position: number;
     }[];
@@ -145,6 +150,7 @@ export type RoomAvailabilityResult = {
 type LobbyPlayerProjection = {
     id: string;
     nickname: string;
+    avatarId?: string | null;
     status?: GamePlayerStatus;
     score: number;
     joinedAt: Date;
@@ -178,6 +184,7 @@ type RoundProjectionRecord = {
         gamePlayer: {
             id: string;
             nickname: string;
+            avatarId?: string | null;
         };
         option: {
             id: string;
@@ -210,6 +217,7 @@ export type ActiveRoundProjection = {
     answeredPlayers: {
         id: string;
         nickname: string;
+        avatarId: PlayerAvatarId;
     }[];
     question: {
         id: string;
@@ -285,6 +293,7 @@ export type ProjectedRoomLobby = ProjectedRoomSummary & {
 export type GameRankingEntry = {
     id: string;
     nickname: string;
+    avatarId: PlayerAvatarId;
     score: number;
     position: number;
     correctCount: number;
@@ -311,6 +320,7 @@ export type GameHistoryItem = {
     winner: {
         id: string;
         nickname: string;
+        avatarId: PlayerAvatarId;
         score: number;
     } | null;
     ranking: GameRankingEntry[];
@@ -389,6 +399,7 @@ function buildGameHistorySummary(game: {
     players: {
         id: string;
         nickname: string;
+        avatarId?: string | null;
         score: number;
         joinedAt: Date;
     }[];
@@ -439,6 +450,7 @@ function buildGameHistorySummary(game: {
         return {
             id: player.id,
             nickname: player.nickname,
+            avatarId: resolvePlayerAvatarId(player.avatarId),
             score: player.score,
             position: index + 1,
             correctCount: stats.correctCount,
@@ -453,6 +465,7 @@ function buildGameHistorySummary(game: {
             ? {
                   id: ranking[0].id,
                   nickname: ranking[0].nickname,
+                  avatarId: ranking[0].avatarId,
                   score: ranking[0].score,
               }
             : null;
@@ -723,7 +736,10 @@ function projectRoomWithGame(
         explicitGame ??
         (room.games ? selectCurrentGame(room.games) : null);
 
-    const allPlayers = selectedGame?.players ?? [];
+    const allPlayers = (selectedGame?.players ?? []).map((player) => ({
+        ...player,
+        avatarId: resolvePlayerAvatarId(player.avatarId),
+    }));
     const activePlayers = filterActiveGamePlayers(allPlayers);
     const exposedPlayers =
         selectedGame?.status === "WAITING" ? activePlayers : allPlayers;
@@ -748,6 +764,7 @@ function projectRoomWithGame(
               answeredPlayers: openRound.answers.map((answer) => ({
                   id: answer.gamePlayer.id,
                   nickname: answer.gamePlayer.nickname,
+                  avatarId: resolvePlayerAvatarId(answer.gamePlayer.avatarId),
               })),
               question: {
                   id: openRound.snapshotQuestion.id,
@@ -1097,6 +1114,7 @@ export class RoomService {
             const ranking = sortedPlayers.map((player, index) => ({
                 id: player.id,
                 nickname: player.nickname,
+                avatarId: resolvePlayerAvatarId(player.avatarId),
                 score: player.score,
                 position: index + 1,
             }));
@@ -1154,7 +1172,7 @@ export class RoomService {
             );
         }
 
-        const { code, nickname } = validation.data;
+        const { code, nickname, avatarId } = validation.data;
 
         const room = await this.roomRepository.findByCode(code);
 
@@ -1177,6 +1195,7 @@ export class RoomService {
                 await this.roomPlayerRepository.createIfRoomHasCapacity({
                     roomId: room.id,
                     nickname,
+                    avatarId,
                     sessionTokenHash,
                 });
         } catch (error) {
@@ -1209,6 +1228,7 @@ export class RoomService {
             roomId: createdPlayer.roomId,
             userId: createdPlayer.userId,
             nickname: createdPlayer.nickname,
+            avatarId: resolvePlayerAvatarId(createdPlayer.avatarId),
             status: createdPlayer.status,
             score: createdPlayer.score,
             joinedAt: createdPlayer.joinedAt,

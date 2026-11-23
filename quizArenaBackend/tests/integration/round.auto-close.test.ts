@@ -184,7 +184,7 @@ describe("Timer Autoritativo, Boot Recovery e Encerramento Automático - Integra
         expect(listedGameOpen.activeRound.answeredCount).toBe(1);
         expect(listedGameOpen.activeRound.eligiblePlayerCount).toBe(2);
         expect(listedGameOpen.activeRound.answeredPlayers).toEqual([
-            { id: alice.player.id, nickname: "Alice" },
+            { id: alice.player.id, nickname: "Alice", avatarId: "explorer" },
         ]);
         for (const opt of listedGameOpen.activeRound.question.options) {
             expect(opt).not.toHaveProperty("isCorrect");
@@ -242,7 +242,7 @@ describe("Timer Autoritativo, Boot Recovery e Encerramento Automático - Integra
         expect(hostLobbyAfterClose.body.room.currentGame.lastClosedRound.id).toBe(round.id);
         expect(hostLobbyAfterClose.body.room.currentGame.lastClosedRound.status).toBe("CLOSED");
         expect(hostLobbyAfterClose.body.room.currentGame.lastClosedRound.unansweredPlayers).toEqual([
-            { id: bob.player.id, nickname: "Bob" },
+            { id: bob.player.id, nickname: "Bob", avatarId: "explorer" },
         ]);
     });
 

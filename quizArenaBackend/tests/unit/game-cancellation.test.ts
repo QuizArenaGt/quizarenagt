@@ -82,7 +82,7 @@ describe("cancelInProgressGameIfInsufficientPlayersTx", () => {
             status: "CANCELLED",
             reason: "INSUFFICIENT_PLAYERS",
             finishedAt: now,
-            ranking: [{ id: "gp-2", nickname: "Bob", score: 150, position: 1 }],
+            ranking: [{ id: "gp-2", nickname: "Bob", avatarId: "explorer", score: 150, position: 1 }],
         });
 
         const txZeroLeft = createTxMock();
