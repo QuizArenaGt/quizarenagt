@@ -1,22 +1,35 @@
-
 import { useState } from 'react';
 import type { ChangeEvent } from 'react';
 
 import './InputPassword.css';
 
 interface InputPasswordProps {
+    id?: string;
+    name?: string;
+    label?: string;
     textPlaceholder?: string;
     password: string;
     setPassword: (password: string) => void;
+    autoComplete?: string;
+    maxLength?: number;
+    disabled?: boolean;
+    error?: string | null;
 }
 
 export default function InputPassword({
+    id = 'password',
+    name,
+    label = 'Senha',
     textPlaceholder,
     password,
-    setPassword
+    setPassword,
+    autoComplete = 'current-password',
+    maxLength,
+    disabled = false,
+    error = null,
 }: InputPasswordProps) {
-
     const [showPassword, setShowPassword] = useState(false);
+    const errorId = `${id}-error`;
 
     function handlePasswordChange(
         event: ChangeEvent<HTMLInputElement>
@@ -30,8 +43,8 @@ export default function InputPassword({
 
     return (
         <div className="input-group">
-            <label htmlFor="password" className="labelInput">
-                Senha
+            <label htmlFor={id} className="labelInput">
+                {label}
             </label>
 
             <div className="input-wrapper">
@@ -54,19 +67,25 @@ export default function InputPassword({
 
                 <input
                     type={showPassword ? 'text' : 'password'}
-                    id="password"
-                    name="password"
+                    id={id}
+                    name={name ?? id}
+                    className="input--with-toggle"
                     placeholder={textPlaceholder || 'Digite sua senha'}
                     value={password}
                     onChange={handlePasswordChange}
-                    autoComplete="current-password"
-                    required
+                    autoComplete={autoComplete}
+                    maxLength={maxLength}
+                    disabled={disabled}
+                    aria-required="true"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
                 />
 
                 <button
                     type="button"
                     className="password-toggle"
                     onClick={handleTogglePassword}
+                    disabled={disabled}
                     aria-label={
                         showPassword
                             ? 'Ocultar senha'
@@ -113,6 +132,12 @@ export default function InputPassword({
                     )}
                 </button>
             </div>
+
+            {error && (
+                <p id={errorId} className="input-error" role="alert">
+                    {error}
+                </p>
+            )}
         </div>
     );
 }

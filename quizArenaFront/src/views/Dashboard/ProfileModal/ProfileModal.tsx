@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react';
+import Alert from '../../../components/ui/Alert/Alert';
+import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
-import Icon from '../../../components/ui/Icon/Icon';
 import Modal from '../../../components/ui/Modal/Modal';
 import {
     NAME_MAX_LENGTH,
@@ -88,9 +89,7 @@ export default function ProfileModal({
                         />
 
                         {savedMessage && (
-                            <p className="profile__success" role="status">
-                                <Icon name="check" size={18} /> {savedMessage}
-                            </p>
+                            <Alert variant="success">{savedMessage}</Alert>
                         )}
 
                         <p className="profile__note">
@@ -102,7 +101,7 @@ export default function ProfileModal({
                             <Button variant="secondary" onClick={onClose}>
                                 Fechar
                             </Button>
-                            <Button type="submit" disabled={isSaving}>
+                            <Button type="submit" isLoading={isSaving}>
                                 {isSaving ? 'Salvando…' : 'Salvar alterações'}
                             </Button>
                         </div>
@@ -113,11 +112,9 @@ export default function ProfileModal({
                             <h3 id="profile-license-title" className="profile__section-title">
                                 Licença
                             </h3>
-                            <span
-                                className={`profile__license-status${license.isActive ? ' is-active' : ''}`}
-                            >
+                            <Badge variant={license.isActive ? 'success' : 'danger'}>
                                 {license.isActive ? 'Ativa' : 'Inativa'}
-                            </span>
+                            </Badge>
                         </div>
                         <p className="profile__plan">{license.planName}</p>
                         <p className="profile__plan-description">{license.description}</p>
@@ -166,7 +163,7 @@ function ProfileInput({ field, label, value, error, hint, onChange, ...inputProp
                 {...inputProps}
             />
             {error && (
-                <p id={errorId} className="profile__error">
+                <p id={errorId} className="profile__error" role="alert">
                     {error}
                 </p>
             )}

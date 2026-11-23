@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import './DashboardForm.css';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import DashboardShell, {
+    type DashboardActiveRoomSummary,
+    type DashboardNavItem,
+    type DashboardTabId,
+} from '../../../components/layout/DashboardShell/DashboardShell';
+import Alert from '../../../components/ui/Alert/Alert';
+import Badge from '../../../components/ui/Badge/Badge';
+import Button from '../../../components/ui/Button/Button';
 import ConfirmDialog from '../../../components/ui/ConfirmDialog/ConfirmDialog';
-import Logo from '../../../components/ui/Logo/Logo';
-import { normalizeRoomCodeInput } from '../../../models/game';
-import { CHOICE_LETTERS, QUESTION_TYPE_LABEL } from '../../../models/question';
+import EmptyState from '../../../components/ui/EmptyState/EmptyState';
+import Icon from '../../../components/ui/Icon/Icon';
+import Modal from '../../../components/ui/Modal/Modal';
+import { LoadingState } from '../../../components/ui/Skeleton/Skeleton';
+import type { Question } from '../../../models/question';
 import {
     GAME_MODE_LABEL,
     MIN_ROOM_PLAYERS,
@@ -15,14 +25,20 @@ import {
     evaluateStartMatchRequirements,
     formatNullableDateTime,
     formatRoomCode,
-    getClipboardRoomCode,
     resolveStartMatchFeedback,
     shouldClearStartMatchFeedbackOnRequirementsMet,
+    type Room,
 } from '../../../models/room';
 import {
+    computeGameHistoryAccuracyRate,
+    filterRoomGamesByStatus,
     formatGameDuration,
     formatGameStatusLabel,
+    formatRate,
+    formatShortGameMode,
+    type GameHistoryStatusFilter,
 } from '../../../models/roomReport';
+import type { ApiGameStatus } from '../../../services/roomStorageService';
 import { useQuestionBankViewModel } from '../../../viewmodels/useQuestionBankViewModel';
 import { useRoomsViewModel } from '../../../viewmodels/useRoomsViewModel';
 import ImportQuestionsModal from '../../../views/Dashboard/ImportQuestionsModal/ImportQuestionsModal';
@@ -30,9 +46,15 @@ import QuestionFormModal from '../../../views/Dashboard/QuestionFormModal/Questi
 import RoomCodeModal from '../../../views/Dashboard/RoomCodeModal/RoomCodeModal';
 import RoomReportModal from '../../../views/Dashboard/RoomReportModal/RoomReportModal';
 import ProfileModal from '../../../views/Dashboard/ProfileModal/ProfileModal';
-import { useProfileViewModel } from '../../../viewmodels/useProfileViewModel';
 import OverviewStats from '../../../views/Dashboard/OverviewStats/OverviewStats';
+import { useProfileViewModel } from '../../../viewmodels/useProfileViewModel';
 import type { GameMode } from '../../../services/socket';
+import RoomDiscoveryList from './RoomDiscoveryList';
+import RoomOverviewStatusBar from './RoomOverviewStatusBar';
+import RoomPlayersCard from './RoomPlayersCard';
+import RoomQuestionsList from './RoomQuestionsList';
+import RoomSettingsSection from './RoomSettingsSection';
+import RoomWorkspaceShell, { type RoomSectionId } from './RoomWorkspaceShell';
 
 interface DashboardFormProps {
     authenticatedUserId?: string | null;
@@ -41,12 +63,35 @@ interface DashboardFormProps {
 export default function DashboardForm({
     authenticatedUserId = null,
 }: DashboardFormProps = {}) {
-    const [activeTab, setActiveTab] = useState<'overview' | 'rooms' | 'questions'>('rooms');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState<DashboardTabId>(() =>
+        searchParams.get('aba') === 'visao-geral' && !searchParams.get('sala')?.trim()
+            ? 'overview'
+            : 'rooms',
+    );
+    const [isManagingRoom, setIsManagingRoom] = useState<boolean>(() =>
+        Boolean(searchParams.get('sala')?.trim()),
+    );
+    const [roomSection, setRoomSection] = useState<RoomSectionId>('overview');
+    const [questionPendingDeletion, setQuestionPendingDeletion] = useState<Question | null>(null);
+    const [isDeletingQuestion, setIsDeletingQuestion] = useState(false);
+    const [gameStatusFilter, setGameStatusFilter] = useState<GameHistoryStatusFilter>('ALL');
     const navigate = useNavigate();
 
     const profileVm = useProfileViewModel();
     const roomsVm = useRoomsViewModel(authenticatedUserId);
     const questionBank = useQuestionBankViewModel(roomsVm.activeRoom?.id ?? null);
+
+    async function handleConfirmDeleteQuestion() {
+        if (!questionPendingDeletion || isDeletingQuestion) return;
+        setIsDeletingQuestion(true);
+        try {
+            await questionBank.deleteQuestion(questionPendingDeletion.id);
+            setQuestionPendingDeletion(null);
+        } finally {
+            setIsDeletingQuestion(false);
+        }
+    }
 
     function handleLogout() {
         roomsVm.resetSessionState();
@@ -55,13 +100,120 @@ export default function DashboardForm({
         navigate('/login');
     }
 
-    function handleCopyRoomCode(event: ClipboardEvent<HTMLElement>, code: string) {
-        event.clipboardData.setData('text/plain', getClipboardRoomCode(code));
-        event.preventDefault();
-    }
-
     const activeRoom = roomsVm.activeRoom;
     const activeRoomId = activeRoom?.id ?? null;
+
+    const navItems: DashboardNavItem[] = [
+        {
+            id: 'overview',
+            label: 'Visão Geral',
+            icon: 'dashboard',
+        },
+        {
+            id: 'rooms',
+            label: 'Salas',
+            icon: 'rooms',
+            badge: roomsVm.rooms.length > 0 ? roomsVm.rooms.length : undefined,
+        },
+    ];
+
+    const activeRoomSummary: DashboardActiveRoomSummary | null = activeRoom
+        ? {
+              name: activeRoom.name,
+              code: formatRoomCode(activeRoom.code),
+              statusLabel: activeRoom.status,
+              statusVariant:
+                  activeRoom.status === 'Aguardando'
+                      ? 'warning'
+                      : activeRoom.status === 'Em Andamento'
+                        ? 'success'
+                        : 'neutral',
+          }
+        : null;
+
+    const showingRoomWorkspace = activeTab === 'rooms' && isManagingRoom && activeRoom !== null;
+
+    const currentHeader =
+        activeTab === 'overview'
+            ? {
+                  title: 'Visão Geral',
+                  subtitle: 'Desempenho analítico dos quizzes e questões, consolidado por sala.',
+              }
+            : showingRoomWorkspace
+              ? {
+                    title: 'Gerenciar Sala',
+                    subtitle: activeRoom.name,
+                }
+              : {
+                    title: 'Salas',
+                    subtitle: 'Escolha uma sala para gerenciar ou crie uma nova arena.',
+                };
+
+    function exitRoomWorkspace() {
+        setIsManagingRoom(false);
+        setSearchParams(
+            (prev) => {
+                if (!prev.has('sala') && !prev.has('aba')) return prev;
+                const next = new URLSearchParams(prev);
+                next.delete('sala');
+                next.delete('aba');
+                return next;
+            },
+            { replace: true },
+        );
+    }
+
+    function handleSelectGlobalTab(tab: DashboardTabId) {
+        setActiveTab(tab);
+        if (tab === 'rooms') {
+            exitRoomWorkspace();
+            return;
+        }
+        setIsManagingRoom(false);
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('sala');
+                next.set('aba', 'visao-geral');
+                return next;
+            },
+            { replace: true },
+        );
+    }
+
+    function handleEnterRoom(room: Room) {
+        const isDifferentRoom = activeRoomId !== room.id;
+        roomsVm.selectRoom(room);
+        setActiveTab('rooms');
+        setIsManagingRoom(true);
+        if (isDifferentRoom) {
+            setRoomSection('overview');
+            setGameStatusFilter('ALL');
+        }
+    }
+
+    function handleOpenActiveRoomFromSidebar() {
+        if (!activeRoom) return;
+        roomsVm.selectRoom(activeRoom);
+        setActiveTab('rooms');
+        setIsManagingRoom(true);
+    }
+
+    function handleBackToRoomsList() {
+        setActiveTab('rooms');
+        exitRoomWorkspace();
+    }
+
+    async function handleRoomModalSubmit(event: FormEvent<HTMLFormElement>) {
+        const wasCreating = !roomsVm.editingRoom;
+        const submitted = await roomsVm.submitRoom(event);
+        if (submitted && wasCreating) {
+            setActiveTab('rooms');
+            setIsManagingRoom(true);
+            setRoomSection('overview');
+        }
+    }
+    const recordedRoomGames = roomsVm.roomGames.filter((item) => item.status !== 'WAITING');
     const activeLobbyPlayersCount = activeRoom
         ? countEligiblePlayers(activeRoom.players)
         : 0;
@@ -107,574 +259,324 @@ export default function DashboardForm({
     ]);
 
     return (
-        <div className="dashboard-container">
-            {/* Menu Lateral */}
-            <aside className="dashboard-sidebar">
-                <div>
-                    <div className="sidebar-header">
-                        <Logo size={36} />
-                        <p>Painel do Anfitrião</p>
-                    </div>
-                    <nav className="sidebar-nav">
-                        <button
-                            className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('overview')}
-                        >
-                            📊 Visão Geral
-                        </button>
-                        <button
-                            className={`nav-item ${activeTab === 'rooms' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('rooms')}
-                        >
-                            🎮 Salas de Quiz
-                        </button>
-                        <button
-                            className={`nav-item ${activeTab === 'questions' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('questions')}
-                        >
-                            ❓ Perguntas da Sala
-                        </button>
-                    </nav>
-                </div>
-                <div className="sidebar-footer">
-                    <button className="logout-btn" onClick={handleLogout}>
-                        Sair da Conta
-                    </button>
-                </div>
-            </aside>
+        <>
+            <DashboardShell
+                navItems={navItems}
+                activeTab={activeTab}
+                onSelectTab={handleSelectGlobalTab}
+                title={currentHeader.title}
+                subtitle={currentHeader.subtitle}
+                activeRoomSummary={activeRoomSummary}
+                isManagingActiveRoom={showingRoomWorkspace}
+                onOpenActiveRoom={handleOpenActiveRoomFromSidebar}
+                userDisplayName={profileVm.displayName}
+                userRoleLabel={profileVm.roleLabel}
+                isProfileAvailable={Boolean(profileVm.profile)}
+                onOpenProfile={profileVm.open}
+                onLogout={handleLogout}
+            >
+                {/* ABA GLOBAL: Visão Geral (Dashboard Analítico por Sala) */}
+                {activeTab === 'overview' && (
+                    <OverviewStats
+                        rooms={roomsVm.rooms}
+                        activeRoomStats={roomsVm.roomStats}
+                        isLoadingHostRooms={roomsVm.isLoadingHostRooms}
+                        onGoToRooms={() => handleSelectGlobalTab('rooms')}
+                    />
+                )}
 
-            {/* Conteúdo Principal */}
-            <main className="dashboard-main">
-                <header className="main-header">
-                    <h1>
-                        {activeTab === 'overview' && 'Visão Geral do Sistema'}
-                        {activeTab === 'rooms' && 'Gerenciamento de Salas e Partida'}
-                        {activeTab === 'questions' && 'Perguntas da Sala'}
-                    </h1>
-                    <button
-                        type="button"
-                        className="user-profile"
-                        onClick={profileVm.open}
-                        aria-label={`Abrir perfil de ${profileVm.displayName}`}
-                        disabled={!profileVm.profile}
+                {/* ABA GLOBAL: Salas — Listagem de descoberta */}
+                {activeTab === 'rooms' && !showingRoomWorkspace && (
+                    <RoomDiscoveryList
+                        rooms={roomsVm.rooms}
+                        activeRoomId={activeRoomId}
+                        activeRoomQuestionCount={questionBank.activeCount}
+                        isLoadingHostRooms={roomsVm.isLoadingHostRooms}
+                        roomActionError={roomsVm.roomActionError}
+                        hostRoomsError={roomsVm.hostRoomsError}
+                        onReloadHostRooms={() => void roomsVm.reloadHostRooms()}
+                        onCreateRoom={roomsVm.openCreate}
+                        onOpenRoom={handleEnterRoom}
+                    />
+                )}
+
+                {/* ABA GLOBAL: Salas — Gerenciamento contextual da sala selecionada */}
+                {showingRoomWorkspace && activeRoom && (
+                    <RoomWorkspaceShell
+                        room={activeRoom}
+                        activeSection={roomSection}
+                        questionCount={questionBank.activeCount}
+                        gamesCount={recordedRoomGames.length}
+                        onSelectSection={setRoomSection}
+                        onBackToList={handleBackToRoomsList}
+                        onShowCode={roomsVm.showCode}
                     >
-                        {profileVm.displayName} - {profileVm.roleLabel}
-                    </button>
-                </header>
+                        {roomsVm.roomActionError && (
+                            <Alert variant="error" className="room-form-error">
+                                {roomsVm.roomActionError}
+                            </Alert>
+                        )}
 
-                <div className="main-content">
-                    {/* ABA: Visão Geral */}
-                    {activeTab === 'overview' && (
-                        <>
-                            <div className="overview-grid">
-                                <div className="stat-card">
-                                    <span>Salas na Sessão</span>
-                                    <h3>{roomsVm.rooms.length}</h3>
-                                </div>
-                                <div className="stat-card">
-                                    <span>Perguntas na Sala Ativa</span>
-                                    <h3>{questionBank.activeCount}</h3>
-                                </div>
-                                <div className="stat-card">
-                                    <span>Salas Finalizadas</span>
-                                    <h3>
-                                        {roomsVm.rooms.filter((room) => room.status === 'Finalizado').length}
-                                    </h3>
-                                </div>
-                            </div>
-                            <div className="welcome-banner">
-                                <h2>Bem-vindo ao Painel da Quiz Arena</h2>
-                                <p>
-                                    Crie uma sala, cadastre pelo menos {MIN_ROOM_QUESTIONS} perguntas, compartilhe o
-                                    código com os jogadores e conduza a partida em tempo real.
-                                </p>
-                            </div>
+                        {/* SEÇÃO INTERNA: Visão geral da sala (Painel de Controle + Lobby / Placar ao Vivo) */}
+                        {roomSection === 'overview' && (
+                            <div className="room-overview-stack">
+                                <RoomOverviewStatusBar
+                                    room={activeRoom}
+                                    canStart={startRequirements.canStart}
+                                    activePlayersCount={activeLobbyPlayersCount}
+                                    activeQuestionsCount={questionBank.activeCount}
+                                    activeRoundNumber={roomsVm.activeRound?.roundNumber ?? null}
+                                    closedRoundNumber={roomsVm.closedRound?.roundNumber ?? null}
+                                    answeredCount={roomsVm.answeredPlayers.length}
+                                    gamesCount={recordedRoomGames.length}
+                                />
 
-                            <OverviewStats
-                                rooms={roomsVm.rooms}
-                                questions={questionBank.questions}
-                                onOpenReport={(room) => roomsVm.openReport(room, questionBank.questions)}
-                            />
-                        </>
-                    )}
-
-                    {/* ABA: Salas */}
-                    {activeTab === 'rooms' && (
-                        <div>
-                            <div className="section-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
-                                <h2>Salas de Quiz</h2>
-                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                    <form
-                                        onSubmit={roomsVm.handleLookupRoom}
-                                        style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
-                                    >
-                                        <input
-                                            type="text"
-                                            value={roomsVm.lookupCode}
-                                            onChange={(e) =>
-                                                roomsVm.setLookupCode(
-                                                    normalizeRoomCodeInput(e.target.value),
-                                                )
-                                            }
-                                            placeholder="Abrir por código (ex: A1B2C3)"
-                                            style={{
-                                                padding: '8px 12px',
-                                                borderRadius: '8px',
-                                                border: '1px solid #cbd5e1',
-                                                fontSize: '0.9rem',
-                                                width: '210px',
-                                            }}
-                                        />
-                                        <button
-                                            type="submit"
-                                            className="secondary-btn"
-                                            disabled={roomsVm.isLoadingRoom || roomsVm.lookupCode.length !== 6}
-                                        >
-                                            {roomsVm.isLoadingRoom ? 'Buscando…' : 'Carregar Sala'}
-                                        </button>
-                                    </form>
-                                    <button className="primary-btn" onClick={roomsVm.openCreate}>
-                                        + Criar Nova Sala
-                                    </button>
-                                </div>
-                            </div>
-
-                            {roomsVm.roomActionError && (
-                                <p className="room-form-error" role="alert" style={{ marginBottom: '16px' }}>
-                                    {roomsVm.roomActionError}
-                                </p>
-                            )}
-
-                            {roomsVm.hostRoomsError && (
-                                <div
-                                    className="room-form-error"
-                                    role="alert"
-                                    style={{
-                                        marginBottom: '16px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        gap: '12px',
-                                        flexWrap: 'wrap',
-                                    }}
-                                >
-                                    <span>{roomsVm.hostRoomsError}</span>
-                                    <button
-                                        type="button"
-                                        className="secondary-btn"
-                                        onClick={() => void roomsVm.reloadHostRooms()}
-                                    >
-                                        Tentar novamente
-                                    </button>
-                                </div>
-                            )}
-
-                            {roomsVm.isLoadingHostRooms && roomsVm.rooms.length === 0 ? (
-                                <div className="welcome-banner" style={{ marginBottom: '24px' }}>
-                                    <h2>Carregando suas salas…</h2>
-                                    <p>Recuperando as salas criadas na sua conta.</p>
-                                </div>
-                            ) : roomsVm.rooms.length === 0 ? (
-                                <div className="welcome-banner" style={{ marginBottom: '24px' }}>
-                                    <h2>Nenhuma sala aberta</h2>
-                                    <p>
-                                        Clique em <strong>+ Criar Nova Sala</strong> para gerar um código no servidor,
-                                        ou carregue uma sala existente informando seu código de 6 caracteres.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="rooms-grid" style={{ marginBottom: '28px' }}>
-                                    {roomsVm.rooms.map((room) => {
-                                        const isSelected = activeRoom?.id === room.id;
-                                        return (
-                                            <div
-                                                className="room-card"
-                                                key={room.id}
-                                                onClick={() => roomsVm.selectRoom(room)}
-                                                style={{
-                                                    cursor: 'pointer',
-                                                    outline: isSelected ? '2px solid #2563eb' : undefined,
-                                                }}
-                                            >
-                                                <div className="room-info">
-                                                    <div className="room-info__top">
-                                                        <span className="room-theme">
-                                                            {room.theme} · {room.gameMode}
-                                                        </span>
-                                                        <div
-                                                            className="room-manage"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        >
-                                                            {room.backendStatus === 'WAITING' && (
-                                                                <button
-                                                                    type="button"
-                                                                    className="btn-icon"
-                                                                    onClick={() => roomsVm.openEdit(room)}
-                                                                    aria-label={`Editar sala ${room.name}`}
-                                                                >
-                                                                    Editar
-                                                                </button>
-                                                            )}
-                                                            <button
-                                                                type="button"
-                                                                className="btn-icon danger"
-                                                                onClick={() => roomsVm.requestDelete(room)}
-                                                                aria-label={`Excluir sala ${room.name}`}
-                                                            >
-                                                                Excluir
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                    <h3>{room.name}</h3>
-                                                    <p>
-                                                        Tempo por questão: {room.timeLimit}s · Máx: {room.maxPlayers}{' '}
-                                                        jogadores
-                                                    </p>
-                                                    <p>
-                                                        Jogadores no lobby: <strong>{room.players.length}</strong>
-                                                        {isSelected && (
-                                                            <>
-                                                                {' '}
-                                                                · Perguntas ativas:{' '}
-                                                                <strong>{questionBank.activeCount}</strong>
-                                                            </>
-                                                        )}
-                                                    </p>
-                                                </div>
-
-                                                <button
-                                                    type="button"
-                                                    className="room-code-chip"
-                                                    onCopy={(e) => handleCopyRoomCode(e, room.code)}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        roomsVm.showCode(room);
-                                                    }}
-                                                    aria-label={`Mostrar código da sala ${room.name} para a turma`}
-                                                >
-                                                    <span className="room-code-chip__label">Código</span>
-                                                    <span className="room-code-chip__value">
-                                                        {formatRoomCode(room.code)}
-                                                    </span>
-                                                    <span className="room-code-chip__action">Projetar</span>
-                                                </button>
-
+                                <div className="room-overview-grid">
+                                    {/* Controle da sala e condução da partida */}
+                                    <section className="room-detail-card room-detail-card--surface" aria-label="Controle da partida">
+                                        {activeRoom.backendStatus === 'WAITING' && (
+                                            <>
                                                 <div>
-                                                    <span
-                                                        className={`status-badge ${
-                                                            room.status === 'Aguardando'
-                                                                ? 'waiting'
-                                                                : room.status === 'Em Andamento'
-                                                                  ? 'active'
-                                                                  : 'finished'
-                                                        }`}
-                                                    >
-                                                        {room.status}
-                                                    </span>
-                                                </div>
-
-                                                <div className="room-actions" onClick={(e) => e.stopPropagation()}>
-                                                    <button
-                                                        type="button"
-                                                        className="action-btn start"
-                                                        onClick={() => roomsVm.selectRoom(room)}
-                                                    >
-                                                        {isSelected ? 'Sala Selecionada' : 'Gerenciar Sala'}
-                                                    </button>
-                                                    {room.backendStatus === 'IN_PROGRESS' && (
-                                                        <button
-                                                            type="button"
-                                                            className="action-btn finish"
-                                                            disabled={roomsVm.isFinishingMatch}
-                                                            onClick={() => roomsVm.requestFinishMatch(room)}
-                                                        >
-                                                            Encerrar Partida
-                                                        </button>
-                                                    )}
-                                                    {room.status === 'Finalizado' && (
-                                                        <>
-                                                            <button
-                                                                type="button"
-                                                                className="action-btn results"
-                                                                onClick={() =>
-                                                                    roomsVm.openReport(room, questionBank.questions)
-                                                                }
-                                                            >
-                                                                Ver resultados
-                                                            </button>
-                                                            {canPlayAgain(room) && (
-                                                                <button
-                                                                    type="button"
-                                                                    className="action-btn start"
-                                                                    disabled={roomsVm.isPlayingAgain}
-                                                                    onClick={() => void roomsVm.playAgain(room)}
-                                                                >
-                                                                    {roomsVm.isPlayingAgain
-                                                                        ? 'Preparando…'
-                                                                        : 'Jogar novamente'}
-                                                                </button>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-
-                            {/* PAINEL DETALHADO DA SALA SELECIONADA (Perguntas + Lobby + Partida em Tempo Real) */}
-                            {activeRoom && (
-                                <section
-                                    aria-label={`Painel da sala ${activeRoom.name}`}
-                                    style={{
-                                        background: '#ffffff',
-                                        border: '1px solid #e2e8f0',
-                                        borderRadius: '16px',
-                                        padding: '24px',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '24px',
-                                    }}
-                                >
-                                    <div
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            flexWrap: 'wrap',
-                                            gap: '12px',
-                                            borderBottom: '1px solid #e2e8f0',
-                                            paddingBottom: '16px',
-                                        }}
-                                    >
-                                        <div>
-                                            <h2 style={{ margin: 0 }}>
-                                                {activeRoom.name} — Código:{' '}
-                                                <strong style={{ color: '#2563eb', letterSpacing: '1px' }}>
-                                                    {activeRoom.code}
-                                                </strong>
-                                            </h2>
-                                            <p style={{ margin: '4px 0 0', color: '#475569' }}>
-                                                Status: <strong>{activeRoom.status}</strong> · Modo:{' '}
-                                                <strong>{GAME_MODE_LABEL[activeRoom.gameMode]}</strong> · Tempo por
-                                                pergunta: <strong>{activeRoom.timeLimit}s</strong>
-                                            </p>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                                            <button
-                                                type="button"
-                                                className="secondary-btn"
-                                                onCopy={(e) => handleCopyRoomCode(e, activeRoom.code)}
-                                                onClick={() => roomsVm.showCode(activeRoom)}
-                                            >
-                                                Projetar Código ({formatRoomCode(activeRoom.code)})
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* BLOCO 1: LOBBY E CONTROLE DA PARTIDA */}
-                                    <div
-                                        style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                                            gap: '20px',
-                                        }}
-                                    >
-                                        {/* Jogadores em tempo real */}
-                                        <div
-                                            style={{
-                                                background: '#f8fafc',
-                                                border: '1px solid #e2e8f0',
-                                                borderRadius: '12px',
-                                                padding: '16px',
-                                            }}
-                                        >
-                                            <h3 style={{ marginTop: 0 }}>
-                                                Jogadores na Sala ({activeRoom.players.length} /{' '}
-                                                {activeRoom.maxPlayers})
-                                            </h3>
-                                            {activeRoom.players.length === 0 ? (
-                                                <p style={{ color: '#64748b' }}>
-                                                    Aguardando jogadores entrarem em <strong>/jogar</strong> com o
-                                                    código <strong>{activeRoom.code}</strong>…
-                                                </p>
-                                            ) : (
-                                                <ol style={{ margin: 0, paddingLeft: '20px' }}>
-                                                    {[...activeRoom.players]
-                                                        .sort((a, b) => b.score - a.score)
-                                                        .map((player) => (
-                                                            <li
-                                                                key={player.id}
-                                                                style={{
-                                                                    padding: '6px 0',
-                                                                    display: 'flex',
-                                                                    justifyContent: 'space-between',
-                                                                    borderBottom: '1px solid #e2e8f0',
-                                                                }}
-                                                            >
-                                                                <strong>
-                                                                    {player.nickname}
-                                                                    {player.status === 'LEFT'
-                                                                        ? ' (saiu)'
-                                                                        : player.status === 'ABANDONED'
-                                                                          ? ' (abandonou)'
-                                                                          : ''}
-                                                                </strong>
-                                                                <span>{player.score} pts</span>
-                                                            </li>
-                                                        ))}
-                                                </ol>
-                                            )}
-                                        </div>
-
-                                        {/* Controle de início e rodadas */}
-                                        <div
-                                            style={{
-                                                background: '#f8fafc',
-                                                border: '1px solid #e2e8f0',
-                                                borderRadius: '12px',
-                                                padding: '16px',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                justifyContent: 'space-between',
-                                                gap: '12px',
-                                            }}
-                                        >
-                                            {activeRoom.backendStatus === 'WAITING' && (
-                                                <>
-                                                    <div>
-                                                        <h3 style={{ marginTop: 0 }}>Requisitos para Iniciar</h3>
-                                                        <ul style={{ margin: 0, paddingLeft: '20px', lineHeight: 1.7 }}>
-                                                            <li
-                                                                style={{
-                                                                    color: !startRequirements.missingQuestions
-                                                                        ? '#15803d'
-                                                                        : '#b45309',
-                                                                }}
-                                                            >
-                                                                Perguntas ativas na sala:{' '}
-                                                                <strong>
-                                                                    {startRequirements.currentQuestions} / mín.{' '}
-                                                                    {MIN_ROOM_QUESTIONS}
-                                                                </strong>{' '}
-                                                                {!startRequirements.missingQuestions
-                                                                    ? '✓ Atendido'
-                                                                    : `(falta${startRequirements.missingQuestionsCount === 1 ? '' : 'm'} ${startRequirements.missingQuestionsCount} — cadastre ou importe abaixo)`}
-                                                            </li>
-                                                            <li
-                                                                style={{
-                                                                    color: !startRequirements.missingPlayers
-                                                                        ? '#15803d'
-                                                                        : '#b45309',
-                                                                }}
-                                                            >
-                                                                Jogadores ativos no lobby:{' '}
-                                                                <strong>
-                                                                    {startRequirements.currentPlayers} / mín.{' '}
-                                                                    {MIN_ROOM_PLAYERS}
-                                                                </strong>{' '}
-                                                                {!startRequirements.missingPlayers
-                                                                    ? '✓ Atendido'
-                                                                    : `(falta${startRequirements.missingPlayersCount === 1 ? '' : 'm'} ${startRequirements.missingPlayersCount} — aguardando jogadores)`}
-                                                            </li>
-                                                        </ul>
+                                                    <div className="room-detail-card__head room-detail-card__head--split">
+                                                        <div>
+                                                            <h3>Preparação para Iniciar</h3>
+                                                            <p className="room-detail-card__desc">
+                                                                Verifique os requisitos mínimos antes de liberar a primeira rodada.
+                                                            </p>
+                                                        </div>
+                                                        <Badge variant={startRequirements.canStart ? 'success' : 'warning'}>
+                                                            {startRequirements.canStart ? 'Tudo pronto' : 'Pendente'}
+                                                        </Badge>
                                                     </div>
 
-                                                    {startMatchFeedback && (
-                                                        <p className="room-form-error" role="alert" style={{ margin: 0 }}>
-                                                            {startMatchFeedback}
+                                                    <ul className="room-checklist">
+                                                        <li
+                                                            className={`room-checklist__item ${
+                                                                !startRequirements.missingQuestions
+                                                                    ? 'is-met'
+                                                                    : 'is-pending'
+                                                            }`}
+                                                        >
+                                                            <span className="room-checklist__icon" aria-hidden="true">
+                                                                <Icon
+                                                                    name={!startRequirements.missingQuestions ? 'check' : 'questions'}
+                                                                    size={16}
+                                                                />
+                                                            </span>
+                                                            <div className="room-checklist__content">
+                                                                <div className="room-checklist__title-row">
+                                                                    <strong>Perguntas ativas</strong>
+                                                                    <span className="room-checklist__ratio">
+                                                                        {startRequirements.currentQuestions} / mín.{' '}
+                                                                        {MIN_ROOM_QUESTIONS}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="room-checklist__hint">
+                                                                    {!startRequirements.missingQuestions
+                                                                        ? 'Quantidade mínima atendida.'
+                                                                        : `Falta${startRequirements.missingQuestionsCount === 1 ? '' : 'm'} ${startRequirements.missingQuestionsCount} ${startRequirements.missingQuestionsCount === 1 ? 'pergunta' : 'perguntas'} para iniciar.`}
+                                                                </p>
+                                                            </div>
+                                                            <div className="room-checklist__status">
+                                                                {!startRequirements.missingQuestions ? (
+                                                                    <Badge variant="success">Atendido</Badge>
+                                                                ) : (
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="secondary"
+                                                                        size="sm"
+                                                                        onClick={() => setRoomSection('questions')}
+                                                                    >
+                                                                        Adicionar perguntas
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        </li>
+
+                                                        <li
+                                                            className={`room-checklist__item ${
+                                                                !startRequirements.missingPlayers
+                                                                    ? 'is-met'
+                                                                    : 'is-pending'
+                                                            }`}
+                                                        >
+                                                            <span className="room-checklist__icon" aria-hidden="true">
+                                                                <Icon
+                                                                    name={!startRequirements.missingPlayers ? 'check' : 'users'}
+                                                                    size={16}
+                                                                />
+                                                            </span>
+                                                            <div className="room-checklist__content">
+                                                                <div className="room-checklist__title-row">
+                                                                    <strong>Jogadores no lobby</strong>
+                                                                    <span className="room-checklist__ratio">
+                                                                        {startRequirements.currentPlayers} / mín.{' '}
+                                                                        {MIN_ROOM_PLAYERS}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="room-checklist__hint">
+                                                                    {!startRequirements.missingPlayers
+                                                                        ? 'Mínimo de participantes conectados.'
+                                                                        : `Falta${startRequirements.missingPlayersCount === 1 ? '' : 'm'} ${startRequirements.missingPlayersCount} ${startRequirements.missingPlayersCount === 1 ? 'jogador' : 'jogadores'} conectado${startRequirements.missingPlayersCount === 1 ? '' : 's'}.`}
+                                                                </p>
+                                                            </div>
+                                                            <div className="room-checklist__status">
+                                                                <Badge
+                                                                    variant={
+                                                                        !startRequirements.missingPlayers
+                                                                            ? 'success'
+                                                                            : 'warning'
+                                                                    }
+                                                                >
+                                                                    {!startRequirements.missingPlayers
+                                                                        ? 'Atendido'
+                                                                        : 'Aguardando'}
+                                                                </Badge>
+                                                            </div>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+
+                                                {startMatchFeedback && (
+                                                    <Alert variant="error">{startMatchFeedback}</Alert>
+                                                )}
+
+                                                <div className="room-start-cta-group">
+                                                    <Button
+                                                        type="button"
+                                                        variant={startRequirements.canStart ? 'primary' : 'secondary'}
+                                                        size="lg"
+                                                        fullWidth
+                                                        disabled={roomsVm.isStartingMatch}
+                                                        isLoading={roomsVm.isStartingMatch}
+                                                        onClick={() => void roomsVm.startMatch(activeRoom)}
+                                                    >
+                                                        <Icon name="play" size={16} />
+                                                        <span>
+                                                            {roomsVm.isStartingMatch
+                                                                ? 'Iniciando Partida…'
+                                                                : 'Iniciar Partida'}
+                                                        </span>
+                                                    </Button>
+                                                    {!startRequirements.canStart && (
+                                                        <p className="room-start-hint">
+                                                            Atenda os dois requisitos acima para iniciar a partida sem bloqueios.
                                                         </p>
                                                     )}
+                                                </div>
+                                            </>
+                                        )}
 
-                                                    <button
-                                                        type="button"
-                                                        className="primary-btn"
-                                                        disabled={roomsVm.isStartingMatch}
-                                                        onClick={() => void roomsVm.startMatch(activeRoom)}
-                                                        style={{ width: '100%', padding: '12px' }}
-                                                    >
-                                                        {roomsVm.isStartingMatch
-                                                            ? 'Iniciando Partida…'
-                                                            : '🚀 Iniciar Partida'}
-                                                    </button>
-                                                </>
-                                            )}
-
-                                            {activeRoom.backendStatus === 'IN_PROGRESS' && (
-                                                <>
-                                                    {roomsVm.activeRound ? (
-                                                        <div>
-                                                            <div
-                                                                style={{
-                                                                    display: 'flex',
-                                                                    justifyContent: 'space-between',
-                                                                    alignItems: 'center',
-                                                                    marginBottom: '8px',
-                                                                }}
-                                                            >
-                                                                <strong>
-                                                                    Rodada {roomsVm.activeRound.roundNumber} em
-                                                                    andamento
-                                                                </strong>
-                                                                <span
-                                                                    className="status-badge active"
-                                                                    style={{ fontSize: '1rem' }}
-                                                                >
-                                                                    ⏱ {roomsVm.roundRemainingSeconds}s
+                                        {activeRoom.backendStatus === 'IN_PROGRESS' && (
+                                            <div className="room-round-panel">
+                                                {roomsVm.activeRound ? (
+                                                    <div className="room-round-panel__body">
+                                                        <div className="room-round-panel__top">
+                                                            <div>
+                                                                <span className="room-round-eyebrow">
+                                                                    {questionBank.activeCount > 0
+                                                                        ? `Rodada ${roomsVm.activeRound.roundNumber} de ${questionBank.activeCount}`
+                                                                        : `Rodada ${roomsVm.activeRound.roundNumber}`}
                                                                 </span>
+                                                                <h3>Pergunta em andamento</h3>
                                                             </div>
-                                                            <p
-                                                                style={{
-                                                                    fontSize: '1.05rem',
-                                                                    fontWeight: 600,
-                                                                    margin: '8px 0',
-                                                                }}
+                                                            <Badge
+                                                                variant={
+                                                                    roomsVm.roundRemainingSeconds <= 5
+                                                                        ? 'warning'
+                                                                        : 'success'
+                                                                }
                                                             >
+                                                                <Icon name="timer" size={14} />
+                                                                <span>{roomsVm.roundRemainingSeconds}s</span>
+                                                            </Badge>
+                                                        </div>
+
+                                                        <div className="room-question-spotlight">
+                                                            <p className="room-round-panel__statement">
                                                                 {roomsVm.activeRound.question.statement}
                                                             </p>
-                                                            <p style={{ color: '#475569', margin: '8px 0' }}>
-                                                                Respostas recebidas:{' '}
+                                                        </div>
+
+                                                        <div className="room-response-progress">
+                                                            <div className="room-response-progress__row">
+                                                                <span>Respostas recebidas</span>
                                                                 <strong>
                                                                     {roomsVm.answeredPlayers.length} de{' '}
                                                                     {countEligiblePlayers(activeRoom.players)}
                                                                 </strong>
-                                                                {roomsVm.answeredPlayers.length > 0 && (
-                                                                    <>
-                                                                        {' '}
-                                                                        (
-                                                                        {roomsVm.answeredPlayers
-                                                                            .map((p) => p.nickname)
-                                                                            .join(', ')}
-                                                                        )
-                                                                    </>
-                                                                )}
-                                                            </p>
-                                                            <button
-                                                                type="button"
-                                                                className="secondary-btn"
-                                                                onClick={() => void roomsVm.closeCurrentRound()}
-                                                                disabled={roomsVm.isClosingRound}
-                                                                style={{ width: '100%', marginTop: '8px' }}
+                                                            </div>
+                                                            <div
+                                                                className="room-progress-track"
+                                                                aria-hidden="true"
                                                             >
-                                                                {roomsVm.isClosingRound
-                                                                    ? 'Encerrando Rodada…'
-                                                                    : 'Encerrar Rodada'}
-                                                            </button>
+                                                                <div
+                                                                    className="room-progress-fill"
+                                                                    style={{
+                                                                        width: `${Math.min(
+                                                                            100,
+                                                                            Math.round(
+                                                                                (roomsVm.answeredPlayers.length /
+                                                                                    Math.max(
+                                                                                        1,
+                                                                                        countEligiblePlayers(
+                                                                                            activeRoom.players,
+                                                                                        ),
+                                                                                    )) *
+                                                                                    100,
+                                                                            ),
+                                                                        )}%`,
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            {roomsVm.answeredPlayers.length > 0 && (
+                                                                <p className="room-round-panel__responses">
+                                                                    Responderam:{' '}
+                                                                    {roomsVm.answeredPlayers
+                                                                        .map((p) => p.nickname)
+                                                                        .join(', ')}
+                                                                </p>
+                                                            )}
                                                         </div>
-                                                    ) : roomsVm.closedRound ? (
-                                                        <div>
-                                                            <h3 style={{ marginTop: 0 }}>
-                                                                Rodada {roomsVm.closedRound.roundNumber} Encerrada
-                                                            </h3>
-                                                            <p style={{ margin: '6px 0' }}>
-                                                                Pergunta:{' '}
-                                                                <strong>
-                                                                    {roomsVm.closedRound.question.statement}
-                                                                </strong>
+
+                                                        <Button
+                                                            type="button"
+                                                            variant="primary"
+                                                            size="lg"
+                                                            fullWidth
+                                                            onClick={() => void roomsVm.closeCurrentRound()}
+                                                            disabled={roomsVm.isClosingRound}
+                                                            isLoading={roomsVm.isClosingRound}
+                                                        >
+                                                            {roomsVm.isClosingRound
+                                                                ? 'Encerrando Rodada…'
+                                                                : 'Encerrar Rodada'}
+                                                        </Button>
+                                                    </div>
+                                                ) : roomsVm.closedRound ? (
+                                                    <div className="room-round-panel__body">
+                                                        <div className="room-round-panel__top">
+                                                            <div>
+                                                                <span className="room-round-eyebrow">
+                                                                    {questionBank.activeCount > 0
+                                                                        ? `Rodada ${roomsVm.closedRound.roundNumber} de ${questionBank.activeCount}`
+                                                                        : `Rodada ${roomsVm.closedRound.roundNumber}`}
+                                                                </span>
+                                                                <h3>Rodada encerrada</h3>
+                                                            </div>
+                                                            <Badge variant="info">Aguardando avanço</Badge>
+                                                        </div>
+
+                                                        <div className="room-question-spotlight">
+                                                            <p className="room-round-panel__statement">
+                                                                {roomsVm.closedRound.question.statement}
                                                             </p>
-                                                            <p style={{ margin: '6px 0', color: '#15803d' }}>
-                                                                Resposta Correta:{' '}
+                                                        </div>
+
+                                                        <div className="room-round-panel__answer">
+                                                            <Icon name="check" size={16} />
+                                                            <span>
+                                                                Resposta correta:{' '}
                                                                 <strong>
                                                                     {
                                                                         roomsVm.closedRound.question.options.find(
@@ -682,579 +584,668 @@ export default function DashboardForm({
                                                                         )?.text
                                                                     }
                                                                 </strong>
+                                                            </span>
+                                                        </div>
+
+                                                        <Button
+                                                            type="button"
+                                                            variant="primary"
+                                                            size="lg"
+                                                            fullWidth
+                                                            disabled={roomsVm.isAdvancingRound}
+                                                            isLoading={roomsVm.isAdvancingRound}
+                                                            onClick={() => void roomsVm.advanceToNextRound()}
+                                                        >
+                                                            {roomsVm.isAdvancingRound
+                                                                ? 'Avançando…'
+                                                                : 'Próxima Rodada / Finalizar Partida'}
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="room-round-panel__body">
+                                                        <div className="room-detail-card__head">
+                                                            <h3>Partida pronta para começar</h3>
+                                                            <p className="room-detail-card__desc">
+                                                                Abra a próxima rodada para enviar a pergunta e iniciar o cronômetro dos jogadores.
                                                             </p>
-                                                            <button
-                                                                type="button"
-                                                                className="primary-btn"
-                                                                disabled={roomsVm.isAdvancingRound}
-                                                                onClick={() => void roomsVm.advanceToNextRound()}
-                                                                style={{ width: '100%', marginTop: '12px' }}
-                                                            >
-                                                                {roomsVm.isAdvancingRound
-                                                                    ? 'Avançando…'
-                                                                    : '▶ Próxima Rodada / Finalizar Partida'}
-                                                            </button>
                                                         </div>
-                                                    ) : (
-                                                        <div>
-                                                            <p>Partida iniciada. Abra a próxima rodada:</p>
-                                                            <button
-                                                                type="button"
-                                                                className="primary-btn"
-                                                                disabled={roomsVm.isAdvancingRound}
-                                                                onClick={() => void roomsVm.advanceToNextRound()}
-                                                            >
-                                                                Abrir Próxima Rodada
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                    <button
+                                                        <Button
+                                                            type="button"
+                                                            variant="primary"
+                                                            size="lg"
+                                                            fullWidth
+                                                            disabled={roomsVm.isAdvancingRound}
+                                                            isLoading={roomsVm.isAdvancingRound}
+                                                            onClick={() => void roomsVm.advanceToNextRound()}
+                                                        >
+                                                            Abrir Próxima Rodada
+                                                        </Button>
+                                                    </div>
+                                                )}
+
+                                                <div className="room-control-danger-footer">
+                                                    <span>Precisa finalizar antes de concluir as rodadas?</span>
+                                                    <Button
                                                         type="button"
-                                                        className="action-btn finish"
+                                                        variant="danger"
+                                                        size="sm"
                                                         disabled={roomsVm.isFinishingMatch}
+                                                        isLoading={roomsVm.isFinishingMatch}
                                                         onClick={() => roomsVm.requestFinishMatch(activeRoom)}
-                                                        style={{ width: '100%', padding: '10px', marginTop: '4px' }}
                                                     >
                                                         {roomsVm.isFinishingMatch
                                                             ? 'Encerrando Partida…'
                                                             : 'Encerrar Partida'}
-                                                    </button>
-                                                </>
-                                            )}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
 
-                                            {canPlayAgain(activeRoom) && (
-                                                <div>
-                                                    <h3
-                                                        style={{
-                                                            marginTop: 0,
-                                                            color:
+                                        {canPlayAgain(activeRoom) && (
+                                            <div className="room-finished-panel">
+                                                <div className="room-detail-card__head room-detail-card__head--split">
+                                                    <div>
+                                                        <h3
+                                                            className={
                                                                 activeRoom.backendStatus === 'CANCELLED'
-                                                                    ? '#b45309'
-                                                                    : '#15803d',
-                                                        }}
-                                                    >
-                                                        {activeRoom.backendStatus === 'FINISHED'
-                                                            ? '🏁 Partida Finalizada!'
-                                                            : activeRoom.backendStatus === 'CANCELLED'
-                                                              ? 'Partida Cancelada'
-                                                              : 'Partida Encerrada'}
-                                                    </h3>
-                                                    <p>
-                                                        {activeRoom.backendStatus === 'CANCELLED'
-                                                            ? 'A partida foi cancelada porque o número de jogadores ativos ficou abaixo do mínimo de 2 participantes. Não houve vencedor automático.'
-                                                            : 'Todas as rodadas foram concluídas e a pontuação final está consolidada no placar ao lado.'}
-                                                    </p>
-                                                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                                                        <button
-                                                            type="button"
-                                                            className="primary-btn"
-                                                            disabled={roomsVm.isPlayingAgain}
-                                                            onClick={() => void roomsVm.playAgain(activeRoom)}
-                                                        >
-                                                            {roomsVm.isPlayingAgain
-                                                                ? 'Preparando nova partida…'
-                                                                : '🔄 Jogar novamente'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="secondary-btn"
-                                                            onClick={() =>
-                                                                roomsVm.openReport(activeRoom, questionBank.questions)
+                                                                    ? 'room-finished-title--cancelled'
+                                                                    : 'room-finished-title--completed'
                                                             }
                                                         >
-                                                            Ver Relatório Completo da Partida
-                                                        </button>
+                                                            {activeRoom.backendStatus === 'FINISHED'
+                                                                ? 'Partida Finalizada'
+                                                                : activeRoom.backendStatus === 'CANCELLED'
+                                                                  ? 'Partida Cancelada'
+                                                                  : 'Partida Encerrada'}
+                                                        </h3>
+                                                        <p className="room-detail-card__desc">
+                                                            {activeRoom.backendStatus === 'CANCELLED'
+                                                                ? 'Esta sessão foi cancelada automaticamente.'
+                                                                : 'Todas as rodadas foram concluídas com sucesso.'}
+                                                        </p>
                                                     </div>
+                                                    <Badge
+                                                        variant={
+                                                            activeRoom.backendStatus === 'CANCELLED'
+                                                                ? 'warning'
+                                                                : 'success'
+                                                        }
+                                                    >
+                                                        {activeRoom.backendStatus === 'CANCELLED'
+                                                            ? 'Cancelada'
+                                                            : 'Concluída'}
+                                                    </Badge>
                                                 </div>
-                                            )}
-                                        </div>
-                                    </div>
 
-                                    {/* BLOCO HISTÓRICO DE PARTIDAS PERSISTIDAS */}
-                                    <div
-                                        style={{
-                                            background: '#f8fafc',
-                                            border: '1px solid #e2e8f0',
-                                            borderRadius: '12px',
-                                            padding: '16px',
-                                        }}
-                                    >
-                                        <div
-                                            className="section-header"
-                                            style={{ marginBottom: '12px', alignItems: 'center' }}
-                                        >
-                                            <div>
-                                                <h3 style={{ margin: 0 }}>
-                                                    Histórico de Partidas ({roomsVm.roomGames.length})
-                                                </h3>
-                                                <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.9rem' }}>
-                                                    Partidas anteriores e atual persistidas no servidor para esta sala.
-                                                </p>
+                                                {activeRoom.backendStatus === 'CANCELLED' ? (
+                                                    <Alert variant="warning">
+                                                        A partida foi cancelada porque o número de jogadores ativos ficou abaixo do mínimo de 2 participantes. Não houve vencedor automático.
+                                                    </Alert>
+                                                ) : (
+                                                    <p className="room-detail-empty-hint">
+                                                        A classificação final e o relatório completo desta partida já estão disponíveis para consulta.
+                                                    </p>
+                                                )}
+
+                                                <div className="room-finished-actions">
+                                                    <Button
+                                                        type="button"
+                                                        variant="primary"
+                                                        size="lg"
+                                                        disabled={roomsVm.isPlayingAgain}
+                                                        isLoading={roomsVm.isPlayingAgain}
+                                                        onClick={() => void roomsVm.playAgain(activeRoom)}
+                                                    >
+                                                        {roomsVm.isPlayingAgain
+                                                            ? 'Preparando nova partida…'
+                                                            : 'Jogar novamente'}
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="secondary"
+                                                        size="md"
+                                                        onClick={() =>
+                                                            roomsVm.openReport(activeRoom, questionBank.questions)
+                                                        }
+                                                    >
+                                                        Ver Relatório Completo da Partida
+                                                    </Button>
+                                                </div>
                                             </div>
-                                            <button
+                                        )}
+                                    </section>
+
+                                    {/* Lobby em tempo real / Placar */}
+                                    <RoomPlayersCard
+                                        players={activeRoom.players}
+                                        maxPlayers={activeRoom.maxPlayers}
+                                        activePlayersCount={activeLobbyPlayersCount}
+                                        roomStatus={activeRoom.backendStatus}
+                                        answeredPlayerIds={roomsVm.answeredPlayers.map((p) => p.id)}
+                                        hasOpenRound={Boolean(roomsVm.activeRound)}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* SEÇÃO INTERNA: Perguntas da sala */}
+                        {roomSection === 'questions' && (
+                            <div className="room-section-surface">
+                                <div className="room-section-header">
+                                    <div>
+                                        <div className="room-section-header__title-row">
+                                            <h2>Perguntas da Sala</h2>
+                                            <Badge
+                                                variant={
+                                                    questionBank.activeCount >= MIN_ROOM_QUESTIONS
+                                                        ? 'success'
+                                                        : 'warning'
+                                                }
+                                            >
+                                                {questionBank.activeCount} / mín. {MIN_ROOM_QUESTIONS}
+                                            </Badge>
+                                        </div>
+                                        <p className="room-section-header__meta">
+                                            {questionBank.activeCount >= MIN_ROOM_QUESTIONS
+                                                ? 'Quantidade mínima atendida para iniciar a partida.'
+                                                : `Cadastre ou importe pelo menos ${MIN_ROOM_QUESTIONS} perguntas ativas para liberar o início da partida.`}
+                                        </p>
+                                    </div>
+                                    {activeRoom.backendStatus === 'WAITING' && (
+                                        <div className="room-section-header__actions">
+                                            <Button
                                                 type="button"
-                                                className="secondary-btn"
+                                                variant="secondary"
+                                                onClick={questionBank.openImport}
+                                            >
+                                                Importar JSON
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="primary"
+                                                onClick={questionBank.openCreate}
+                                            >
+                                                + Cadastrar Pergunta
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {activeRoom.backendStatus !== 'WAITING' && questionBank.questions.length > 0 && (
+                                    <Alert variant="info">
+                                        Esta sala já saiu da fase de espera; as perguntas ficam disponíveis apenas para consulta durante e após a partida.
+                                    </Alert>
+                                )}
+
+                                {questionBank.error && (
+                                    <Alert variant="error" className="room-form-error">
+                                        {questionBank.error}
+                                    </Alert>
+                                )}
+
+                                {questionBank.isLoading ? (
+                                    <div className="room-detail-panel">
+                                        <LoadingState label="Carregando perguntas da sala…" />
+                                    </div>
+                                ) : questionBank.questions.length === 0 ? (
+                                    <EmptyState
+                                        icon="questions"
+                                        title="Nenhuma pergunta cadastrada nesta sala"
+                                        description={
+                                            activeRoom.backendStatus === 'WAITING'
+                                                ? `Adicione pelo menos ${MIN_ROOM_QUESTIONS} perguntas manualmente ou importe em lote via JSON para liberar o início da partida.`
+                                                : 'Nenhuma pergunta foi registrada nesta sala.'
+                                        }
+                                        action={
+                                            activeRoom.backendStatus === 'WAITING' ? (
+                                                <Button type="button" onClick={questionBank.openCreate}>
+                                                    + Cadastrar Primeira Pergunta
+                                                </Button>
+                                            ) : undefined
+                                        }
+                                    />
+                                ) : (
+                                    <RoomQuestionsList
+                                        questions={questionBank.questions}
+                                        canEdit={activeRoom.backendStatus === 'WAITING'}
+                                        onEdit={questionBank.openEdit}
+                                        onRequestDelete={setQuestionPendingDeletion}
+                                    />
+                                )}
+                            </div>
+                        )}
+
+                        {/* SEÇÃO INTERNA: Partidas da sala */}
+                        {roomSection === 'games' && (() => {
+                            const gameNumberById = new Map(
+                                recordedRoomGames.map((item, idx) => [
+                                    item.id,
+                                    recordedRoomGames.length - idx,
+                                ]),
+                            );
+                            const distinctStatuses = Array.from(
+                                new Set(recordedRoomGames.map((item) => item.status)),
+                            );
+                            const filteredGames = filterRoomGamesByStatus(
+                                recordedRoomGames,
+                                gameStatusFilter,
+                            );
+                            const statusBadgeVariant = (status: ApiGameStatus) => {
+                                if (status === 'IN_PROGRESS') return 'success' as const;
+                                if (status === 'WAITING') return 'warning' as const;
+                                if (status === 'CANCELLED') return 'danger' as const;
+                                return 'neutral' as const;
+                            };
+
+                            return (
+                                <div className="room-section-surface">
+                                    <div className="room-section-header">
+                                        <div>
+                                            <h2>Histórico de Partidas ({recordedRoomGames.length})</h2>
+                                            <p className="room-section-header__meta">
+                                                Consulte o andamento, participantes, vencedor e relatório completo de cada partida.
+                                            </p>
+                                        </div>
+                                        <div className="room-section-header__actions">
+                                            <Button
+                                                type="button"
+                                                variant="secondary"
+                                                size="sm"
                                                 disabled={roomsVm.isLoadingRoomGames}
+                                                isLoading={roomsVm.isLoadingRoomGames}
                                                 onClick={() => void roomsVm.refreshRoomGames()}
                                             >
-                                                {roomsVm.isLoadingRoomGames
-                                                    ? 'Atualizando…'
-                                                    : 'Atualizar Histórico'}
-                                            </button>
+                                                {roomsVm.isLoadingRoomGames ? 'Atualizando…' : 'Atualizar Histórico'}
+                                            </Button>
                                         </div>
-
-                                        {roomsVm.roomGamesError && (
-                                            <p className="room-form-error" role="alert">
-                                                {roomsVm.roomGamesError}
-                                            </p>
-                                        )}
-
-                                        {roomsVm.isLoadingRoomGames && roomsVm.roomGames.length === 0 ? (
-                                            <p style={{ color: '#64748b', margin: 0 }}>
-                                                Carregando histórico de partidas…
-                                            </p>
-                                        ) : roomsVm.roomGames.length === 0 ? (
-                                            <p style={{ color: '#64748b', margin: 0 }}>
-                                                Nenhuma partida registrada nesta sala ainda.
-                                            </p>
-                                        ) : (
-                                            <div className="table-container">
-                                                <table className="questions-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Partida</th>
-                                                            <th>Status</th>
-                                                            <th>Data</th>
-                                                            <th>Duração</th>
-                                                            <th>Jogadores</th>
-                                                            <th>Vencedor</th>
-                                                            <th>Resultados</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {roomsVm.roomGames.map((game, index) => (
-                                                            <tr key={game.id}>
-                                                                <td>#{roomsVm.roomGames.length - index}</td>
-                                                                <td>
-                                                                    <span
-                                                                        className={`status-badge ${
-                                                                            game.status === 'WAITING'
-                                                                                ? 'waiting'
-                                                                                : game.status === 'IN_PROGRESS'
-                                                                                  ? 'active'
-                                                                                  : 'finished'
-                                                                        }`}
-                                                                    >
-                                                                        {formatGameStatusLabel(game.status)}
-                                                                    </span>
-                                                                </td>
-                                                                <td>
-                                                                    {formatNullableDateTime(
-                                                                        game.startedAt ?? game.createdAt,
-                                                                    )}
-                                                                </td>
-                                                                <td>
-                                                                    {formatGameDuration(game.durationMs, game.status)}
-                                                                </td>
-                                                                <td>{game.playerCount}</td>
-                                                                <td>
-                                                                    {game.winner
-                                                                        ? `${game.winner.nickname} (${game.winner.score} pts)`
-                                                                        : '—'}
-                                                                </td>
-                                                                <td>
-                                                                    <button
-                                                                        type="button"
-                                                                        className="btn-icon"
-                                                                        onClick={() =>
-                                                                            void roomsVm.openGameReport(
-                                                                                activeRoom,
-                                                                                game.id,
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        Ver resultados
-                                                                    </button>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        )}
                                     </div>
 
-                                    {/* BLOCO 2: PERGUNTAS VINCULADAS A ESTA SALA */}
-                                    <div>
-                                        <div className="section-header" style={{ marginBottom: '12px' }}>
-                                            <div>
-                                                <h3 style={{ margin: 0 }}>
-                                                    Perguntas desta Sala ({questionBank.questions.length})
-                                                </h3>
-                                                <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.9rem' }}>
-                                                    São necessárias pelo menos {MIN_ROOM_QUESTIONS} perguntas para
-                                                    iniciar a partida.
-                                                </p>
-                                            </div>
-                                            {activeRoom.backendStatus === 'WAITING' && (
-                                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                    {roomsVm.roomGamesError && (
+                                        <Alert variant="error" className="room-form-error">
+                                            {roomsVm.roomGamesError}
+                                        </Alert>
+                                    )}
+
+                                    {roomsVm.isLoadingRoomGames && roomsVm.roomGames.length === 0 ? (
+                                        <div className="room-detail-panel">
+                                            <LoadingState label="Carregando histórico de partidas…" />
+                                        </div>
+                                    ) : recordedRoomGames.length === 0 ? (
+                                        <EmptyState
+                                            icon="trophy"
+                                            title="Nenhuma partida registrada nesta sala ainda"
+                                            description="Assim que uma partida for iniciada nesta sala, os resultados e relatórios aparecerão aqui."
+                                            action={
+                                                <Button
+                                                    type="button"
+                                                    variant="secondary"
+                                                    onClick={() => setRoomSection('overview')}
+                                                >
+                                                    Voltar para Visão geral da sala
+                                                </Button>
+                                            }
+                                        />
+                                    ) : (
+                                        <div className="game-history">
+                                            {distinctStatuses.length > 1 && (
+                                                <div
+                                                    className="game-history__filters"
+                                                    role="group"
+                                                    aria-label="Filtrar partidas por status"
+                                                >
                                                     <button
                                                         type="button"
-                                                        className="secondary-btn"
-                                                        onClick={questionBank.openImport}
+                                                        className={`question-bank__filter-chip ${gameStatusFilter === 'ALL' ? 'is-active' : ''}`}
+                                                        aria-pressed={gameStatusFilter === 'ALL'}
+                                                        onClick={() => setGameStatusFilter('ALL')}
                                                     >
-                                                        Importar JSON
+                                                        Todas ({recordedRoomGames.length})
                                                     </button>
-                                                    <button
-                                                        type="button"
-                                                        className="primary-btn"
-                                                        onClick={questionBank.openCreate}
-                                                    >
-                                                        + Cadastrar Pergunta na Sala
-                                                    </button>
+                                                    {distinctStatuses.map((status) => {
+                                                        const count = recordedRoomGames.filter(
+                                                            (item) => item.status === status,
+                                                        ).length;
+                                                        return (
+                                                            <button
+                                                                key={status}
+                                                                type="button"
+                                                                className={`question-bank__filter-chip ${gameStatusFilter === status ? 'is-active' : ''}`}
+                                                                aria-pressed={gameStatusFilter === status}
+                                                                onClick={() => setGameStatusFilter(status)}
+                                                            >
+                                                                {formatGameStatusLabel(status)} ({count})
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            {filteredGames.length === 0 ? (
+                                                <EmptyState
+                                                    icon="trophy"
+                                                    title="Nenhuma partida corresponde ao filtro selecionado"
+                                                    description="Altere ou limpe o filtro para visualizar todo o histórico desta sala."
+                                                    action={
+                                                        <Button
+                                                            type="button"
+                                                            variant="secondary"
+                                                            onClick={() => setGameStatusFilter('ALL')}
+                                                        >
+                                                            Mostrar todas as partidas
+                                                        </Button>
+                                                    }
+                                                />
+                                            ) : (
+                                                <div className="game-history__card">
+                                                    <div className="game-history__head" aria-hidden="true">
+                                                        <span>Partida e data</span>
+                                                        <span>Status e duração</span>
+                                                        <span>Participação</span>
+                                                        <span>Resultado</span>
+                                                        <span className="game-history__head-action">Relatório</span>
+                                                    </div>
+
+                                                    <ul className="game-history__list" aria-label="Partidas da sala">
+                                                        {filteredGames.map((game) => {
+                                                            const matchNumber = gameNumberById.get(game.id) ?? 1;
+                                                            const formattedDate = formatNullableDateTime(
+                                                                game.startedAt ?? game.createdAt,
+                                                            );
+                                                            const formattedDuration = formatGameDuration(
+                                                                game.durationMs,
+                                                                game.status,
+                                                            );
+
+                                                            return (
+                                                                <li key={game.id} className="game-history__item">
+                                                                    <div className="game-history__col-match">
+                                                                        <div className="game-history__match-title">
+                                                                            <span className="game-history__number">
+                                                                                #{matchNumber}
+                                                                            </span>
+                                                                            <span className="game-history__mode">
+                                                                                {formatShortGameMode(game.gameMode)}
+                                                                            </span>
+                                                                        </div>
+                                                                        <span className="game-history__date">
+                                                                            {formattedDate}
+                                                                        </span>
+                                                                    </div>
+
+                                                                    <div className="game-history__col-status">
+                                                                        <Badge variant={statusBadgeVariant(game.status)}>
+                                                                            {formatGameStatusLabel(game.status)}
+                                                                        </Badge>
+                                                                        <span className="game-history__duration">
+                                                                            <Icon name="timer" size={13} />
+                                                                            {formattedDuration}
+                                                                        </span>
+                                                                    </div>
+
+                                                                    <div className="game-history__col-players">
+                                                                        <span className="game-history__mobile-label">
+                                                                            Participação e acerto
+                                                                        </span>
+                                                                        <span className="game-history__players-value">
+                                                                            <Icon name="users" size={14} />
+                                                                            {game.playerCount}{' '}
+                                                                            {game.playerCount === 1
+                                                                                ? 'jogador'
+                                                                                : 'jogadores'}
+                                                                        </span>
+                                                                        {(() => {
+                                                                            const avgRate = computeGameHistoryAccuracyRate(game);
+                                                                            return (
+                                                                                <span className="game-history__players-accuracy">
+                                                                                    {avgRate !== null
+                                                                                        ? `Acerto médio: ${formatRate(avgRate)}`
+                                                                                        : 'Sem respostas'}
+                                                                                </span>
+                                                                            );
+                                                                        })()}
+                                                                    </div>
+
+                                                                    <div className="game-history__col-result">
+                                                                        <span className="game-history__mobile-label">
+                                                                            Resultado
+                                                                        </span>
+                                                                        {game.winner ? (
+                                                                            <div className="game-history__winner">
+                                                                                <Icon name="trophy" size={14} />
+                                                                                <span className="game-history__winner-name">
+                                                                                    {game.winner.nickname}
+                                                                                </span>
+                                                                                <span className="game-history__winner-score">
+                                                                                    {game.winner.score} pts
+                                                                                </span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="game-history__muted">
+                                                                                {game.status === 'IN_PROGRESS'
+                                                                                    ? 'Partida em andamento'
+                                                                                    : game.status === 'CANCELLED'
+                                                                                      ? 'Sem vencedor (cancelada)'
+                                                                                      : 'Sem vencedor'}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="game-history__col-action">
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="secondary"
+                                                                            size="sm"
+                                                                            onClick={() =>
+                                                                                void roomsVm.openGameReport(
+                                                                                    activeRoom,
+                                                                                    game.id,
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            Ver resultados
+                                                                        </Button>
+                                                                    </div>
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
                                                 </div>
                                             )}
                                         </div>
-
-                                        {questionBank.error && (
-                                            <p className="room-form-error" role="alert">
-                                                {questionBank.error}
-                                            </p>
-                                        )}
-
-                                        {questionBank.isLoading ? (
-                                            <p>Carregando perguntas da sala…</p>
-                                        ) : questionBank.questions.length === 0 ? (
-                                            <p style={{ color: '#64748b' }}>
-                                                Nenhuma pergunta cadastrada nesta sala ainda. Clique em{' '}
-                                                <strong>+ Cadastrar Pergunta na Sala</strong> para adicionar as{' '}
-                                                {MIN_ROOM_QUESTIONS} perguntas.
-                                            </p>
-                                        ) : (
-                                            <div className="table-container">
-                                                <table className="questions-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>#</th>
-                                                            <th>Enunciado da Pergunta</th>
-                                                            <th>Tipo</th>
-                                                            <th>Alternativas</th>
-                                                            {activeRoom.backendStatus === 'WAITING' && <th>Ações</th>}
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {questionBank.questions.map((q, index) => (
-                                                            <tr key={q.id}>
-                                                                <td>{index + 1}</td>
-                                                                <td>{q.statement}</td>
-                                                                <td>{QUESTION_TYPE_LABEL[q.type]}</td>
-                                                                <td>
-                                                                    {q.options.map((opt, optIdx) => (
-                                                                        <span
-                                                                            key={opt.id}
-                                                                            style={{
-                                                                                display: 'inline-block',
-                                                                                marginRight: '8px',
-                                                                                fontWeight: opt.isCorrect ? 700 : 400,
-                                                                                color: opt.isCorrect
-                                                                                    ? '#15803d'
-                                                                                    : undefined,
-                                                                            }}
-                                                                        >
-                                                                            {CHOICE_LETTERS[optIdx]}: {opt.text}
-                                                                            {opt.isCorrect ? ' ✓' : ''}
-                                                                        </span>
-                                                                    ))}
-                                                                </td>
-                                                                {activeRoom.backendStatus === 'WAITING' && (
-                                                                    <td>
-                                                                        <div className="table-actions">
-                                                                            <button
-                                                                                type="button"
-                                                                                className="btn-icon"
-                                                                                onClick={() => questionBank.openEdit(q)}
-                                                                            >
-                                                                                Editar
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                className="btn-icon danger"
-                                                                                onClick={() =>
-                                                                                    void questionBank.deleteQuestion(
-                                                                                        q.id,
-                                                                                    )
-                                                                                }
-                                                                            >
-                                                                                Excluir
-                                                                            </button>
-                                                                        </div>
-                                                                    </td>
-                                                                )}
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        )}
-                                    </div>
-                                </section>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ABA: Perguntas */}
-                    {activeTab === 'questions' && (
-                        <div>
-                            <div className="section-header">
-                                <h2>
-                                    {activeRoom
-                                        ? `Perguntas da Sala: ${activeRoom.name} (${activeRoom.code})`
-                                        : 'Gerenciar Perguntas da Sala'}
-                                </h2>
-                                {activeRoom && activeRoom.backendStatus === 'WAITING' && (
-                                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                                        <button
-                                            type="button"
-                                            className="secondary-btn"
-                                            onClick={questionBank.openImport}
-                                        >
-                                            Importar JSON
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="primary-btn"
-                                            onClick={questionBank.openCreate}
-                                        >
-                                            + Cadastrar Pergunta
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {!activeRoom ? (
-                                <div className="welcome-banner">
-                                    <h2>Selecione ou crie uma sala primeiro</h2>
-                                    <p>
-                                        No QuizArena, as perguntas são vinculadas a uma sala. Vá até a aba{' '}
-                                        <strong>Salas de Quiz</strong> e crie uma sala para cadastrar suas perguntas.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        className="primary-btn"
-                                        onClick={() => {
-                                            setActiveTab('rooms');
-                                            roomsVm.openCreate();
-                                        }}
-                                        style={{ marginTop: '12px' }}
-                                    >
-                                        + Criar Nova Sala
-                                    </button>
-                                </div>
-                            ) : (
-                                <>
-                                    <p className="section-note">
-                                        Sala ativa: <strong>{activeRoom.name}</strong> (código{' '}
-                                        <strong>{activeRoom.code}</strong>) ·{' '}
-                                        <strong>{questionBank.activeCount}</strong> de no mínimo{' '}
-                                        <strong>{MIN_ROOM_QUESTIONS}</strong> perguntas cadastradas.
-                                    </p>
-
-                                    {questionBank.error && (
-                                        <p className="room-form-error" role="alert">
-                                            {questionBank.error}
-                                        </p>
                                     )}
+                                </div>
+                            );
+                        })()}
 
-                                    <div className="table-container">
-                                        <table className="questions-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>#</th>
-                                                    <th>Título / Pergunta</th>
-                                                    <th>Tipo</th>
-                                                    <th>Alternativas</th>
-                                                    <th>Ações</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {questionBank.questions.map((q, idx) => (
-                                                    <tr key={q.id}>
-                                                        <td>{idx + 1}</td>
-                                                        <td>{q.statement}</td>
-                                                        <td>
-                                                            {QUESTION_TYPE_LABEL[q.type]}
-                                                            {q.type === 'MULTIPLE_CHOICE' && (
-                                                                <span className="question-type-count">
-                                                                    {' '}
-                                                                    · {q.options.length} alternativas
-                                                                </span>
-                                                            )}
-                                                        </td>
-                                                        <td>
-                                                            {q.options.map((opt, optIdx) => (
-                                                                <span
-                                                                    key={opt.id}
-                                                                    style={{
-                                                                        display: 'inline-block',
-                                                                        marginRight: '8px',
-                                                                        fontWeight: opt.isCorrect ? 700 : 400,
-                                                                        color: opt.isCorrect ? '#15803d' : undefined,
-                                                                    }}
-                                                                >
-                                                                    {CHOICE_LETTERS[optIdx]}: {opt.text}
-                                                                    {opt.isCorrect ? ' ✓' : ''}
-                                                                </span>
-                                                            ))}
-                                                        </td>
-                                                        <td>
-                                                            {activeRoom.backendStatus === 'WAITING' ? (
-                                                                <div className="table-actions">
-                                                                    <button
-                                                                        className="btn-icon"
-                                                                        onClick={() => questionBank.openEdit(q)}
-                                                                    >
-                                                                        Editar
-                                                                    </button>
-                                                                    <button
-                                                                        className="btn-icon danger"
-                                                                        onClick={() =>
-                                                                            void questionBank.deleteQuestion(q.id)
-                                                                        }
-                                                                    >
-                                                                        Excluir
-                                                                    </button>
-                                                                </div>
-                                                            ) : (
-                                                                <span>Sala iniciada</span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </main>
+                        {/* SEÇÃO INTERNA: Configurações da sala */}
+                        {roomSection === 'settings' && (
+                            <RoomSettingsSection
+                                room={activeRoom}
+                                isFinishingMatch={roomsVm.isFinishingMatch}
+                                onEditRoom={roomsVm.openEdit}
+                                onShowCode={roomsVm.showCode}
+                                onRequestFinishMatch={roomsVm.requestFinishMatch}
+                                onRequestDeleteRoom={roomsVm.requestDelete}
+                            />
+                        )}
+                    </RoomWorkspaceShell>
+                )}
+            </DashboardShell>
 
             {/* Modal: Criar / Editar Sala */}
-            {roomsVm.isCreateOpen && (
-                <div className="modal-overlay">
-                    <div className="modal-content">
-                        <h3>{roomsVm.isEditing ? 'Editar Sala' : 'Criar e Configurar Nova Sala'}</h3>
-                        <form onSubmit={roomsVm.submitRoom}>
-                            <div className="form-group">
-                                <label htmlFor="room-name">Nome da Sala</label>
-                                <input
-                                    id="room-name"
-                                    type="text"
-                                    value={roomsVm.form.name}
-                                    onChange={(e) => roomsVm.setName(e.target.value)}
-                                    placeholder="Ex: Arena de Programação"
-                                    disabled={roomsVm.isSubmittingRoom}
-                                    required
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="room-theme">Tema</label>
-                                <input
-                                    id="room-theme"
-                                    type="text"
-                                    value={roomsVm.form.theme}
-                                    onChange={(e) => roomsVm.setTheme(e.target.value)}
-                                    placeholder="Ex: React & TypeScript"
-                                    disabled={roomsVm.isSubmittingRoom}
-                                    required
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="room-max-players">Máximo de Jogadores (2 a 50)</label>
-                                <input
-                                    id="room-max-players"
-                                    type="number"
-                                    min={2}
-                                    max={50}
-                                    value={roomsVm.form.maxPlayers}
-                                    onChange={(e) => roomsVm.setMaxPlayers(Number(e.target.value))}
-                                    disabled={roomsVm.isSubmittingRoom}
-                                    required
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="room-time">Tempo Limite por Questão (segundos)</label>
-                                <select
-                                    id="room-time"
-                                    value={roomsVm.form.timeLimit}
-                                    onChange={(e) => roomsVm.setTimeLimit(Number(e.target.value))}
-                                    disabled={roomsVm.isSubmittingRoom}
-                                >
-                                    {ROOM_TIME_OPTIONS.map((seconds) => (
-                                        <option key={seconds} value={seconds}>
-                                            {seconds} segundos
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="room-mode">Modo de Jogo</label>
-                                <select
-                                    id="room-mode"
-                                    value={roomsVm.form.gameMode}
-                                    onChange={(e) => roomsVm.setGameMode(e.target.value as GameMode)}
-                                    disabled={roomsVm.isSubmittingRoom}
-                                >
-                                    {(Object.keys(GAME_MODE_LABEL) as GameMode[]).map((mode) => (
-                                        <option key={mode} value={mode}>
-                                            {GAME_MODE_LABEL[mode]}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {roomsVm.formError && (
-                                <p className="room-form-error" role="alert">
-                                    {roomsVm.formError}
-                                </p>
-                            )}
-
-                            <p className="room-form-note">
-                                {roomsVm.editingRoom ? (
-                                    <>
-                                        O código da sala continua o mesmo:{' '}
-                                        <strong>{formatRoomCode(roomsVm.editingRoom.code)}</strong>.
-                                    </>
-                                ) : (
-                                    'Após criar a sala, cadastre pelo menos 5 perguntas dentro dela para iniciar a partida.'
-                                )}
+            <Modal
+                isOpen={roomsVm.isCreateOpen}
+                onClose={roomsVm.closeCreate}
+                closeDisabled={roomsVm.isSubmittingRoom}
+                title={roomsVm.isEditing ? 'Editar Sala' : 'Criar e Configurar Nova Sala'}
+            >
+                <form
+                    className="room-modal-form"
+                    onSubmit={(e) => void handleRoomModalSubmit(e)}
+                    noValidate
+                >
+                    <div className="form-group">
+                        <label htmlFor="room-name">Nome da Sala</label>
+                        <input
+                            id="room-name"
+                            type="text"
+                            value={roomsVm.form.name}
+                            onChange={(e) => roomsVm.setName(e.target.value)}
+                            placeholder="Ex: Arena de Programação"
+                            disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.name ? 'is-invalid' : undefined}
+                            aria-required="true"
+                            aria-invalid={Boolean(roomsVm.fieldErrors.name)}
+                            aria-describedby={roomsVm.fieldErrors.name ? 'room-name-error' : undefined}
+                        />
+                        {roomsVm.fieldErrors.name && (
+                            <p id="room-name-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.name}
                             </p>
-                            <div className="modal-actions">
-                                <button
-                                    type="button"
-                                    className="secondary-btn"
-                                    onClick={roomsVm.closeCreate}
-                                    disabled={roomsVm.isSubmittingRoom}
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="primary-btn"
-                                    disabled={roomsVm.isSubmittingRoom}
-                                >
-                                    {roomsVm.isSubmittingRoom
-                                        ? 'Salvando…'
-                                        : roomsVm.isEditing
-                                          ? 'Salvar alterações'
-                                          : 'Criar sala'}
-                                </button>
-                            </div>
-                        </form>
+                        )}
                     </div>
-                </div>
-            )}
+                    <div className="form-group">
+                        <label htmlFor="room-theme">Tema</label>
+                        <input
+                            id="room-theme"
+                            type="text"
+                            value={roomsVm.form.theme}
+                            onChange={(e) => roomsVm.setTheme(e.target.value)}
+                            placeholder="Ex: React & TypeScript"
+                            disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.theme ? 'is-invalid' : undefined}
+                            aria-required="true"
+                            aria-invalid={Boolean(roomsVm.fieldErrors.theme)}
+                            aria-describedby={roomsVm.fieldErrors.theme ? 'room-theme-error' : undefined}
+                        />
+                        {roomsVm.fieldErrors.theme && (
+                            <p id="room-theme-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.theme}
+                            </p>
+                        )}
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="room-max-players">Máximo de Jogadores (2 a 50)</label>
+                        <input
+                            id="room-max-players"
+                            type="number"
+                            inputMode="numeric"
+                            value={
+                                Number.isNaN(roomsVm.form.maxPlayers)
+                                    ? ''
+                                    : String(roomsVm.form.maxPlayers)
+                            }
+                            onChange={(e) =>
+                                roomsVm.setMaxPlayers(
+                                    e.target.value === '' ? Number.NaN : Number(e.target.value),
+                                )
+                            }
+                            disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.maxPlayers ? 'is-invalid' : undefined}
+                            aria-required="true"
+                            aria-invalid={Boolean(roomsVm.fieldErrors.maxPlayers)}
+                            aria-describedby={
+                                roomsVm.fieldErrors.maxPlayers
+                                    ? 'room-max-players-error'
+                                    : undefined
+                            }
+                        />
+                        {roomsVm.fieldErrors.maxPlayers && (
+                            <p
+                                id="room-max-players-error"
+                                className="room-field-error"
+                                role="alert"
+                            >
+                                {roomsVm.fieldErrors.maxPlayers}
+                            </p>
+                        )}
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="room-time">Tempo Limite por Questão (segundos)</label>
+                        <select
+                            id="room-time"
+                            value={roomsVm.form.timeLimit}
+                            onChange={(e) => roomsVm.setTimeLimit(Number(e.target.value))}
+                            disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.timeLimit ? 'is-invalid' : undefined}
+                            aria-invalid={Boolean(roomsVm.fieldErrors.timeLimit)}
+                            aria-describedby={
+                                roomsVm.fieldErrors.timeLimit ? 'room-time-error' : undefined
+                            }
+                        >
+                            {ROOM_TIME_OPTIONS.map((seconds) => (
+                                <option key={seconds} value={seconds}>
+                                    {seconds} segundos
+                                </option>
+                            ))}
+                        </select>
+                        {roomsVm.fieldErrors.timeLimit && (
+                            <p id="room-time-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.timeLimit}
+                            </p>
+                        )}
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="room-mode">Modo de Jogo</label>
+                        <select
+                            id="room-mode"
+                            value={roomsVm.form.gameMode}
+                            onChange={(e) => roomsVm.setGameMode(e.target.value as GameMode)}
+                            disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.gameMode ? 'is-invalid' : undefined}
+                            aria-invalid={Boolean(roomsVm.fieldErrors.gameMode)}
+                            aria-describedby={
+                                roomsVm.fieldErrors.gameMode ? 'room-mode-error' : undefined
+                            }
+                        >
+                            {(Object.keys(GAME_MODE_LABEL) as GameMode[]).map((mode) => (
+                                <option key={mode} value={mode}>
+                                    {GAME_MODE_LABEL[mode]}
+                                </option>
+                            ))}
+                        </select>
+                        {roomsVm.fieldErrors.gameMode && (
+                            <p id="room-mode-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.gameMode}
+                            </p>
+                        )}
+                    </div>
+
+                    {roomsVm.formError && (
+                        <Alert variant="error" className="room-form-alert">
+                            {roomsVm.formError}
+                        </Alert>
+                    )}
+
+                    <p className="room-form-note">
+                        {roomsVm.editingRoom ? (
+                            <>
+                                O código da sala continua o mesmo:{' '}
+                                <strong>{formatRoomCode(roomsVm.editingRoom.code)}</strong>.
+                            </>
+                        ) : (
+                            'Após criar a sala, cadastre pelo menos 5 perguntas dentro dela para iniciar a partida.'
+                        )}
+                    </p>
+                    <div className="modal-actions">
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={roomsVm.closeCreate}
+                            disabled={roomsVm.isSubmittingRoom}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button type="submit" isLoading={roomsVm.isSubmittingRoom}>
+                            {roomsVm.isSubmittingRoom
+                                ? 'Salvando…'
+                                : roomsVm.isEditing
+                                  ? 'Salvar alterações'
+                                  : 'Criar sala'}
+                        </Button>
+                    </div>
+                </form>
+            </Modal>
 
             {/* Tela de exibição do código da sala (para projetar aos alunos) */}
             <RoomCodeModal room={roomsVm.displayedRoom} onClose={roomsVm.hideCode} />
@@ -1295,13 +1286,13 @@ export default function DashboardForm({
                     </strong>
                     ) deixará de aparecer na lista de salas ativas e não aceitará novos jogadores ou novas partidas.
                 </p>
-                <p style={{ marginTop: '8px' }}>
+                <p className="confirm-dialog__note">
                     O histórico de partidas e os resultados anteriores permanecerão preservados.
                 </p>
                 {roomsVm.archiveRoomError && (
-                    <p className="room-form-error" role="alert" style={{ marginTop: '12px' }}>
+                    <Alert variant="error" className="confirm-dialog__alert">
                         {roomsVm.archiveRoomError}
-                    </p>
+                    </Alert>
                 )}
             </ConfirmDialog>
 
@@ -1323,15 +1314,36 @@ export default function DashboardForm({
                     </strong>
                     ) será finalizada imediatamente.
                 </p>
-                <p style={{ marginTop: '8px' }}>
+                <p className="confirm-dialog__note">
                     As pontuações atuais dos jogadores serão preservadas, qualquer rodada aberta será encerrada e todos
                     serão direcionados aos resultados finais.
                 </p>
                 {roomsVm.finishMatchError && (
-                    <p className="room-form-error" role="alert" style={{ marginTop: '12px' }}>
+                    <Alert variant="error" className="confirm-dialog__alert">
                         {roomsVm.finishMatchError}
-                    </p>
+                    </Alert>
                 )}
+            </ConfirmDialog>
+
+            {/* Confirmação antes de excluir uma pergunta da sala */}
+            <ConfirmDialog
+                isOpen={questionPendingDeletion !== null}
+                title="Excluir pergunta?"
+                confirmLabel="Excluir pergunta"
+                loadingLabel="Excluindo…"
+                isLoading={isDeletingQuestion}
+                tone="danger"
+                onConfirm={() => void handleConfirmDeleteQuestion()}
+                onCancel={() => {
+                    if (!isDeletingQuestion) {
+                        setQuestionPendingDeletion(null);
+                    }
+                }}
+            >
+                <p>
+                    A pergunta <strong>“{questionPendingDeletion?.statement}”</strong> será removida
+                    desta sala permanentemente.
+                </p>
             </ConfirmDialog>
 
             {/* Modal: Cadastrar / Editar Pergunta (vinculada à sala ativa) */}
@@ -1353,6 +1365,6 @@ export default function DashboardForm({
                 onImportBatch={questionBank.importQuestionsBatch}
                 onClose={questionBank.closeImport}
             />
-        </div>
+        </>
     );
 }

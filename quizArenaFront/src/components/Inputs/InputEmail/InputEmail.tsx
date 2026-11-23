@@ -1,16 +1,28 @@
-
 import type { ChangeEvent } from 'react';
 import './InputEmail.css';
 
 interface InputEmailProps {
     email: string;
     setEmail: (email: string) => void;
+    id?: string;
+    label?: string;
+    placeholder?: string;
+    autoComplete?: string;
+    disabled?: boolean;
+    error?: string | null;
 }
 
 export default function InputEmail({
     email,
-    setEmail
+    setEmail,
+    id = 'email',
+    label = 'Email',
+    placeholder = 'Digite seu email',
+    autoComplete = 'email',
+    disabled = false,
+    error = null,
 }: InputEmailProps) {
+    const errorId = `${id}-error`;
 
     function handleEmailChange(
         event: ChangeEvent<HTMLInputElement>
@@ -20,8 +32,8 @@ export default function InputEmail({
 
     return (
         <div className="input-group">
-            <label htmlFor="email" className="labelInput">
-                Email
+            <label htmlFor={id} className="labelInput">
+                {label}
             </label>
 
             <div className="input-wrapper">
@@ -38,22 +50,30 @@ export default function InputEmail({
                             strokeLinejoin="round"
                             strokeWidth="2"
                             d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"
-                            //d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
                         />
                     </svg>
                 </span>
 
                 <input
                     type="email"
-                    id="email"
-                    name="email"
-                    placeholder="Digite seu email"
+                    id={id}
+                    name={id}
+                    placeholder={placeholder}
                     value={email}
                     onChange={handleEmailChange}
-                    autoComplete="email"
-                    required
+                    autoComplete={autoComplete}
+                    disabled={disabled}
+                    aria-required="true"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
                 />
             </div>
+
+            {error && (
+                <p id={errorId} className="input-error" role="alert">
+                    {error}
+                </p>
+            )}
         </div>
     );
 }

@@ -1,3 +1,4 @@
+import Alert from '../../../components/ui/Alert/Alert';
 import Button from '../../../components/ui/Button/Button';
 import Icon from '../../../components/ui/Icon/Icon';
 import Modal from '../../../components/ui/Modal/Modal';
@@ -7,6 +8,7 @@ import {
     MAX_CHOICES,
     MIN_CHOICES,
     QUESTION_TYPE_LABEL,
+    STATEMENT_MAX_LENGTH,
     TRUE_LABEL,
     type Question,
     type QuestionType,
@@ -22,13 +24,24 @@ interface QuestionFormModalProps {
     onSave: (question: Question) => Promise<void> | void;
 }
 
+type QuestionErrorTarget = 'statement' | 'choices' | 'trueFalse' | 'general';
+
 const TYPE_HINT: Record<QuestionType, string> = {
-    MULTIPLE_CHOICE: `De ${MIN_CHOICES} a ${MAX_CHOICES} alternativas`,
+    MULTIPLE_CHOICE: `${MIN_CHOICES} a ${MAX_CHOICES} alternativas`,
     TRUE_FALSE: 'Duas opções fixas',
 };
 
+function classifyErrorTarget(error: string | null): QuestionErrorTarget | null {
+    if (!error) return null;
+    const lower = error.toLocaleLowerCase();
+    if (lower.includes('enunciado')) return 'statement';
+    if (lower.includes('verdadeira') || lower.includes('falsa')) return 'trueFalse';
+    if (lower.includes('alternativa')) return 'choices';
+    return 'general';
+}
+
 /**
- * VIEW — modal de criação/edição de pergunta do painel do professor.
+ * VIEW — modal de criação/edição de pergunta do painel do anfitrião.
  * O Modal só monta o conteúdo quando está aberto, então o formulário (e
  * seu ViewModel) começa do zero a cada abertura.
  */
@@ -55,37 +68,52 @@ interface QuestionFormProps {
 function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
     const viewModel = useQuestionFormViewModel(initial, onSave);
     const { draft } = viewModel;
+    const errorTarget = classifyErrorTarget(viewModel.error);
 
     return (
         <form className="question-form" onSubmit={viewModel.submit} noValidate>
-            <div className="question-form__field">
-                <label htmlFor="question-statement" className="question-form__label">
-                    Enunciado
-                </label>
-                <textarea
-                    id="question-statement"
-                    className="question-form__input"
-                    rows={3}
-                    maxLength={300}
-                    placeholder="Ex.: Qual é a capital do Brasil?"
-                    value={draft.statement}
-                    onChange={(event) => viewModel.setStatement(event.target.value)}
-                />
-            </div>
+            <div className="question-form__top-row">
+                <div className="question-form__field question-form__field--statement">
+                    <div className="question-form__label-row">
+                        <label htmlFor="question-statement" className="question-form__label">
+                            Enunciado
+                        </label>
+                        <span className="question-form__counter">
+                            {draft.statement.length}/{STATEMENT_MAX_LENGTH}
+                        </span>
+                    </div>
+                    <textarea
+                        id="question-statement"
+                        className={`question-form__input${errorTarget === 'statement' ? ' is-invalid' : ''}`}
+                        rows={2}
+                        maxLength={STATEMENT_MAX_LENGTH}
+                        placeholder="Ex.: Qual é a capital do Brasil?"
+                        value={draft.statement}
+                        aria-invalid={errorTarget === 'statement' || undefined}
+                        aria-describedby={errorTarget === 'statement' ? 'question-statement-error' : undefined}
+                        onChange={(event) => viewModel.setStatement(event.target.value)}
+                    />
+                    {errorTarget === 'statement' && viewModel.error && (
+                        <p id="question-statement-error" className="question-form__field-error" role="alert">
+                            {viewModel.error}
+                        </p>
+                    )}
+                </div>
 
-            <div className="question-form__field">
-                <label htmlFor="question-theme" className="question-form__label">
-                    Tema <span className="question-form__optional">(opcional)</span>
-                </label>
-                <input
-                    id="question-theme"
-                    className="question-form__input"
-                    type="text"
-                    maxLength={60}
-                    placeholder="Ex.: Geografia"
-                    value={draft.theme}
-                    onChange={(event) => viewModel.setTheme(event.target.value)}
-                />
+                <div className="question-form__field question-form__field--theme">
+                    <label htmlFor="question-theme" className="question-form__label">
+                        Tema <span className="question-form__optional">(opcional)</span>
+                    </label>
+                    <input
+                        id="question-theme"
+                        className="question-form__input"
+                        type="text"
+                        maxLength={60}
+                        placeholder="Ex.: Geografia"
+                        value={draft.theme}
+                        onChange={(event) => viewModel.setTheme(event.target.value)}
+                    />
+                </div>
             </div>
 
             <fieldset className="question-form__fieldset">
@@ -111,11 +139,16 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
             </fieldset>
 
             {draft.type === 'MULTIPLE_CHOICE' ? (
-                <fieldset className="question-form__fieldset" aria-describedby="question-choices-hint">
-                    <legend className="question-form__label">Alternativas</legend>
-                    <p id="question-choices-hint" className="question-form__hint">
-                        Marque o círculo da alternativa correta.
-                    </p>
+                <fieldset
+                    className={`question-form__fieldset${errorTarget === 'choices' ? ' is-invalid' : ''}`}
+                    aria-describedby="question-choices-hint"
+                >
+                    <div className="question-form__label-row">
+                        <legend className="question-form__label">Alternativas</legend>
+                        <span id="question-choices-hint" className="question-form__hint">
+                            Selecione qual é a correta
+                        </span>
+                    </div>
 
                     <ul className="question-form__choices">
                         {draft.choices.map((choice, index) => {
@@ -146,6 +179,12 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
                                         value={choice.text}
                                         onChange={(event) => viewModel.setChoiceText(choice.id, event.target.value)}
                                     />
+                                    {isCorrect && (
+                                        <span className="question-form__correct-pill">
+                                            <Icon name="check" size={13} />
+                                            <span>Correta</span>
+                                        </span>
+                                    )}
                                     <button
                                         type="button"
                                         className="question-form__remove"
@@ -158,12 +197,18 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
                                                 : `Mínimo de ${MIN_CHOICES} alternativas`
                                         }
                                     >
-                                        <Icon name="close" size={18} />
+                                        <Icon name="close" size={16} />
                                     </button>
                                 </li>
                             );
                         })}
                     </ul>
+
+                    {errorTarget === 'choices' && viewModel.error && (
+                        <p className="question-form__field-error" role="alert">
+                            {viewModel.error}
+                        </p>
+                    )}
 
                     {viewModel.canAddChoice && (
                         <button type="button" className="question-form__add" onClick={viewModel.addChoice}>
@@ -173,7 +218,10 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
                 </fieldset>
             ) : (
                 <fieldset className="question-form__fieldset">
-                    <legend className="question-form__label">A afirmação é…</legend>
+                    <div className="question-form__label-row">
+                        <legend className="question-form__label">Resposta correta</legend>
+                        <span className="question-form__hint">Escolha se a afirmação é verdadeira ou falsa</span>
+                    </div>
                     <div className="question-form__true-false">
                         {[true, false].map((value) => (
                             <label
@@ -186,25 +234,38 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
                                     checked={draft.trueFalseAnswer === value}
                                     onChange={() => viewModel.setTrueFalseAnswer(value)}
                                 />
-                                <Icon name={value ? 'check' : 'close'} size={20} />
-                                {value ? TRUE_LABEL : FALSE_LABEL}
+                                <Icon name={value ? 'check' : 'close'} size={18} />
+                                <span>{value ? TRUE_LABEL : FALSE_LABEL}</span>
                             </label>
                         ))}
                     </div>
+                    {errorTarget === 'trueFalse' && viewModel.error && (
+                        <p className="question-form__field-error" role="alert">
+                            {viewModel.error}
+                        </p>
+                    )}
                 </fieldset>
             )}
 
-            {viewModel.error && (
-                <p className="question-form__error" role="alert">
-                    {viewModel.error}
-                </p>
+            {errorTarget === 'general' && viewModel.error && (
+                <Alert variant="error">{viewModel.error}</Alert>
             )}
 
             <div className="question-form__actions">
-                <Button variant="secondary" onClick={onCancel} disabled={viewModel.isSaving}>
+                <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={onCancel}
+                    disabled={viewModel.isSaving}
+                >
                     Cancelar
                 </Button>
-                <Button type="submit" disabled={viewModel.isSaving}>
+                <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={viewModel.isSaving}
+                    isLoading={viewModel.isSaving}
+                >
                     {viewModel.isSaving
                         ? 'Salvando…'
                         : viewModel.isEditing

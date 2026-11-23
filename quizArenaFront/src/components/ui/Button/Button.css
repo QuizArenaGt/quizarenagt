@@ -24,7 +24,17 @@
 
 .ui-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: var(--opacity-disabled);
+}
+
+.ui-button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.ui-button--sm {
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
 }
 
 .ui-button--md {
@@ -49,26 +59,32 @@
 
 .ui-button--primary:not(:disabled):hover {
   transform: translateY(-1px);
+  filter: brightness(1.06);
 }
 
 .ui-button--secondary {
   background: var(--color-surface);
   color: var(--color-primary);
-  border-color: #ddd6fe;
+  border-color: var(--color-primary-border);
 }
 
 .ui-button--secondary:not(:disabled):hover {
   border-color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 
 /* Ações destrutivas (ex.: excluir) */
 .ui-button--danger {
-  background: #dc2626;
+  background: var(--color-danger);
   color: var(--color-white);
 }
 
+.ui-button--danger:focus-visible {
+  box-shadow: var(--focus-ring-danger);
+}
+
 .ui-button--danger:not(:disabled):hover {
-  background: #b91c1c;
+  background: var(--color-danger-hover);
 }
 
 .ui-button--ghost {
@@ -79,4 +95,19 @@
 .ui-button--ghost:not(:disabled):hover {
   background: var(--color-primary-soft);
   color: var(--color-primary);
+}
+
+.ui-button__spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ui-spin 650ms linear infinite;
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

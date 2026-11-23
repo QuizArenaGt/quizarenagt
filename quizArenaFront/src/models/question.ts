@@ -184,3 +184,43 @@ export function isPlayable(question: Question): boolean {
         question.options.filter((option) => option.isCorrect).length === 1
     );
 }
+
+export type QuestionTypeFilter = 'ALL' | QuestionType;
+
+/** Filtra perguntas da sala por texto (enunciado, tema ou alternativas) e tipo. */
+export function filterQuestions<
+    TQuestion extends Pick<Question, 'statement' | 'theme' | 'type' | 'options'>,
+>(
+    questions: readonly TQuestion[],
+    query: string,
+    typeFilter: QuestionTypeFilter = 'ALL',
+): { question: TQuestion; number: number }[] {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+
+    return questions.reduce<{ question: TQuestion; number: number }[]>(
+        (acc, question, index) => {
+            if (typeFilter !== 'ALL' && question.type !== typeFilter) {
+                return acc;
+            }
+
+            if (normalizedQuery) {
+                const matchesStatement = question.statement
+                    .toLocaleLowerCase()
+                    .includes(normalizedQuery);
+                const matchesTheme = question.theme
+                    .toLocaleLowerCase()
+                    .includes(normalizedQuery);
+                const matchesOptions = question.options.some((opt) =>
+                    opt.text.toLocaleLowerCase().includes(normalizedQuery),
+                );
+                if (!matchesStatement && !matchesTheme && !matchesOptions) {
+                    return acc;
+                }
+            }
+
+            acc.push({ question, number: index + 1 });
+            return acc;
+        },
+        [],
+    );
+}

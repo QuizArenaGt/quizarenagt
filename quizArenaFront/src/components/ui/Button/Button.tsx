@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom';
 import './Button.css';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-type ButtonSize = 'md' | 'lg';
+type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface BaseButtonProps {
     variant?: ButtonVariant;
     size?: ButtonSize;
     fullWidth?: boolean;
+    isLoading?: boolean;
     children: ReactNode;
     className?: string;
 }
@@ -37,6 +38,7 @@ export default function Button(props: ButtonProps) {
         variant = 'primary',
         size = 'md',
         fullWidth = false,
+        isLoading = false,
         className = '',
         children,
         ...rest
@@ -47,6 +49,7 @@ export default function Button(props: ButtonProps) {
         `ui-button--${variant}`,
         `ui-button--${size}`,
         fullWidth ? 'ui-button--full' : '',
+        isLoading ? 'ui-button--loading' : '',
         className,
     ]
         .filter(Boolean)
@@ -69,9 +72,17 @@ export default function Button(props: ButtonProps) {
         );
     }
 
-    const buttonProps = rest as ButtonHTMLAttributes<HTMLButtonElement>;
+    const { disabled, ...buttonProps } = rest as ButtonHTMLAttributes<HTMLButtonElement>;
+    const isDisabled = Boolean(disabled || isLoading);
     return (
-        <button type="button" className={classes} {...buttonProps}>
+        <button
+            type="button"
+            className={classes}
+            disabled={isDisabled}
+            aria-busy={isLoading || undefined}
+            {...buttonProps}
+        >
+            {isLoading && <span className="ui-button__spinner" aria-hidden="true" />}
             {children}
         </button>
     );

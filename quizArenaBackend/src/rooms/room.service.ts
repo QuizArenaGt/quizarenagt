@@ -268,6 +268,10 @@ export type ProjectedRoomSummary = {
     updatedAt: Date;
     players: LobbyPlayerProjection[];
     currentGame: CurrentGameProjection | null;
+    activeQuestionsCount?: number;
+    finishedGamesCount?: number;
+    totalGamesCount?: number;
+    lastGameFinishedAt?: Date | null;
 };
 
 export type ProjectedRoomLobby = ProjectedRoomSummary & {
@@ -301,12 +305,48 @@ export type GameHistoryItem = {
     createdAt: Date;
     durationMs: number | null;
     playerCount: number;
+    answeredCount: number;
+    correctCount: number;
+    averageCorrectRate: number | null;
     winner: {
         id: string;
         nickname: string;
         score: number;
     } | null;
     ranking: GameRankingEntry[];
+};
+
+export type RoomAggregatedQuestionPerformance = {
+    questionKey: string;
+    questionId: string;
+    sourceQuestionId: string | null;
+    statement: string;
+    position: number;
+    gamesPlayedCount: number;
+    answeredCount: number;
+    correctCount: number;
+    incorrectCount: number;
+    unansweredCount: number;
+    expectedAnswers: number;
+    correctRate: number | null;
+    errorRate: number | null;
+    overallCorrectRate: number | null;
+};
+
+export type RoomAggregatedStats = {
+    roomId: string;
+    finishedGamesCount: number;
+    totalParticipations: number;
+    averagePlayersPerGame: number | null;
+    averageScore: number | null;
+    totalAnswers: number;
+    totalCorrectAnswers: number;
+    totalWrongAnswers: number;
+    averageCorrectRate: number | null;
+    lastFinishedGameAt: Date | null;
+    hardestQuestions: RoomAggregatedQuestionPerformance[];
+    easiestQuestions: RoomAggregatedQuestionPerformance[];
+    questionPerformance: RoomAggregatedQuestionPerformance[];
 };
 
 export type GameQuestionResultItem = {
@@ -417,6 +457,9 @@ function buildGameHistorySummary(game: {
               }
             : null;
 
+    const totalAnswers = ranking.reduce((sum, entry) => sum + entry.answeredCount, 0);
+    const totalCorrect = ranking.reduce((sum, entry) => sum + entry.correctCount, 0);
+
     return {
         id: game.id,
         roomId: game.roomId,
@@ -429,13 +472,251 @@ function buildGameHistorySummary(game: {
         createdAt: game.createdAt,
         durationMs: calculateDurationMs(game.startedAt, game.finishedAt),
         playerCount: ranking.length,
+        answeredCount: totalAnswers,
+        correctCount: totalCorrect,
+        averageCorrectRate: totalAnswers > 0 ? totalCorrect / totalAnswers : null,
         winner,
         ranking,
     };
 }
 
+export type AggregatableGameRecord = {
+    id: string;
+    status: GameStatus;
+    startedAt: Date | null;
+    finishedAt: Date | null;
+    createdAt: Date;
+    players: {
+        id: string;
+        score: number;
+    }[];
+    rounds: {
+        id: string;
+        snapshotQuestion?: {
+            id: string;
+            sourceQuestionId: string | null;
+            statement: string;
+            position: number;
+        } | null;
+        answers: {
+            gamePlayerId: string;
+            isCorrect: boolean;
+        }[];
+    }[];
+};
+
+export function buildRoomAggregatedStats(
+    roomId: string,
+    games: readonly AggregatableGameRecord[],
+): RoomAggregatedStats {
+    const finishedGames = games
+        .filter((game) => game.status === "FINISHED")
+        .sort(
+            (a, b) =>
+                a.createdAt.getTime() - b.createdAt.getTime() ||
+                a.id.localeCompare(b.id),
+        );
+
+    if (finishedGames.length === 0) {
+        return {
+            roomId,
+            finishedGamesCount: 0,
+            totalParticipations: 0,
+            averagePlayersPerGame: null,
+            averageScore: null,
+            totalAnswers: 0,
+            totalCorrectAnswers: 0,
+            totalWrongAnswers: 0,
+            averageCorrectRate: null,
+            lastFinishedGameAt: null,
+            hardestQuestions: [],
+            easiestQuestions: [],
+            questionPerformance: [],
+        };
+    }
+
+    let totalParticipations = 0;
+    let totalScoreSum = 0;
+    let totalAnswers = 0;
+    let totalCorrectAnswers = 0;
+    let lastFinishedGameAt: Date | null = null;
+
+    const questionBuckets = new Map<
+        string,
+        {
+            questionKey: string;
+            questionId: string;
+            sourceQuestionId: string | null;
+            statement: string;
+            position: number;
+            gameIds: Set<string>;
+            answeredCount: number;
+            correctCount: number;
+            expectedAnswers: number;
+        }
+    >();
+
+    for (const game of finishedGames) {
+        const participantCount = game.players.length;
+        totalParticipations += participantCount;
+
+        for (const player of game.players) {
+            totalScoreSum += player.score;
+        }
+
+        const completionRef =
+            game.finishedAt ?? game.startedAt ?? game.createdAt;
+        if (
+            lastFinishedGameAt === null ||
+            completionRef.getTime() > lastFinishedGameAt.getTime()
+        ) {
+            lastFinishedGameAt = completionRef;
+        }
+
+        for (const round of game.rounds) {
+            const answeredCount = round.answers.length;
+            const correctCount = round.answers.filter(
+                (answer) => answer.isCorrect,
+            ).length;
+
+            totalAnswers += answeredCount;
+            totalCorrectAnswers += correctCount;
+
+            if (!round.snapshotQuestion) {
+                continue;
+            }
+
+            const sq = round.snapshotQuestion;
+            const normalizedStatement = sq.statement.trim().toLowerCase();
+            const questionKey = sq.sourceQuestionId
+                ? `source:${sq.sourceQuestionId}`
+                : `snapshot-stmt:${normalizedStatement}`;
+
+            const existing = questionBuckets.get(questionKey);
+            if (!existing) {
+                questionBuckets.set(questionKey, {
+                    questionKey,
+                    questionId: sq.id,
+                    sourceQuestionId: sq.sourceQuestionId,
+                    statement: sq.statement,
+                    position: sq.position,
+                    gameIds: new Set([game.id]),
+                    answeredCount,
+                    correctCount,
+                    expectedAnswers: participantCount,
+                });
+            } else {
+                existing.statement = sq.statement;
+                existing.questionId = sq.id;
+                existing.gameIds.add(game.id);
+                existing.answeredCount += answeredCount;
+                existing.correctCount += correctCount;
+                existing.expectedAnswers += participantCount;
+            }
+        }
+    }
+
+    const questionPerformance: RoomAggregatedQuestionPerformance[] = Array.from(
+        questionBuckets.values(),
+    )
+        .map((bucket) => {
+            const incorrectCount = Math.max(
+                0,
+                bucket.answeredCount - bucket.correctCount,
+            );
+            const unansweredCount = Math.max(
+                0,
+                bucket.expectedAnswers - bucket.answeredCount,
+            );
+
+            return {
+                questionKey: bucket.questionKey,
+                questionId: bucket.questionId,
+                sourceQuestionId: bucket.sourceQuestionId,
+                statement: bucket.statement,
+                position: bucket.position,
+                gamesPlayedCount: bucket.gameIds.size,
+                answeredCount: bucket.answeredCount,
+                correctCount: bucket.correctCount,
+                incorrectCount,
+                unansweredCount,
+                expectedAnswers: bucket.expectedAnswers,
+                correctRate:
+                    bucket.answeredCount > 0
+                        ? bucket.correctCount / bucket.answeredCount
+                        : null,
+                errorRate:
+                    bucket.answeredCount > 0
+                        ? incorrectCount / bucket.answeredCount
+                        : null,
+                overallCorrectRate:
+                    bucket.expectedAnswers > 0
+                        ? bucket.correctCount / bucket.expectedAnswers
+                        : null,
+            };
+        })
+        .sort(
+            (a, b) =>
+                b.answeredCount - a.answeredCount ||
+                a.position - b.position ||
+                a.statement.localeCompare(b.statement),
+        );
+
+    const answeredQuestions = questionPerformance.filter(
+        (item) => item.answeredCount > 0 && item.correctRate !== null,
+    );
+
+    const hardestQuestions = answeredQuestions
+        .filter((item) => item.incorrectCount > 0)
+        .sort(
+            (a, b) =>
+                (b.errorRate ?? 0) - (a.errorRate ?? 0) ||
+                b.incorrectCount - a.incorrectCount ||
+                b.answeredCount - a.answeredCount,
+        );
+
+    // Exige amostra mínima de 2 respostas para evitar classificar questões sem amostra ou com 1 único acerto isolado como melhor desempenho.
+    const MIN_ANSWERS_FOR_TOP_PERFORMANCE = 2;
+    const easiestQuestions = answeredQuestions
+        .filter(
+            (item) =>
+                item.answeredCount >= MIN_ANSWERS_FOR_TOP_PERFORMANCE &&
+                item.correctCount > 0,
+        )
+        .sort(
+            (a, b) =>
+                (b.correctRate ?? 0) - (a.correctRate ?? 0) ||
+                b.correctCount - a.correctCount ||
+                b.answeredCount - a.answeredCount,
+        );
+
+    const finishedGamesCount = finishedGames.length;
+    const totalWrongAnswers = Math.max(0, totalAnswers - totalCorrectAnswers);
+
+    return {
+        roomId,
+        finishedGamesCount,
+        totalParticipations,
+        averagePlayersPerGame: totalParticipations / finishedGamesCount,
+        averageScore:
+            totalParticipations > 0 ? totalScoreSum / totalParticipations : null,
+        totalAnswers,
+        totalCorrectAnswers,
+        totalWrongAnswers,
+        averageCorrectRate:
+            totalAnswers > 0 ? totalCorrectAnswers / totalAnswers : null,
+        lastFinishedGameAt,
+        hardestQuestions,
+        easiestQuestions,
+        questionPerformance,
+    };
+}
+
 function projectRoomWithGame(
-    room: Room & { games?: readonly GameWithPlayersProjection[] },
+    room: Room & {
+        games?: readonly GameWithPlayersProjection[];
+        questions?: readonly { id: string }[];
+    },
     explicitGame?: GameWithPlayersProjection | null,
 ): ProjectedRoomSummary {
     const selectedGame =
@@ -525,6 +806,20 @@ function projectRoomWithGame(
         (selectedGame.status === "WAITING" ||
             selectedGame.status === "IN_PROGRESS");
 
+    const finishedGames = (room.games ?? []).filter(
+        (game) => game.status === "FINISHED",
+    );
+    let lastGameFinishedAt: Date | null = null;
+    for (const game of finishedGames) {
+        const refDate = game.finishedAt ?? game.startedAt ?? game.createdAt;
+        if (
+            lastGameFinishedAt === null ||
+            refDate.getTime() > lastGameFinishedAt.getTime()
+        ) {
+            lastGameFinishedAt = refDate;
+        }
+    }
+
     return {
         id: room.id,
         code: room.code,
@@ -545,6 +840,16 @@ function projectRoomWithGame(
         updatedAt: room.updatedAt,
         players: exposedPlayers,
         currentGame,
+        ...(room.questions !== undefined
+            ? { activeQuestionsCount: room.questions.length }
+            : {}),
+        ...(room.games !== undefined
+            ? {
+                  finishedGamesCount: finishedGames.length,
+                  totalGamesCount: room.games.length,
+                  lastGameFinishedAt,
+              }
+            : {}),
     };
 }
 
@@ -1068,6 +1373,14 @@ export class RoomService {
         roomId: string,
         hostId: string,
     ): Promise<GameHistoryItem[]> {
+        const { games } = await this.listRoomGamesWithStats(roomId, hostId);
+        return games;
+    }
+
+    async listRoomGamesWithStats(
+        roomId: string,
+        hostId: string,
+    ): Promise<{ games: GameHistoryItem[]; stats: RoomAggregatedStats }> {
         const room = await this.roomRepository.findById(roomId);
 
         if (!room) {
@@ -1080,8 +1393,11 @@ export class RoomService {
             );
         }
 
-        const games = await this.roomRepository.findGamesByRoomId(roomId);
-        return games.map((game) => buildGameHistorySummary(game));
+        const rawGames = await this.roomRepository.findGamesByRoomId(roomId);
+        return {
+            games: rawGames.map((game) => buildGameHistorySummary(game)),
+            stats: buildRoomAggregatedStats(roomId, rawGames),
+        };
     }
 
     async getGameResults(

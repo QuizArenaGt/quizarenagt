@@ -1402,7 +1402,7 @@ describe('Etapa 2.3 — Interface e fluxo do modal de importação JSON', () => 
         assert.equal(stale.canRetry, false);
     });
 
-    it('18. DashboardForm integra botões Importar JSON apenas em WAITING ao lado do cadastro manual e monta único ImportQuestionsModal', () => {
+    it('18. DashboardForm integra botão Importar JSON apenas em WAITING ao lado do cadastro manual e monta único ImportQuestionsModal', () => {
         const dashboardSource = readFileSync(
             path.resolve(
                 import.meta.dirname,
@@ -1419,7 +1419,7 @@ describe('Etapa 2.3 — Interface e fluxo do modal de importação JSON', () => 
         );
 
         const importBtnMatches = dashboardSource.match(/Importar JSON/g) ?? [];
-        assert.equal(importBtnMatches.length, 2);
+        assert.equal(importBtnMatches.length, 1);
 
         const modalTagMatches =
             dashboardSource.match(/<ImportQuestionsModal/g) ?? [];
@@ -1431,7 +1431,6 @@ describe('Etapa 2.3 — Interface e fluxo do modal de importação JSON', () => 
             dashboardSource,
             /onImportBatch=\{questionBank\.importQuestionsBatch\}/,
         );
-        assert.match(dashboardSource, /\+ Cadastrar Pergunta na Sala/);
         assert.match(dashboardSource, /\+ Cadastrar Pergunta/);
 
         assert.match(modalSource, /canCloseImportModal\(vmParams\.isImporting\)/);

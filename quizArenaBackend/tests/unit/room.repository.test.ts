@@ -145,6 +145,10 @@ describe("RoomRepository", () => {
                 },
                 orderBy: { createdAt: "desc" },
                 include: {
+                    questions: {
+                        where: { isActive: true },
+                        select: { id: true },
+                    },
                     games: {
                         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
                         include: expect.objectContaining({

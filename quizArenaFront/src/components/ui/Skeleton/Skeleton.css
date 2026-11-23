@@ -1,0 +1,61 @@
+.ui-skeleton {
+  display: block;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-sm);
+  animation: ui-pulse 1.5s ease-in-out infinite;
+}
+
+.ui-skeleton--text {
+  height: 1em;
+  border-radius: var(--radius-sm);
+}
+
+.ui-skeleton--rect {
+  border-radius: var(--radius-md);
+}
+
+.ui-skeleton--circle {
+  border-radius: 50%;
+}
+
+@keyframes ui-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.ui-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.ui-loading__spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid var(--color-primary-soft);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: ui-loading-spin 700ms linear infinite;
+}
+
+@keyframes ui-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton {
+    animation: none;
+  }
+}

@@ -1,4 +1,5 @@
 import { useState, type ClipboardEvent } from 'react';
+import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import Modal from '../../../components/ui/Modal/Modal';
 import { formatRoomCode, getClipboardRoomCode, type Room } from '../../../models/room';
@@ -65,7 +66,19 @@ function RoomCodeContent({ room, onClose }: { room: Room; onClose: () => void })
                 <li>{room.theme}</li>
                 <li>{room.timeLimit} segundos por pergunta</li>
                 <li>{room.players.length} / {room.maxPlayers} jogadores no lobby</li>
-                <li>{room.status}</li>
+                <li>
+                    <Badge
+                        variant={
+                            room.status === 'Aguardando'
+                                ? 'warning'
+                                : room.status === 'Em Andamento'
+                                  ? 'success'
+                                  : 'neutral'
+                        }
+                    >
+                        {room.status}
+                    </Badge>
+                </li>
             </ul>
 
             <p className="room-code__note">

@@ -1,5 +1,11 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import Alert from '../../components/ui/Alert/Alert';
+import ConfirmDialog from '../../components/ui/ConfirmDialog/ConfirmDialog';
+import Icon from '../../components/ui/Icon/Icon';
 import Logo from '../../components/ui/Logo/Logo';
+import { LoadingState } from '../../components/ui/Skeleton/Skeleton';
+import { getPlayExitState } from '../../models/game';
 import { usePlayViewModel } from '../../viewmodels/usePlayViewModel';
 import FeedbackStep from './steps/FeedbackStep';
 import JoinStep from './steps/JoinStep';
@@ -11,46 +17,101 @@ import './PlayView.css';
 
 export default function PlayView() {
     const viewModel = usePlayViewModel();
-    const { phase } = viewModel;
+    const [isLeaveConfirmOpen, setIsLeaveConfirmOpen] = useState(false);
+    const { phase, socketStatus } = viewModel;
     const isInGame = phase === 'question' || phase === 'feedback';
+    const isLiveRoom = phase === 'lobby' || isInGame;
+    const exitState = getPlayExitState(phase, viewModel.isRecovering);
+    const isConfirmVisible = isLeaveConfirmOpen && exitState.requiresConfirmation;
+
+    const connectionLabel =
+        socketStatus === 'connected'
+            ? 'Ao vivo'
+            : socketStatus === 'reconnecting'
+              ? 'Reconectando…'
+              : 'Conectando…';
+
+    function handleTopbarExitClick() {
+        if (exitState.requiresConfirmation) {
+            setIsLeaveConfirmOpen(true);
+            return;
+        }
+        void viewModel.leaveRoom();
+    }
+
+    async function handleConfirmLeave() {
+        await viewModel.leaveRoom();
+        setIsLeaveConfirmOpen(false);
+    }
 
     return (
-        <div className="play">
+        <div className={`play play--phase-${phase}`}>
             <header className="play__topbar">
-                <Link to="/" className="play__brand" aria-label="QuizArenaGT, página inicial">
-                    <Logo variant="dark" withBadge size={34} />
-                </Link>
+                {exitState.requiresConfirmation ? (
+                    <span className="play__brand" aria-label="QuizArenaGT">
+                        <Logo variant="dark" withBadge size={34} />
+                    </span>
+                ) : (
+                    <Link to="/" className="play__brand" aria-label="QuizArenaGT, página inicial">
+                        <Logo variant="dark" withBadge size={34} />
+                    </Link>
+                )}
 
                 <div className="play__topbar-info">
-                    {isInGame && (
-                        <span className="play__chip play__chip--score">
-                            {viewModel.totalScore} pts
+                    {isLiveRoom && socketStatus !== 'idle' && (
+                        <span
+                            className={`play__chip play__chip--connection is-${socketStatus}`}
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <span className="play__conn-dot" aria-hidden="true" />
+                            <span>{connectionLabel}</span>
                         </span>
                     )}
+
+                    {isInGame && viewModel.room && (
+                        <span className="play__chip play__chip--room" title={viewModel.room.title}>
+                            <Icon name="rooms" size={14} />
+                            <span className="play__chip-room-name">{viewModel.room.title}</span>
+                        </span>
+                    )}
+
+                    {isInGame && (
+                        <span className="play__chip play__chip--score">
+                            <Icon name="trophy" size={14} />
+                            <span>{viewModel.totalScore} pts</span>
+                        </span>
+                    )}
+
                     <button
                         type="button"
-                        className="play__leave"
-                        onClick={() => void viewModel.leaveRoom()}
+                        className={`play__leave${exitState.requiresConfirmation ? ' play__leave--danger' : ''}`}
+                        onClick={handleTopbarExitClick}
                         disabled={viewModel.isLeaving}
                     >
-                        {viewModel.isLeaving ? 'Saindo...' : 'Sair'}
+                        {viewModel.isLeaving ? 'Saindo…' : exitState.label}
                     </button>
                 </div>
             </header>
 
-            {viewModel.leaveError && (
-                <div className="play__leave-error" role="alert">
-                    {viewModel.leaveError}
+            {isLiveRoom && socketStatus === 'reconnecting' && (
+                <div className="play__banner">
+                    <Alert variant="warning">
+                        Conexão instável. Tentando reconectar automaticamente à sala…
+                    </Alert>
+                </div>
+            )}
+
+            {viewModel.leaveError && !isConfirmVisible && (
+                <div className="play__banner">
+                    <Alert variant="error">{viewModel.leaveError}</Alert>
                 </div>
             )}
 
             <main className="play__stage">
                 {viewModel.isRecovering && (
                     <section className="play-card play-card--center" aria-live="polite">
-                        <h1 className="play-card__title">Recuperando sessão…</h1>
-                        <p className="play-card__text">
-                            Sincronizando sua participação na sala atual.
-                        </p>
+                        <LoadingState label="Recuperando sessão e sincronizando a sala…" />
                     </section>
                 )}
 
@@ -66,6 +127,7 @@ export default function PlayView() {
 
                 {!viewModel.isRecovering && phase === 'nickname' && (
                     <NicknameStep
+                        pin={viewModel.pin}
                         nickname={viewModel.nickname}
                         error={viewModel.error}
                         isJoining={viewModel.isJoining}
@@ -80,6 +142,7 @@ export default function PlayView() {
                         nickname={viewModel.nickname}
                         playerId={viewModel.playerId}
                         players={viewModel.lobbyPlayers}
+                        socketStatus={socketStatus}
                     />
                 )}
 
@@ -124,6 +187,22 @@ export default function PlayView() {
                     />
                 )}
             </main>
+
+            <ConfirmDialog
+                isOpen={isConfirmVisible}
+                title={exitState.confirmTitle}
+                confirmLabel={exitState.confirmLabel}
+                loadingLabel="Saindo…"
+                isLoading={viewModel.isLeaving}
+                tone="danger"
+                onConfirm={() => void handleConfirmLeave()}
+                onCancel={() => setIsLeaveConfirmOpen(false)}
+            >
+                <p>{exitState.confirmMessage}</p>
+                {viewModel.leaveError && (
+                    <Alert variant="error">{viewModel.leaveError}</Alert>
+                )}
+            </ConfirmDialog>
         </div>
     );
 }

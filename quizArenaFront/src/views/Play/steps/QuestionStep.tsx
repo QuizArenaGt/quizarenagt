@@ -1,3 +1,6 @@
+import Alert from '../../../components/ui/Alert/Alert';
+import Badge from '../../../components/ui/Badge/Badge';
+import Icon from '../../../components/ui/Icon/Icon';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
 import { CHOICE_LETTERS, QUESTION_TYPE_LABEL, type Question } from '../../../models/question';
 
@@ -15,6 +18,7 @@ interface QuestionStepProps {
 }
 
 const LOW_TIME_SECONDS = 5;
+const WARN_TIME_SECONDS = 10;
 
 export default function QuestionStep({
     question,
@@ -29,38 +33,63 @@ export default function QuestionStep({
     onAnswer,
 }: QuestionStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
-    const timeRatio = timeLimit > 0 ? remainingSeconds / timeLimit : 0;
-    const isLowTime = remainingSeconds <= LOW_TIME_SECONDS;
-    const isLocked = hasSubmittedAnswer || isSubmittingAnswer || remainingSeconds <= 0;
+    const timeRatio = timeLimit > 0 ? Math.max(0, Math.min(1, remainingSeconds / timeLimit)) : 0;
+    const isExpired = remainingSeconds <= 0;
+    const isLowTime = !isExpired && remainingSeconds <= LOW_TIME_SECONDS;
+    const isWarnTime =
+        !isExpired && !isLowTime && timeLimit > WARN_TIME_SECONDS && remainingSeconds <= WARN_TIME_SECONDS;
+    const isLocked = hasSubmittedAnswer || isSubmittingAnswer || isExpired;
+
+    const timerStateClass = isExpired
+        ? 'is-expired'
+        : isLowTime
+          ? 'is-low'
+          : isWarnTime
+            ? 'is-warn'
+            : '';
 
     return (
         <section className="play-question" aria-labelledby="play-question-title">
             <div className="play-question__top">
-                <span className="play-question__counter">
-                    {totalQuestions > 0
-                        ? `Pergunta ${questionNumber} de ${totalQuestions}`
-                        : `Rodada ${questionNumber}`}{' '}
-                    · {QUESTION_TYPE_LABEL[question.type]}
-                </span>
-                <span
-                    className={`play-question__timer${isLowTime ? ' is-low' : ''}`}
+                <div className="play-question__meta">
+                    <span className="play-question__counter">
+                        {totalQuestions > 0
+                            ? `Pergunta ${questionNumber} de ${totalQuestions}`
+                            : `Rodada ${questionNumber}`}
+                    </span>
+                    <Badge variant="neutral" className="play-question__type-badge">
+                        {QUESTION_TYPE_LABEL[question.type]}
+                    </Badge>
+                </div>
+
+                <div
+                    className={`play-question__timer${timerStateClass ? ` ${timerStateClass}` : ''}`}
                     role="timer"
-                    aria-label={`${remainingSeconds} segundos restantes`}
+                    aria-label={
+                        isExpired
+                            ? 'Tempo encerrado'
+                            : `${remainingSeconds} segundos restantes`
+                    }
                 >
-                    {remainingSeconds}s
-                </span>
+                    <span className="play-question__timer-value">{remainingSeconds}s</span>
+                    <span className="play-question__timer-label">
+                        {isExpired ? 'Encerrado' : 'restantes'}
+                    </span>
+                </div>
             </div>
 
             <div className="play-question__progress" aria-hidden="true">
                 <span
-                    className={isLowTime ? 'is-low' : undefined}
+                    className={timerStateClass || undefined}
                     style={{ transform: `scaleX(${timeRatio})` }}
                 />
             </div>
 
-            <h1 id="play-question-title" ref={titleRef} tabIndex={-1} className="play-question__statement">
-                {question.statement}
-            </h1>
+            <div className="play-question__statement-card">
+                <h1 id="play-question-title" ref={titleRef} tabIndex={-1} className="play-question__statement">
+                    {question.statement}
+                </h1>
+            </div>
 
             <div
                 className={`play-options play-options--${question.options.length === 2 ? 'two' : 'many'}`}
@@ -69,51 +98,85 @@ export default function QuestionStep({
             >
                 {question.options.map((option, index) => {
                     const isSelected = selectedOptionId === option.id;
+                    const optionClasses = [
+                        'play-option',
+                        `play-option--${index % 4}`,
+                        isSelected ? 'play-option--selected' : '',
+                        isLocked && !isSelected ? 'play-option--unselected' : '',
+                    ]
+                        .filter(Boolean)
+                        .join(' ');
+
                     return (
                         <button
                             key={option.id}
                             type="button"
-                            className={`play-option play-option--${index}`}
+                            className={optionClasses}
                             onClick={() => onAnswer(option.id)}
                             disabled={isLocked}
-                            style={{
-                                outline: isSelected ? '4px solid #ffffff' : undefined,
-                                opacity: isLocked && !isSelected ? 0.65 : 1,
-                            }}
+                            aria-pressed={isSelected}
                         >
                             <span className="play-option__letter" aria-hidden="true">
                                 {CHOICE_LETTERS[index]}
                             </span>
                             <span className="play-option__text">{option.text}</span>
+                            {isSelected && (
+                                <span className="play-option__selected-tag">
+                                    <Icon name="check" size={14} />
+                                    {isSubmittingAnswer && !hasSubmittedAnswer ? 'Enviando…' : 'Selecionada'}
+                                </span>
+                            )}
                         </button>
                     );
                 })}
             </div>
 
             {answerError && (
-                <p className="play-form__error" role="alert" style={{ marginTop: '16px', textAlign: 'center' }}>
+                <Alert variant="error" className="play-question__error-alert">
                     {answerError}
-                </p>
+                </Alert>
+            )}
+
+            {isSubmittingAnswer && !hasSubmittedAnswer && (
+                <div className="play-question__status play-question__status--submitting" role="status">
+                    <span className="play-question__status-badge" aria-hidden="true">
+                        <Icon name="bolt" size={16} />
+                    </span>
+                    <div className="play-question__status-text">
+                        <strong>Registrando sua resposta…</strong>
+                        <span>Confirmando envio com o servidor.</span>
+                    </div>
+                </div>
             )}
 
             {hasSubmittedAnswer && (
-                <p
-                    className="play-lobby__waiting"
-                    role="status"
-                    style={{ marginTop: '20px', textAlign: 'center', fontWeight: 600 }}
-                >
-                    Resposta registrada! Aguardando o encerramento da rodada para revelar o gabarito e a pontuação…
-                </p>
+                <div className="play-question__status play-question__status--submitted" role="status">
+                    <span className="play-question__status-badge" aria-hidden="true">
+                        <Icon name="check" size={16} />
+                    </span>
+                    <div className="play-question__status-text">
+                        <strong>Resposta registrada e bloqueada!</strong>
+                        <span>
+                            Sua escolha já foi computada e não pode ser alterada. Aguarde os demais
+                            jogadores ou o término do tempo para ver o gabarito.
+                        </span>
+                    </div>
+                </div>
             )}
 
-            {!hasSubmittedAnswer && remainingSeconds <= 0 && (
-                <p
-                    className="play-lobby__waiting"
-                    role="status"
-                    style={{ marginTop: '20px', textAlign: 'center', fontWeight: 600 }}
-                >
-                    Tempo esgotado! Aguardando o encerramento da rodada…
-                </p>
+            {!hasSubmittedAnswer && !isSubmittingAnswer && isExpired && (
+                <div className="play-question__status play-question__status--timeout" role="status">
+                    <span className="play-question__status-badge" aria-hidden="true">
+                        <Icon name="timer" size={16} />
+                    </span>
+                    <div className="play-question__status-text">
+                        <strong>Tempo esgotado!</strong>
+                        <span>
+                            Nenhuma resposta foi enviada nesta rodada. Aguardando o encerramento para
+                            revelar o gabarito e avançar.
+                        </span>
+                    </div>
+                </div>
             )}
         </section>
     );

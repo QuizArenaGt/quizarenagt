@@ -1,7 +1,18 @@
 /*
- * Estilos compartilhados pelo relatório da sala (RoomReportModal) e pelas
+ * Estilos compartilhados pelo relatório da sala/partida (RoomReportModal) e pelas
  * estatísticas da Visão Geral (OverviewStats).
  */
+.ui-modal:has(.report-modal-root) {
+  width: min(860px, calc(100% - 2 * var(--space-4)));
+}
+
+.report-modal-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  text-align: left;
+}
+
 .report {
   display: flex;
   flex-direction: column;
@@ -9,20 +20,114 @@
   text-align: left;
 }
 
-.report-summary {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-2);
-  list-style: none;
+/* Metadados compactos da partida */
+.report-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
 }
 
-.report-summary li {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-full);
-  background: var(--color-primary-soft);
+.report-meta__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.report-meta__item dt {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.report-meta__item dd {
+  margin: 0;
   font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.report-meta__winner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.report-meta__winner svg {
+  flex-shrink: 0;
+  color: var(--color-highlight-strong);
+}
+
+.report-status-alert {
+  margin: 0;
+}
+
+/* Faixa única de KPIs do resumo */
+.report-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.report-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-right: var(--space-3);
+  border-right: 1px solid var(--color-border);
+}
+
+.report-kpi:last-child {
+  padding-right: 0;
+  border-right: none;
+}
+
+.report-kpi__label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-muted);
+}
+
+.report-kpi__value {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-black);
+  line-height: 1.15;
   color: var(--color-primary);
+}
+
+.report-kpi__caption {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  line-height: 1.35;
+}
+
+.report-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.report-section-head .report-section__title {
+  margin-bottom: 0;
 }
 
 .report-section__title {
@@ -34,11 +139,17 @@
   color: var(--color-text-muted);
 }
 
-/* Ranking em tabela */
+.report-tie-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+/* Ranking em tabela (desktop/tablet >= 640px) */
 .report-table-wrapper {
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 
 .report-table {
@@ -59,6 +170,10 @@
   border-bottom: none;
 }
 
+.report-table tbody tr:hover {
+  background: var(--color-bg);
+}
+
 .report-table th {
   background: var(--color-bg);
   font-size: var(--text-xs);
@@ -74,27 +189,49 @@
   min-width: 32px;
   padding: 2px var(--space-2);
   border-radius: var(--radius-full);
+  font-size: var(--text-xs);
   font-weight: var(--weight-black);
 }
 
 .report-position--1 {
-  background: var(--color-highlight);
+  background: var(--color-highlight-soft);
+  color: var(--color-highlight-strong);
 }
 
 .report-position--2 {
-  background: #e2e8f0;
+  background: var(--color-surface-muted);
+  color: var(--color-text);
 }
 
 .report-position--3 {
-  background: #fdba74;
+  background: var(--color-warning-soft);
+  color: var(--color-warning-strong);
 }
 
 .report-position--4 {
   color: var(--color-text-muted);
 }
 
+.report-player-name {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.report-tag-tie {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  font-size: 0.7rem;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
 .report-simulated {
-  margin-left: var(--space-2);
   padding: 1px var(--space-2);
   border-radius: var(--radius-full);
   background: var(--color-bg);
@@ -102,7 +239,249 @@
   color: var(--color-text-muted);
 }
 
-/* Destaques em cartões */
+.report-score {
+  font-weight: var(--weight-bold);
+  color: var(--color-primary);
+}
+
+.report-score.is-negative {
+  color: var(--color-danger-strong);
+}
+
+.report-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold);
+}
+
+.report-num--good {
+  color: var(--color-success-strong);
+}
+
+.report-num--bad {
+  color: var(--color-danger-strong);
+}
+
+.report-num--muted {
+  color: var(--color-text-muted);
+}
+
+/* Ranking em cartões compactos (mobile < 640px) */
+.report-ranking-cards {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-ranking-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.report-ranking-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.report-ranking-card__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.report-ranking-card__name {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.report-ranking-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.report-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.report-stat-pill strong {
+  color: var(--color-text);
+}
+
+.report-stat-pill--good {
+  border-color: var(--color-success-border);
+  background: var(--color-success-soft);
+  color: var(--color-success-strong);
+}
+
+.report-stat-pill--good strong {
+  color: var(--color-success-strong);
+}
+
+.report-stat-pill--bad {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-soft);
+  color: var(--color-danger-strong);
+}
+
+.report-stat-pill--bad strong {
+  color: var(--color-danger-strong);
+}
+
+/* Análise por questão */
+.report-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.report-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.report-legend__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-full);
+}
+
+.report-legend__dot--good {
+  background: var(--color-success);
+}
+
+.report-legend__dot--bad {
+  background: var(--color-danger);
+}
+
+.report-legend__dot--muted {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+}
+
+.report-questions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-question-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.report-question-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.report-question-item__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.report-question-item__num {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-black);
+  color: var(--color-primary);
+}
+
+.report-question-item__rate {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-muted);
+}
+
+.report-question-item__statement {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1.45;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.report-dist-bar {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-subtle);
+}
+
+.report-dist-bar__segment {
+  display: block;
+  height: 100%;
+}
+
+.report-dist-bar__segment--good {
+  background: var(--color-success);
+}
+
+.report-dist-bar__segment--bad {
+  background: var(--color-danger);
+}
+
+.report-dist-bar__segment--muted {
+  background: var(--color-surface-muted);
+}
+
+.report-question-item__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.report-question-item__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.report-question-item__answered-rate {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+/* Destaques e OverviewStats compartilhado */
 .report-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -116,10 +495,40 @@
   background: var(--color-surface);
 }
 
+.report-card-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.report-highlights-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.report-highlights-group--divider {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.report-highlights-subtitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .report-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
@@ -140,6 +549,12 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--color-text);
+  word-break: break-word;
+}
+
+.report-list__sub {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 .report-list__metric {
@@ -149,7 +564,7 @@
   color: var(--color-primary);
 }
 
-/* Barra de taxa de acerto */
+/* Barra de taxa de acerto (usada por OverviewStats e RoomReportModal) */
 .rate-bar {
   display: flex;
   align-items: center;
@@ -171,7 +586,7 @@
 }
 
 .rate-bar__fill--good {
-  background: #22c55e;
+  background: var(--color-success);
 }
 
 .rate-bar__fill--medium {
@@ -179,7 +594,7 @@
 }
 
 .rate-bar__fill--low {
-  background: #ef4444;
+  background: var(--color-danger);
 }
 
 .rate-bar__value {
@@ -196,21 +611,49 @@
 
 .report-note,
 .report-empty {
+  margin: 0;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+  line-height: 1.45;
 }
 
 .report-empty {
   text-align: center;
 }
 
+/* Rodapé fixo mantém botão Fechar sempre acessível */
 .report-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
-  margin-top: var(--space-6);
+  margin: var(--space-1) calc(-1 * var(--space-6)) calc(-1 * var(--space-6));
+  padding: var(--space-3) var(--space-6) var(--space-5);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+@media (max-width: 767px) {
+  .report-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-kpi {
+    padding-right: 0;
+    border-right: none;
+  }
 }
 
 @media (max-width: 639px) {
+  .report-table-wrapper {
+    display: none;
+  }
+
+  .report-ranking-cards {
+    display: flex;
+  }
+
   .report-grid {
     grid-template-columns: 1fr;
   }

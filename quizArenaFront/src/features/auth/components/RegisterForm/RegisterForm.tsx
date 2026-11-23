@@ -1,49 +1,82 @@
-
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import "../LoginForm/LoginForm.css";
 
 import { register } from "../../services/authService";
 import type { RegisterRequest } from "../../types/auth";
+import {
+    AUTH_NAME_MAX_LENGTH,
+    formatAuthApiError,
+    validateRegisterFields,
+    type AuthFieldErrors,
+    type RegisterField,
+} from "../../validation";
+import { ApiError } from "../../../../services/api";
+import InputEmail from "../../../../components/Inputs/InputEmail/InputEmail";
+import InputPassword from "../../../../components/Inputs/InputPassword/InputPassword";
 import AuthBrandPanel from "../../../../components/layout/AuthBrandPanel/AuthBrandPanel";
+import Alert from "../../../../components/ui/Alert/Alert";
+import Button from "../../../../components/ui/Button/Button";
 
 interface RegisterFormProps {
     onSuccess: () => void;
 }
 
-export default function RegisterForm({ onSuccess
-}: RegisterFormProps) {
-    const navigate = useNavigate();
+export default function RegisterForm({ onSuccess }: RegisterFormProps) {
+    const redirectTimerRef = useRef<number | null>(null);
 
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
+    const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors<RegisterField>>({});
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
+    useEffect(() => {
+        return () => {
+            if (redirectTimerRef.current !== null) {
+                window.clearTimeout(redirectTimerRef.current);
+            }
+        };
+    }, []);
+
+    function clearFieldError(field: RegisterField) {
+        if (fieldErrors[field]) {
+            setFieldErrors((current) => ({ ...current, [field]: undefined }));
+        }
+        if (error) {
+            setError(null);
+        }
+    }
+
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        if (isLoading || success) return;
+
         setError(null);
         setSuccess(null);
 
-        if (password.length < 8) {
-            setError("A senha deve possuir pelo menos 8 caracteres.");
+        const validationErrors = validateRegisterFields({
+            name,
+            email,
+            password,
+            confirmPassword,
+        });
+
+        if (Object.keys(validationErrors).length > 0) {
+            setFieldErrors(validationErrors);
             return;
         }
 
-        if (password !== confirmPassword) {
-            setError("As senhas não coincidem.");
-            return;
-        }
-
+        setFieldErrors({});
         setIsLoading(true);
 
         try {
             const request: RegisterRequest = {
-                name,
-                email,
+                name: name.trim(),
+                email: email.trim(),
                 password,
             };
 
@@ -51,23 +84,27 @@ export default function RegisterForm({ onSuccess
 
             setSuccess("Cadastro realizado com sucesso! Redirecionando para o login...");
 
-            setTimeout(() => {
-                navigate("/login", {
-                    state: { registered: true },
-                });
+            redirectTimerRef.current = window.setTimeout(() => {
+                onSuccess();
             }, 1500);
-
-            onSuccess();
-        } catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : "Erro ao realizar cadastro. Tente novamente."
-            );
+        } catch (err) {
+            if (err instanceof ApiError && err.status === 400 && err.errors) {
+                const nextFieldErrors: AuthFieldErrors<RegisterField> = {};
+                if (err.errors.name) nextFieldErrors.name = err.errors.name;
+                if (err.errors.email) nextFieldErrors.email = err.errors.email;
+                if (err.errors.password) nextFieldErrors.password = err.errors.password;
+                if (Object.keys(nextFieldErrors).length > 0) {
+                    setFieldErrors(nextFieldErrors);
+                    return;
+                }
+            }
+            setError(formatAuthApiError(err, "Erro ao realizar cadastro. Tente novamente."));
         } finally {
             setIsLoading(false);
         }
     }
+
+    const isFormLocked = isLoading || Boolean(success);
 
     return (
         <div className="arena-background">
@@ -77,84 +114,108 @@ export default function RegisterForm({ onSuccess
                     description="Leva menos de um minuto para começar."
                 />
 
-                <form className="login-card" onSubmit={handleSubmit}>
+                <form className="login-card" onSubmit={handleSubmit} noValidate>
                     <div className="input-group">
-                        <label htmlFor="name">Nome</label>
+                        <label htmlFor="name" className="labelInput">
+                            Nome
+                        </label>
                         <div className="input-wrapper">
+                            <span className="input-icon">
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth="2"
+                                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                                    />
+                                </svg>
+                            </span>
                             <input
                                 type="text"
                                 id="name"
+                                name="name"
                                 placeholder="Digite seu nome"
                                 value={name}
-                                onChange={(event) => setName(event.target.value)}
-                                required
-                                maxLength={100}
+                                onChange={(event) => {
+                                    setName(event.target.value);
+                                    clearFieldError("name");
+                                }}
+                                autoComplete="name"
+                                disabled={isFormLocked}
+                                maxLength={AUTH_NAME_MAX_LENGTH}
+                                aria-required="true"
+                                aria-invalid={fieldErrors.name ? true : undefined}
+                                aria-describedby={fieldErrors.name ? "name-error" : undefined}
                             />
                         </div>
+                        {fieldErrors.name && (
+                            <p id="name-error" className="input-error" role="alert">
+                                {fieldErrors.name}
+                            </p>
+                        )}
                     </div>
 
-                    <div className="input-group">
-                        <label htmlFor="email">Email</label>
-                        <div className="input-wrapper">
-                            <input
-                                type="email"
-                                id="email"
-                                placeholder="Digite seu email"
-                                value={email}
-                                onChange={(event) => setEmail(event.target.value)}
-                                required
-                            />
-                        </div>
-                    </div>
+                    <InputEmail
+                        email={email}
+                        setEmail={(value) => {
+                            setEmail(value);
+                            clearFieldError("email");
+                        }}
+                        disabled={isFormLocked}
+                        error={fieldErrors.email}
+                    />
 
-                    <div className="input-group">
-                        <label htmlFor="password">Senha</label>
-                        <div className="input-wrapper">
-                            <input
-                                type="password"
-                                id="password"
-                                placeholder="Mínimo de 8 caracteres"
-                                value={password}
-                                onChange={(event) => setPassword(event.target.value)}
-                                required
-                                minLength={8}
-                            />
-                        </div>
-                    </div>
+                    <InputPassword
+                        id="password"
+                        label="Senha"
+                        textPlaceholder="Mínimo de 8 caracteres"
+                        password={password}
+                        setPassword={(value) => {
+                            setPassword(value);
+                            clearFieldError("password");
+                        }}
+                        autoComplete="new-password"
+                        disabled={isFormLocked}
+                        error={fieldErrors.password}
+                    />
 
-                    <div className="input-group">
-                        <label htmlFor="confirmPassword">Confirmar senha</label>
-                        <div className="input-wrapper">
-                            <input
-                                type="password"
-                                id="confirmPassword"
-                                placeholder="Digite a senha novamente"
-                                value={confirmPassword}
-                                onChange={(event) => setConfirmPassword(event.target.value)}
-                                required
-                            />
-                        </div>
-                    </div>
+                    <InputPassword
+                        id="confirmPassword"
+                        label="Confirmar senha"
+                        textPlaceholder="Digite a senha novamente"
+                        password={confirmPassword}
+                        setPassword={(value) => {
+                            setConfirmPassword(value);
+                            clearFieldError("confirmPassword");
+                        }}
+                        autoComplete="new-password"
+                        disabled={isFormLocked}
+                        error={fieldErrors.confirmPassword}
+                    />
 
                     {error && (
-                        <div className="login-error" role="alert">
-                            {error}
-                        </div>
+                        <Alert variant="error">{error}</Alert>
                     )}
 
                     {success && (
-                        <div className="register-success" role="status">
-                            {success}
-                        </div>
+                        <Alert variant="success">{success}</Alert>
                     )}
 
-                    <button
+                    <Button
                         type="submit"
-                        className="btn-submit"
-                        disabled={isLoading}
+                        size="lg"
+                        fullWidth
+                        isLoading={isLoading}
+                        disabled={Boolean(success)}
                     >
-                        {isLoading ? "CADASTRANDO..." : "CADASTRAR"}
-                    </button>
+                        {isLoading ? "Cadastrando…" : "Criar conta"}
+                    </Button>
                 </form>
 
                 <footer className="login-footer">

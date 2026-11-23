@@ -9,7 +9,7 @@ interface RankingListProps {
     limit?: number;
 }
 
-/** VIEW — lista de classificação, destacando o aluno atual. */
+/** VIEW — lista de classificação, destacando o participante atual. */
 export default function RankingList({ entries, limit = entries.length }: RankingListProps) {
     const visible = entries.slice(0, limit);
     const currentPlayer = entries.find((entry) => entry.isCurrentPlayer);
@@ -38,12 +38,16 @@ function RankingRow({ entry }: { entry: RankingEntry }) {
             className={`play-ranking__row${entry.isCurrentPlayer ? ' is-current' : ''}`}
             aria-current={entry.isCurrentPlayer ? 'true' : undefined}
         >
-            <span className="play-ranking__position">{entry.position}º</span>
-            <span className="play-ranking__name">
-                {entry.nickname}
-                {entry.isCurrentPlayer && <span className="play-ranking__you"> (você)</span>}
+            <span className={`play-ranking__position play-ranking__position--${Math.min(entry.position, 4)}`}>
+                {entry.position}º
             </span>
-            <span className="play-ranking__score">{entry.score} pts</span>
+            <span className="play-ranking__name">
+                <span className="play-ranking__name-text">{entry.nickname}</span>
+                {entry.isCurrentPlayer && <span className="play-ranking__you">você</span>}
+            </span>
+            <span className={`play-ranking__score${entry.score < 0 ? ' is-negative' : ''}`}>
+                {entry.score} pts
+            </span>
         </li>
     );
 }
