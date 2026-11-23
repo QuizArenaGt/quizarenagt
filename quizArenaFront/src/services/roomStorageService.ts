@@ -42,8 +42,44 @@ export interface ApiGameHistoryItem {
     createdAt: string;
     durationMs: number | null;
     playerCount: number;
+    answeredCount?: number;
+    correctCount?: number;
+    averageCorrectRate?: number | null;
     winner: ApiGameWinner | null;
     ranking: ApiGameRankingEntry[];
+}
+
+export interface ApiRoomAggregatedQuestionPerformance {
+    questionKey: string;
+    questionId: string;
+    sourceQuestionId: string | null;
+    statement: string;
+    position: number;
+    gamesPlayedCount: number;
+    answeredCount: number;
+    correctCount: number;
+    incorrectCount: number;
+    unansweredCount: number;
+    expectedAnswers: number;
+    correctRate: number | null;
+    errorRate?: number | null;
+    overallCorrectRate: number | null;
+}
+
+export interface ApiRoomAggregatedStats {
+    roomId: string;
+    finishedGamesCount: number;
+    totalParticipations: number;
+    averagePlayersPerGame: number | null;
+    averageScore: number | null;
+    totalAnswers: number;
+    totalCorrectAnswers: number;
+    totalWrongAnswers?: number;
+    averageCorrectRate: number | null;
+    lastFinishedGameAt: string | null;
+    hardestQuestions: ApiRoomAggregatedQuestionPerformance[];
+    easiestQuestions: ApiRoomAggregatedQuestionPerformance[];
+    questionPerformance: ApiRoomAggregatedQuestionPerformance[];
 }
 
 export interface ApiGameQuestionResult {
@@ -125,6 +161,10 @@ export interface ApiRoom {
 export interface ApiHostRoom extends ApiRoom {
     players?: LobbyPlayerDto[];
     currentGame?: ApiGameSummary;
+    activeQuestionsCount?: number;
+    finishedGamesCount?: number;
+    totalGamesCount?: number;
+    lastGameFinishedAt?: string | null;
 }
 
 export interface ApiRoomLobby {
@@ -220,6 +260,20 @@ export function mapApiRoomToModel(
     const metaTheme = typeof meta?.theme === 'string' ? meta.theme.trim() : '';
     const currentGameId =
         'currentGame' in apiRoom ? (apiRoom.currentGame?.id ?? null) : undefined;
+    const activeQuestionsCount =
+        'activeQuestionsCount' in apiRoom && typeof apiRoom.activeQuestionsCount === 'number'
+            ? apiRoom.activeQuestionsCount
+            : undefined;
+    const finishedGamesCount =
+        'finishedGamesCount' in apiRoom && typeof apiRoom.finishedGamesCount === 'number'
+            ? apiRoom.finishedGamesCount
+            : undefined;
+    const totalGamesCount =
+        'totalGamesCount' in apiRoom && typeof apiRoom.totalGamesCount === 'number'
+            ? apiRoom.totalGamesCount
+            : undefined;
+    const lastGameFinishedAt =
+        'lastGameFinishedAt' in apiRoom ? (apiRoom.lastGameFinishedAt ?? null) : undefined;
     return {
         id: apiRoom.id,
         code: apiRoom.code,
@@ -231,6 +285,10 @@ export function mapApiRoomToModel(
         status: mapBackendRoomStatus(apiRoom.status),
         backendStatus: apiRoom.status,
         ...(currentGameId !== undefined ? { currentGameId } : {}),
+        ...(activeQuestionsCount !== undefined ? { activeQuestionsCount } : {}),
+        ...(finishedGamesCount !== undefined ? { finishedGamesCount } : {}),
+        ...(totalGamesCount !== undefined ? { totalGamesCount } : {}),
+        ...(lastGameFinishedAt !== undefined ? { lastGameFinishedAt } : {}),
         questionIds: meta?.questionIds ?? [],
         players,
     };
@@ -453,10 +511,10 @@ export async function submitRoundAnswerApi(
     });
 }
 
-export async function listRoomGamesApi(
+export async function listRoomGamesWithStatsApi(
     roomId: string,
-): Promise<ApiGameHistoryItem[]> {
-    const response = await apiRequest<{ games: unknown }>(
+): Promise<{ games: ApiGameHistoryItem[]; stats: ApiRoomAggregatedStats | null }> {
+    const response = await apiRequest<{ games: unknown; stats?: unknown }>(
         `/rooms/${encodeURIComponent(roomId)}/games`,
         {
             method: 'GET',
@@ -471,7 +529,23 @@ export async function listRoomGamesApi(
         throw new Error('Resposta inválida ao consultar histórico de partidas.');
     }
 
-    return (response as { games: ApiGameHistoryItem[] }).games;
+    const rawStats = (response as { stats?: unknown }).stats;
+    const stats =
+        rawStats && typeof rawStats === 'object'
+            ? (rawStats as ApiRoomAggregatedStats)
+            : null;
+
+    return {
+        games: (response as { games: ApiGameHistoryItem[] }).games,
+        stats,
+    };
+}
+
+export async function listRoomGamesApi(
+    roomId: string,
+): Promise<ApiGameHistoryItem[]> {
+    const { games } = await listRoomGamesWithStatsApi(roomId);
+    return games;
 }
 
 export async function getGameResultsApi(

@@ -4,6 +4,12 @@ import { Link } from "react-router-dom";
 
 import { login } from '../../services/authService';
 import type { LoginRequest } from '../../types/auth';
+import {
+    formatAuthApiError,
+    validateLoginFields,
+    type AuthFieldErrors,
+    type LoginField,
+} from '../../validation';
 import InputEmail from '../../../../components/Inputs/InputEmail/InputEmail';
 import InputPassword from '../../../../components/Inputs/InputPassword/InputPassword';
 import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
@@ -18,18 +24,47 @@ interface LoginFormProps {
 export default function LoginForm({ onSuccess, embedded = false }: LoginFormProps) {
     const [email, setEmail] = useState<string>('');
     const [password, setPassword] = useState<string>('');
+    const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors<LoginField>>({});
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
 
+    function handleEmailChange(value: string) {
+        setEmail(value);
+        if (fieldErrors.email) {
+            setFieldErrors((current) => ({ ...current, email: undefined }));
+        }
+        if (error) {
+            setError(null);
+        }
+    }
+
+    function handlePasswordChange(value: string) {
+        setPassword(value);
+        if (fieldErrors.password) {
+            setFieldErrors((current) => ({ ...current, password: undefined }));
+        }
+        if (error) {
+            setError(null);
+        }
+    }
+
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        setIsLoading(true);
         setError(null);
+
+        const validationErrors = validateLoginFields({ email, password });
+        if (Object.keys(validationErrors).length > 0) {
+            setFieldErrors(validationErrors);
+            return;
+        }
+
+        setFieldErrors({});
+        setIsLoading(true);
 
         try {
             const request: LoginRequest = {
-                email,
-                password
+                email: email.trim(),
+                password,
             };
 
             const response = await login(request);
@@ -38,12 +73,8 @@ export default function LoginForm({ onSuccess, embedded = false }: LoginFormProp
             localStorage.setItem("user", JSON.stringify(response.user));
 
             onSuccess();
-        } catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : "Erro ao fazer login. Tente novamente."
-            );
+        } catch (err) {
+            setError(formatAuthApiError(err, "Erro ao fazer login. Tente novamente."));
         } finally {
             setIsLoading(false);
         }
@@ -61,17 +92,19 @@ export default function LoginForm({ onSuccess, embedded = false }: LoginFormProp
                     />
                 )}
 
-                <form className="login-card" onSubmit={handleSubmit}>
+                <form className="login-card" onSubmit={handleSubmit} noValidate>
                     <InputEmail
                         email={email}
-                        setEmail={setEmail}
+                        setEmail={handleEmailChange}
                         disabled={isLoading}
+                        error={fieldErrors.email}
                     />
 
                     <InputPassword
                         password={password}
-                        setPassword={setPassword}
+                        setPassword={handlePasswordChange}
                         disabled={isLoading}
+                        error={fieldErrors.password}
                     />
 
                     <div className="forgot-password-wrapper">
@@ -102,4 +135,4 @@ export default function LoginForm({ onSuccess, embedded = false }: LoginFormProp
             </ContainerTag>
         </div>
     );
-};
+}

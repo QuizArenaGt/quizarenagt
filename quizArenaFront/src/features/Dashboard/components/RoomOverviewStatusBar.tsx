@@ -1,5 +1,6 @@
 import Badge, { type BadgeVariant } from '../../../components/ui/Badge/Badge';
 import {
+    MIN_ROOM_PLAYERS,
     MIN_ROOM_QUESTIONS,
     type Room,
 } from '../../../models/room';
@@ -13,6 +14,12 @@ interface RoomOverviewStatusBarProps {
     closedRoundNumber: number | null;
     answeredCount: number;
     gamesCount: number;
+}
+
+interface StatusMetricItem {
+    label: string;
+    value: string;
+    hint?: string;
 }
 
 /** Faixa de leitura rápida do estado operacional da sala na aba Visão Geral. */
@@ -29,7 +36,7 @@ export default function RoomOverviewStatusBar({
     let badgeVariant: BadgeVariant;
     let badgeLabel: string;
     let headline: string;
-    let metrics: { label: string; value: string }[];
+    let metrics: StatusMetricItem[];
 
     if (room.backendStatus === 'WAITING') {
         badgeVariant = canStart ? 'success' : 'warning';
@@ -39,12 +46,14 @@ export default function RoomOverviewStatusBar({
             : 'Complete as perguntas e aguarde os jogadores entrarem para iniciar.';
         metrics = [
             {
-                label: 'Jogadores ativos',
-                value: `${activePlayersCount} / ${room.maxPlayers}`,
+                label: 'Jogadores na sala',
+                value: `${activePlayersCount}`,
+                hint: `mín. ${MIN_ROOM_PLAYERS} · máx. ${room.maxPlayers}`,
             },
             {
                 label: 'Perguntas ativas',
-                value: `${activeQuestionsCount} / mín. ${MIN_ROOM_QUESTIONS}`,
+                value: `${activeQuestionsCount}`,
+                hint: `mín. ${MIN_ROOM_QUESTIONS}`,
             },
         ];
     } else if (room.backendStatus === 'IN_PROGRESS') {
@@ -74,6 +83,7 @@ export default function RoomOverviewStatusBar({
             {
                 label: 'Participantes ativos',
                 value: `${activePlayersCount}`,
+                hint: `máx. ${room.maxPlayers}`,
             },
             ...(activeRoundNumber
                 ? [
@@ -113,6 +123,7 @@ export default function RoomOverviewStatusBar({
                     <li key={item.label} className="room-status-metric">
                         <span className="room-status-metric__label">{item.label}</span>
                         <strong className="room-status-metric__value">{item.value}</strong>
+                        {item.hint && <span className="room-status-metric__hint">{item.hint}</span>}
                     </li>
                 ))}
             </ul>

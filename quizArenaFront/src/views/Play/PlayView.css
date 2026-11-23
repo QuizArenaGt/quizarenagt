@@ -706,7 +706,7 @@
 }
 
 .play-question__statement-card {
-  padding: var(--space-7) var(--space-6);
+  padding: var(--space-8) var(--space-8);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: var(--shadow-modal);
@@ -716,8 +716,8 @@
   margin: 0;
   font-size: clamp(var(--text-xl), 3vw, var(--text-3xl));
   font-weight: var(--weight-black);
-  letter-spacing: -0.015em;
-  line-height: 1.28;
+  letter-spacing: -0.01em;
+  line-height: 1.38;
   text-align: center;
   overflow-wrap: anywhere;
   color: var(--color-text);
@@ -1500,11 +1500,12 @@
   }
 
   .play-question__statement-card {
-    padding: var(--space-5) var(--space-4);
+    padding: var(--space-6) var(--space-5);
   }
 
   .play-question__statement {
-    font-size: clamp(1.125rem, 4.8vw, 1.5rem);
+    font-size: clamp(1.125rem, 4.4vw, 1.45rem);
+    line-height: 1.38;
   }
 
   .play-options {

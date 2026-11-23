@@ -761,6 +761,146 @@ describe("RoomService", () => {
                 service.listRoomGames(roomFixture.id, "outro-host"),
             ).rejects.toThrow(RoomAccessDeniedError);
         });
+
+        it("deve agregar estatísticas apenas de partidas FINISHED, tratando Hardcore negativo e partidas sem respostas", async () => {
+            const { buildRoomAggregatedStats } = await import("../../src/rooms/room.service.js");
+
+            const stats = buildRoomAggregatedStats("room-1", [
+                {
+                    id: "g-finished-1",
+                    status: "FINISHED",
+                    startedAt: new Date("2026-11-20T10:00:00.000Z"),
+                    finishedAt: new Date("2026-11-20T10:05:00.000Z"),
+                    createdAt: new Date("2026-11-20T09:58:00.000Z"),
+                    players: [
+                        { id: "p1", score: 150 },
+                        { id: "p2", score: -30 },
+                    ],
+                    rounds: [
+                        {
+                            id: "r1",
+                            snapshotQuestion: {
+                                id: "sq-1",
+                                sourceQuestionId: "q-shared",
+                                statement: "Questão compartilhada",
+                                position: 0,
+                            },
+                            answers: [
+                                { gamePlayerId: "p1", isCorrect: true },
+                                { gamePlayerId: "p2", isCorrect: false },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    id: "g-cancelled",
+                    status: "CANCELLED",
+                    startedAt: new Date("2026-11-20T11:00:00.000Z"),
+                    finishedAt: new Date("2026-11-20T11:01:00.000Z"),
+                    createdAt: new Date("2026-11-20T10:59:00.000Z"),
+                    players: [{ id: "p-canc", score: 500 }],
+                    rounds: [],
+                },
+                {
+                    id: "g-in-progress",
+                    status: "IN_PROGRESS",
+                    startedAt: new Date("2026-11-20T12:00:00.000Z"),
+                    finishedAt: null,
+                    createdAt: new Date("2026-11-20T11:59:00.000Z"),
+                    players: [{ id: "p-live", score: 999 }],
+                    rounds: [],
+                },
+                {
+                    id: "g-finished-no-answers",
+                    status: "FINISHED",
+                    startedAt: new Date("2026-11-20T13:00:00.000Z"),
+                    finishedAt: new Date("2026-11-20T13:02:00.000Z"),
+                    createdAt: new Date("2026-11-20T12:58:00.000Z"),
+                    players: [{ id: "p3", score: 0 }],
+                    rounds: [
+                        {
+                            id: "r2",
+                            snapshotQuestion: {
+                                id: "sq-2",
+                                sourceQuestionId: "q-shared",
+                                statement: "Questão compartilhada",
+                                position: 0,
+                            },
+                            answers: [],
+                        },
+                    ],
+                },
+            ]);
+
+            expect(stats.finishedGamesCount).toBe(2);
+            expect(stats.totalParticipations).toBe(3);
+            expect(stats.averagePlayersPerGame).toBeCloseTo(1.5, 5);
+            expect(stats.averageScore).toBeCloseTo(40, 5);
+            expect(stats.totalAnswers).toBe(2);
+            expect(stats.totalCorrectAnswers).toBe(1);
+            expect(stats.totalWrongAnswers).toBe(1);
+            expect(stats.averageCorrectRate).toBeCloseTo(0.5, 5);
+            expect(stats.questionPerformance).toHaveLength(1);
+            expect(stats.questionPerformance[0]?.gamesPlayedCount).toBe(2);
+            expect(stats.questionPerformance[0]?.errorRate).toBeCloseTo(0.5, 5);
+            expect(stats.hardestQuestions).toHaveLength(1);
+            expect(stats.easiestQuestions).toHaveLength(1);
+
+            // Questão com apenas 1 resposta isolada não deve ser promovida em easiestQuestions (amostra insuficiente)
+            const singleAnswerStats = buildRoomAggregatedStats("room-single-answer", [
+                {
+                    id: "g-single",
+                    status: "FINISHED",
+                    startedAt: new Date("2026-11-20T13:00:00.000Z"),
+                    finishedAt: new Date("2026-11-20T13:02:00.000Z"),
+                    createdAt: new Date("2026-11-20T12:58:00.000Z"),
+                    players: [
+                        { id: "p1", score: 100 },
+                        { id: "p2", score: 0 },
+                    ],
+                    rounds: [
+                        {
+                            id: "r-single",
+                            snapshotQuestion: {
+                                id: "sq-single",
+                                sourceQuestionId: "q-single",
+                                statement: "Amostra insuficiente",
+                                position: 0,
+                            },
+                            answers: [{ gamePlayerId: "p1", isCorrect: true }],
+                        },
+                    ],
+                },
+            ]);
+            expect(singleAnswerStats.easiestQuestions).toEqual([]);
+            expect(singleAnswerStats.hardestQuestions).toEqual([]);
+
+            const noAnswerStats = buildRoomAggregatedStats("room-empty-answers", [
+                {
+                    id: "g-only-no-answers",
+                    status: "FINISHED",
+                    startedAt: new Date("2026-11-20T13:00:00.000Z"),
+                    finishedAt: new Date("2026-11-20T13:02:00.000Z"),
+                    createdAt: new Date("2026-11-20T12:58:00.000Z"),
+                    players: [{ id: "p1", score: 0 }],
+                    rounds: [
+                        {
+                            id: "r-empty",
+                            snapshotQuestion: {
+                                id: "sq-empty",
+                                sourceQuestionId: "q-1",
+                                statement: "Pergunta sem envio",
+                                position: 0,
+                            },
+                            answers: [],
+                        },
+                    ],
+                },
+            ]);
+            expect(noAnswerStats.averageCorrectRate).toBeNull();
+            expect(noAnswerStats.hardestQuestions).toEqual([]);
+            expect(noAnswerStats.easiestQuestions).toEqual([]);
+        });
     });
 
     describe("archiveRoom", () => {

@@ -4,6 +4,11 @@ import '../LoginForm/LoginForm.css';
 
 import { recoverPassword } from '../../services/authService';
 import type { RecoverPasswordRequest } from '../../types/auth';
+import {
+    validateRecoverPasswordFields,
+    type AuthFieldErrors,
+    type RecoverPasswordField,
+} from '../../validation';
 import InputEmail from '../../../../components/Inputs/InputEmail/InputEmail';
 import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
 import Alert from '../../../../components/ui/Alert/Alert';
@@ -15,19 +20,38 @@ interface RecoverPasswordFormProps {
 
 export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormProps) {
     const [email, setEmail] = useState<string>('');
+    const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors<RecoverPasswordField>>({});
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
 
+    function handleEmailChange(value: string) {
+        setEmail(value);
+        if (fieldErrors.email) {
+            setFieldErrors({});
+        }
+        if (error) {
+            setError(null);
+        }
+    }
+
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        setIsLoading(true);
         setError(null);
         setSuccess(null);
 
+        const validationErrors = validateRecoverPasswordFields({ email });
+        if (Object.keys(validationErrors).length > 0) {
+            setFieldErrors(validationErrors);
+            return;
+        }
+
+        setFieldErrors({});
+        setIsLoading(true);
+
         try {
             const request: RecoverPasswordRequest = {
-                email
+                email: email.trim(),
             };
 
             await recoverPassword(request);
@@ -52,11 +76,12 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
                     description="Informe seu e-mail cadastrado para receber as instruções de redefinição."
                 />
 
-                <form className="login-card" onSubmit={handleSubmit}>
+                <form className="login-card" onSubmit={handleSubmit} noValidate>
                     <InputEmail
                         email={email}
-                        setEmail={setEmail}
+                        setEmail={handleEmailChange}
                         disabled={isLoading}
+                        error={fieldErrors.email}
                     />
 
                     {error && (

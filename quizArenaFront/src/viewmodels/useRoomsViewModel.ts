@@ -25,6 +25,8 @@ import {
     upsertRoomInList,
     type HostSessionTracker,
     type Room,
+    type RoomFormField,
+    type RoomFormFieldErrors,
     type StartMatchErrorKind,
 } from '../models/room';
 import {
@@ -48,7 +50,7 @@ import {
     getGameResultsApi,
     getRoomLobbyApi,
     listHostRoomsApi,
-    listRoomGamesApi,
+    listRoomGamesWithStatsApi,
     mapApiRoomToModel,
     playAgainApi,
     startRoomApi,
@@ -56,6 +58,7 @@ import {
     type ApiGameDetailedResults,
     type ApiGameHistoryItem,
     type ApiHostRoom,
+    type ApiRoomAggregatedStats,
     type ApiRoomLobby,
 } from '../services/roomStorageService';
 import {
@@ -111,6 +114,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const [maxPlayers, setMaxPlayers] = useState(DEFAULT_MAX_PLAYERS);
     const [gameMode, setGameMode] = useState<GameMode>(DEFAULT_GAME_MODE);
     const [formError, setFormError] = useState<string | null>(null);
+    const [fieldErrors, setFieldErrors] = useState<RoomFormFieldErrors>({});
     const [isSubmittingRoom, setIsSubmittingRoom] = useState(false);
 
     // Busca de sala existente por código
@@ -129,8 +133,9 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const [isFinishingMatch, setIsFinishingMatch] = useState(false);
     const [finishMatchError, setFinishMatchError] = useState<string | null>(null);
 
-    // Histórico persistido e relatório aberto
+    // Histórico persistido, estatísticas consolidadas da sala e relatório aberto
     const [roomGames, setRoomGames] = useState<ApiGameHistoryItem[]>([]);
+    const [roomStats, setRoomStats] = useState<ApiRoomAggregatedStats | null>(null);
     const [isLoadingRoomGames, setIsLoadingRoomGames] = useState(false);
     const [roomGamesError, setRoomGamesError] = useState<string | null>(null);
     const [reportView, setReportView] = useState<{
@@ -208,6 +213,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setRooms([]);
         setActiveRoomId(null);
         setRoomGames([]);
+        setRoomStats(null);
         setIsLoadingRoomGames(false);
         setRoomGamesError(null);
         setActiveRound(null);
@@ -235,10 +241,26 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             return executeLoadRoomGames({
                 roomId: roomIdToLoad,
                 requestSeqRef: gamesRequestSeqRef,
-                fetchRoomGames: listRoomGamesApi,
+                fetchRoomGamesWithStats: listRoomGamesWithStatsApi,
                 onLoadingChange: setIsLoadingRoomGames,
                 onError: setRoomGamesError,
                 onSuccess: setRoomGames,
+                onStatsSuccess: (nextStats) => {
+                    setRoomStats(nextStats);
+                    if (nextStats) {
+                        setRooms((current) =>
+                            current.map((room) =>
+                                room.id === nextStats.roomId
+                                    ? {
+                                          ...room,
+                                          finishedGamesCount: nextStats.finishedGamesCount,
+                                          lastGameFinishedAt: nextStats.lastFinishedGameAt,
+                                      }
+                                    : room,
+                            ),
+                        );
+                    }
+                },
             });
         },
         [currentRoomId],
@@ -252,6 +274,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             if (!active) return;
 
             setRoomGames([]);
+            setRoomStats(null);
             setRoomGamesError(null);
 
             if (!currentRoomId) {
@@ -297,6 +320,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                     setActiveRoomId(lobby.id);
                     setSearchParams((prev) => {
                         const next = new URLSearchParams(prev);
+                        next.delete('aba');
                         next.set('sala', lobby.code);
                         return next;
                     }, { replace: true });
@@ -318,6 +342,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                     setAnsweredPlayers([]);
                     setRoundRemainingSeconds(0);
                     setRoomGames([]);
+                    setRoomStats(null);
                     setRoomGamesError(null);
                 }
                 return room.id;
@@ -328,6 +353,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             }
             setSearchParams((prev) => {
                 const next = new URLSearchParams(prev);
+                next.delete('aba');
                 next.set('sala', room.code);
                 return next;
             }, { replace: true });
@@ -574,6 +600,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             setAnsweredPlayers([]);
             setRoundRemainingSeconds(0);
             setRoomGames([]);
+            setRoomStats(null);
             setRoomGamesError(null);
             deleteRoomResults(payload.roomId);
         });
@@ -792,6 +819,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setMaxPlayers(DEFAULT_MAX_PLAYERS);
         setGameMode(DEFAULT_GAME_MODE);
         setFormError(null);
+        setFieldErrors({});
         setIsCreateOpen(true);
     }, []);
 
@@ -803,13 +831,27 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setMaxPlayers(room.maxPlayers);
         setGameMode(room.gameMode);
         setFormError(null);
+        setFieldErrors({});
         setIsCreateOpen(true);
     }
 
     const closeCreate = useCallback(() => {
         if (isSubmittingRoomRef.current) return;
         setFormError(null);
+        setFieldErrors({});
         setIsCreateOpen(false);
+    }, []);
+
+    const clearFieldError = useCallback((field: RoomFormField) => {
+        setFormError(null);
+        setFieldErrors((current) => {
+            if (!current[field]) {
+                return current;
+            }
+            const next = { ...current };
+            delete next[field];
+            return next;
+        });
     }, []);
 
     async function submitRoom(event: FormEvent<HTMLFormElement>): Promise<boolean> {
@@ -826,6 +868,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             lockRef: isSubmittingRoomRef,
             onSubmittingChange: setIsSubmittingRoom,
             onError: setFormError,
+            onFieldErrors: setFieldErrors,
             executeRequest: (validInput) =>
                 editingRoom
                     ? updateRoomApi(editingRoom.id, {
@@ -883,6 +926,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                 setAnsweredPlayers([]);
                 setSearchParams((prev) => {
                     const next = new URLSearchParams(prev);
+                    next.delete('aba');
                     next.set('sala', newRoom.code);
                     return next;
                 }, { replace: true });
@@ -936,6 +980,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
                     setAnsweredPlayers([]);
                     setRoundRemainingSeconds(0);
                     setRoomGames([]);
+                    setRoomStats(null);
                     setRoomGamesError(null);
                     clearStartMatchFeedback();
                 }
@@ -1066,25 +1111,26 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         isSubmittingRoom,
         form: { name, theme, timeLimit, maxPlayers, gameMode },
         formError,
+        fieldErrors,
         setName: (value: string) => {
             setName(value);
-            setFormError(null);
+            clearFieldError('name');
         },
         setTheme: (value: string) => {
             setTheme(value);
-            setFormError(null);
+            clearFieldError('theme');
         },
         setTimeLimit: (value: number) => {
             setTimeLimit(value);
-            setFormError(null);
+            clearFieldError('timeLimit');
         },
         setMaxPlayers: (value: number) => {
             setMaxPlayers(value);
-            setFormError(null);
+            clearFieldError('maxPlayers');
         },
         setGameMode: (value: GameMode) => {
             setGameMode(value);
-            setFormError(null);
+            clearFieldError('gameMode');
         },
         openCreate,
         openEdit,
@@ -1105,6 +1151,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         cancelFinishMatch,
         confirmFinishMatch,
         roomGames,
+        roomStats,
         isLoadingRoomGames,
         roomGamesError,
         refreshRoomGames: () => refreshRoomGames(),

@@ -625,13 +625,15 @@ export class RoomController {
         }
 
         try {
-            const games = await this.roomService.listRoomGames(
-                roomId,
-                req.user.id,
-            );
+            const { games, stats } =
+                await this.roomService.listRoomGamesWithStats(
+                    roomId,
+                    req.user.id,
+                );
 
             res.status(200).json({
                 games,
+                stats,
             });
         } catch (error: unknown) {
             if (error instanceof RoomNotFoundError) {

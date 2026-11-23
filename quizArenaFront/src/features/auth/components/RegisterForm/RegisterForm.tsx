@@ -1,10 +1,17 @@
-
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import "../LoginForm/LoginForm.css";
 
 import { register } from "../../services/authService";
 import type { RegisterRequest } from "../../types/auth";
+import {
+    AUTH_NAME_MAX_LENGTH,
+    formatAuthApiError,
+    validateRegisterFields,
+    type AuthFieldErrors,
+    type RegisterField,
+} from "../../validation";
+import { ApiError } from "../../../../services/api";
 import InputEmail from "../../../../components/Inputs/InputEmail/InputEmail";
 import InputPassword from "../../../../components/Inputs/InputPassword/InputPassword";
 import AuthBrandPanel from "../../../../components/layout/AuthBrandPanel/AuthBrandPanel";
@@ -15,14 +22,14 @@ interface RegisterFormProps {
     onSuccess: () => void;
 }
 
-export default function RegisterForm({ onSuccess
-}: RegisterFormProps) {
+export default function RegisterForm({ onSuccess }: RegisterFormProps) {
     const redirectTimerRef = useRef<number | null>(null);
 
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
+    const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors<RegisterField>>({});
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -35,6 +42,15 @@ export default function RegisterForm({ onSuccess
         };
     }, []);
 
+    function clearFieldError(field: RegisterField) {
+        if (fieldErrors[field]) {
+            setFieldErrors((current) => ({ ...current, [field]: undefined }));
+        }
+        if (error) {
+            setError(null);
+        }
+    }
+
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (isLoading || success) return;
@@ -42,22 +58,25 @@ export default function RegisterForm({ onSuccess
         setError(null);
         setSuccess(null);
 
-        if (password.length < 8) {
-            setError("A senha deve possuir pelo menos 8 caracteres.");
+        const validationErrors = validateRegisterFields({
+            name,
+            email,
+            password,
+            confirmPassword,
+        });
+
+        if (Object.keys(validationErrors).length > 0) {
+            setFieldErrors(validationErrors);
             return;
         }
 
-        if (password !== confirmPassword) {
-            setError("As senhas não coincidem.");
-            return;
-        }
-
+        setFieldErrors({});
         setIsLoading(true);
 
         try {
             const request: RegisterRequest = {
-                name,
-                email,
+                name: name.trim(),
+                email: email.trim(),
                 password,
             };
 
@@ -68,16 +87,24 @@ export default function RegisterForm({ onSuccess
             redirectTimerRef.current = window.setTimeout(() => {
                 onSuccess();
             }, 1500);
-        } catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : "Erro ao realizar cadastro. Tente novamente."
-            );
+        } catch (err) {
+            if (err instanceof ApiError && err.status === 400 && err.errors) {
+                const nextFieldErrors: AuthFieldErrors<RegisterField> = {};
+                if (err.errors.name) nextFieldErrors.name = err.errors.name;
+                if (err.errors.email) nextFieldErrors.email = err.errors.email;
+                if (err.errors.password) nextFieldErrors.password = err.errors.password;
+                if (Object.keys(nextFieldErrors).length > 0) {
+                    setFieldErrors(nextFieldErrors);
+                    return;
+                }
+            }
+            setError(formatAuthApiError(err, "Erro ao realizar cadastro. Tente novamente."));
         } finally {
             setIsLoading(false);
         }
     }
+
+    const isFormLocked = isLoading || Boolean(success);
 
     return (
         <div className="arena-background">
@@ -87,7 +114,7 @@ export default function RegisterForm({ onSuccess
                     description="Leva menos de um minuto para começar."
                 />
 
-                <form className="login-card" onSubmit={handleSubmit}>
+                <form className="login-card" onSubmit={handleSubmit} noValidate>
                     <div className="input-group">
                         <label htmlFor="name" className="labelInput">
                             Nome
@@ -115,19 +142,33 @@ export default function RegisterForm({ onSuccess
                                 name="name"
                                 placeholder="Digite seu nome"
                                 value={name}
-                                onChange={(event) => setName(event.target.value)}
+                                onChange={(event) => {
+                                    setName(event.target.value);
+                                    clearFieldError("name");
+                                }}
                                 autoComplete="name"
-                                disabled={isLoading}
-                                required
-                                maxLength={100}
+                                disabled={isFormLocked}
+                                maxLength={AUTH_NAME_MAX_LENGTH}
+                                aria-required="true"
+                                aria-invalid={fieldErrors.name ? true : undefined}
+                                aria-describedby={fieldErrors.name ? "name-error" : undefined}
                             />
                         </div>
+                        {fieldErrors.name && (
+                            <p id="name-error" className="input-error" role="alert">
+                                {fieldErrors.name}
+                            </p>
+                        )}
                     </div>
 
                     <InputEmail
                         email={email}
-                        setEmail={setEmail}
-                        disabled={isLoading}
+                        setEmail={(value) => {
+                            setEmail(value);
+                            clearFieldError("email");
+                        }}
+                        disabled={isFormLocked}
+                        error={fieldErrors.email}
                     />
 
                     <InputPassword
@@ -135,10 +176,13 @@ export default function RegisterForm({ onSuccess
                         label="Senha"
                         textPlaceholder="Mínimo de 8 caracteres"
                         password={password}
-                        setPassword={setPassword}
+                        setPassword={(value) => {
+                            setPassword(value);
+                            clearFieldError("password");
+                        }}
                         autoComplete="new-password"
-                        minLength={8}
-                        disabled={isLoading}
+                        disabled={isFormLocked}
+                        error={fieldErrors.password}
                     />
 
                     <InputPassword
@@ -146,10 +190,13 @@ export default function RegisterForm({ onSuccess
                         label="Confirmar senha"
                         textPlaceholder="Digite a senha novamente"
                         password={confirmPassword}
-                        setPassword={setConfirmPassword}
+                        setPassword={(value) => {
+                            setConfirmPassword(value);
+                            clearFieldError("confirmPassword");
+                        }}
                         autoComplete="new-password"
-                        minLength={8}
-                        disabled={isLoading}
+                        disabled={isFormLocked}
+                        error={fieldErrors.confirmPassword}
                     />
 
                     {error && (
@@ -165,6 +212,7 @@ export default function RegisterForm({ onSuccess
                         size="lg"
                         fullWidth
                         isLoading={isLoading}
+                        disabled={Boolean(success)}
                     >
                         {isLoading ? "Cadastrando…" : "Criar conta"}
                     </Button>

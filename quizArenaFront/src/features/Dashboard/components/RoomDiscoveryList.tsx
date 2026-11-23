@@ -9,6 +9,7 @@ import {
     GAME_MODE_LABEL,
     countEligiblePlayers,
     filterRoomsByName,
+    formatNullableDateTime,
     type Room,
 } from '../../../models/room';
 
@@ -151,9 +152,15 @@ export default function RoomDiscoveryList({
                         const activePlayers = countEligiblePlayers(room.players);
                         const knownQuestionsCount = isLastFocused
                             ? activeRoomQuestionCount
-                            : room.questionIds.length > 0
-                              ? room.questionIds.length
-                              : null;
+                            : typeof room.activeQuestionsCount === 'number'
+                              ? room.activeQuestionsCount
+                              : room.questionIds.length > 0
+                                ? room.questionIds.length
+                                : null;
+                        const finishedGamesCount = room.finishedGamesCount ?? 0;
+                        const lastMatchText = room.lastGameFinishedAt
+                            ? formatNullableDateTime(room.lastGameFinishedAt, 'Não registrada')
+                            : 'Nenhuma finalizada';
 
                         return (
                             <article
@@ -170,15 +177,33 @@ export default function RoomDiscoveryList({
                                         </Badge>
                                     </div>
                                     <h3>{room.name}</h3>
-                                    <p>
-                                        Participantes: <strong>{activePlayers}</strong> / {room.maxPlayers} · Tempo:{' '}
-                                        <strong>{room.timeLimit}s</strong>
-                                    </p>
-                                    {knownQuestionsCount !== null && (
-                                        <p>
-                                            Perguntas na sala: <strong>{knownQuestionsCount}</strong>
-                                        </p>
-                                    )}
+                                    <dl className="room-discovery-meta">
+                                        <div>
+                                            <dt>Questões</dt>
+                                            <dd>
+                                                {knownQuestionsCount !== null
+                                                    ? `${knownQuestionsCount} ${knownQuestionsCount === 1 ? 'ativa' : 'ativas'}`
+                                                    : '—'}
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt>Partidas</dt>
+                                            <dd>
+                                                {finishedGamesCount}{' '}
+                                                {finishedGamesCount === 1 ? 'realizada' : 'realizadas'}
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt>Participantes</dt>
+                                            <dd>
+                                                {activePlayers} / {room.maxPlayers} · {room.timeLimit}s
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt>Última partida</dt>
+                                            <dd>{lastMatchText}</dd>
+                                        </div>
+                                    </dl>
                                 </div>
 
                                 <div className="room-actions">

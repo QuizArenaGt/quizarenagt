@@ -1,6 +1,7 @@
 import Badge from '../../../components/ui/Badge/Badge';
 import Icon from '../../../components/ui/Icon/Icon';
 import { getInitials } from '../../../models/profile';
+import { MIN_ROOM_PLAYERS } from '../../../models/room';
 import type { BackendRoomStatus, LobbyPlayerDto } from '../../../services/socket';
 
 interface RoomPlayersCardProps {
@@ -22,6 +23,9 @@ export default function RoomPlayersCard({
     hasOpenRound,
 }: RoomPlayersCardProps) {
     const isWaiting = roomStatus === 'WAITING';
+    const hasEnoughPlayers = activePlayersCount >= MIN_ROOM_PLAYERS;
+    const missingPlayers = Math.max(0, MIN_ROOM_PLAYERS - activePlayersCount);
+    const occupancyRatio = maxPlayers > 0 ? Math.min(100, Math.round((activePlayersCount / maxPlayers) * 100)) : 0;
     const answeredSet = new Set(answeredPlayerIds);
     const orderedPlayers = isWaiting
         ? players
@@ -43,18 +47,45 @@ export default function RoomPlayersCard({
 
     return (
         <section className="room-detail-card room-detail-card--surface" aria-labelledby="room-lobby-title">
-            <div>
+            <div className="room-players-card__body">
                 <div className="room-detail-card__head room-detail-card__head--split">
                     <div>
                         <h3 id="room-lobby-title">{title}</h3>
                         <p className="room-detail-card__desc">{description}</p>
                     </div>
-                    <Badge variant={isWaiting ? (activePlayersCount >= 2 ? 'success' : 'neutral') : 'primary'}>
+                    <Badge variant={isWaiting ? (hasEnoughPlayers ? 'success' : 'warning') : 'primary'}>
                         {isWaiting
-                            ? `${activePlayersCount} / ${maxPlayers}`
+                            ? hasEnoughPlayers
+                                ? 'Mínimo atingido'
+                                : `Falta${missingPlayers === 1 ? '' : 'm'} ${missingPlayers} p/ iniciar`
                             : `${activePlayersCount} ${activePlayersCount === 1 ? 'ativo' : 'ativos'}`}
                     </Badge>
                 </div>
+
+                {isWaiting && (
+                    <div className="room-players-capacity" aria-label="Lotação da sala">
+                        <dl className="room-players-capacity__stats">
+                            <div className="room-players-capacity__stat">
+                                <dt>Na sala agora</dt>
+                                <dd>{activePlayersCount}</dd>
+                            </div>
+                            <div className="room-players-capacity__stat">
+                                <dt>Mínimo p/ iniciar</dt>
+                                <dd>{MIN_ROOM_PLAYERS}</dd>
+                            </div>
+                            <div className="room-players-capacity__stat">
+                                <dt>Limite máximo</dt>
+                                <dd>{maxPlayers}</dd>
+                            </div>
+                        </dl>
+                        <div className="room-players-capacity__track" aria-hidden="true">
+                            <span
+                                className={`room-players-capacity__fill${hasEnoughPlayers ? ' is-ready' : ''}`}
+                                style={{ width: `${occupancyRatio}%` }}
+                            />
+                        </div>
+                    </div>
+                )}
 
                 {orderedPlayers.length === 0 ? (
                     <div className="room-lobby-empty">

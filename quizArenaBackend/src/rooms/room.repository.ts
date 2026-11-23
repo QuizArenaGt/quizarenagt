@@ -319,6 +319,10 @@ export class RoomRepository {
             },
             orderBy: { createdAt: "desc" },
             include: {
+                questions: {
+                    where: { isActive: true },
+                    select: { id: true },
+                },
                 games: {
                     orderBy: [
                         { createdAt: "desc" },
@@ -976,9 +980,18 @@ export class RoomRepository {
                     ],
                 },
                 rounds: {
+                    orderBy: { roundNumber: "asc" },
                     select: {
                         id: true,
                         status: true,
+                        snapshotQuestion: {
+                            select: {
+                                id: true,
+                                sourceQuestionId: true,
+                                statement: true,
+                                position: true,
+                            },
+                        },
                         answers: {
                             select: {
                                 gamePlayerId: true,

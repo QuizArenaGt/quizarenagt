@@ -29,6 +29,14 @@ export interface Room {
     /** IDs das perguntas vinculadas à sala. */
     questionIds: string[];
     players: LobbyPlayerDto[];
+    /** Quantidade de perguntas ativas persistidas na sala (retornada em GET /rooms). */
+    activeQuestionsCount?: number;
+    /** Quantidade de partidas finalizadas na sala. */
+    finishedGamesCount?: number;
+    /** Total de sessões criadas na sala (WAITING, IN_PROGRESS, FINISHED, CANCELLED). */
+    totalGamesCount?: number;
+    /** Data/hora ISO da última partida finalizada da sala. */
+    lastGameFinishedAt?: string | null;
 }
 
 /** Uma sala precisa de pelo menos 5 perguntas ativas para iniciar no backend. */
@@ -87,7 +95,74 @@ export interface CreateRoomFormInput {
     gameMode: GameMode;
 }
 
+export type RoomFormField = keyof CreateRoomFormInput;
+export type RoomFormFieldErrors = Partial<Record<RoomFormField, string>>;
+
 const VALID_GAME_MODES: readonly GameMode[] = ['CLASSIC', 'HARDCORE'];
+
+/**
+ * Valida cada campo do formulário de criação/edição de sala para exibição inline acessível.
+ */
+export function validateCreateRoomFields(input: CreateRoomFormInput): RoomFormFieldErrors {
+    const errors: RoomFormFieldErrors = {};
+    const trimmedName = input.name?.trim() ?? '';
+    const trimmedTheme = input.theme?.trim() ?? '';
+
+    if (!trimmedName) {
+        errors.name = 'Dê um nome de identificação para a sala.';
+    } else if (trimmedName.length > 100) {
+        errors.name = 'O nome da sala deve ter no máximo 100 caracteres.';
+    }
+
+    if (!trimmedTheme) {
+        errors.theme = 'Informe o tema principal da sala.';
+    } else if (trimmedTheme.length > 80) {
+        errors.theme = 'O tema da sala deve ter no máximo 80 caracteres.';
+    }
+
+    if (
+        typeof input.maxPlayers !== 'number' ||
+        !Number.isInteger(input.maxPlayers) ||
+        input.maxPlayers < 2 ||
+        input.maxPlayers > 50
+    ) {
+        errors.maxPlayers = 'A quantidade de jogadores deve ser um número inteiro entre 2 e 50.';
+    }
+
+    if (
+        typeof input.timeLimit !== 'number' ||
+        !Number.isInteger(input.timeLimit) ||
+        input.timeLimit < 5 ||
+        input.timeLimit > 180
+    ) {
+        errors.timeLimit = 'O tempo por pergunta deve ser um número inteiro entre 5 e 180 segundos.';
+    }
+
+    if (!VALID_GAME_MODES.includes(input.gameMode)) {
+        errors.gameMode = 'O modo de jogo selecionado é inválido.';
+    }
+
+    return errors;
+}
+
+/**
+ * Extrai erros por campo retornados pelo backend em respostas HTTP 400.
+ */
+export function extractRoomFieldErrors(error: unknown): RoomFormFieldErrors {
+    if (!isHttpErrorLike(error) || error.status !== 400 || !error.errors) {
+        return {};
+    }
+
+    const mapped: RoomFormFieldErrors = {};
+    const fields: RoomFormField[] = ['name', 'theme', 'maxPlayers', 'timeLimit', 'gameMode'];
+    for (const field of fields) {
+        const message = error.errors[field];
+        if (typeof message === 'string' && message.trim().length > 0) {
+            mapped[field] = message.trim();
+        }
+    }
+    return mapped;
+}
 
 /**
  * Valida os dados do formulário de criação/edição de sala antes de enviar ao backend.
@@ -221,6 +296,7 @@ export interface SubmitRoomDependencies<TApiRoom> {
     executeRequest: (validInput: CreateRoomFormInput) => Promise<TApiRoom>;
     onSubmittingChange?: (isSubmitting: boolean) => void;
     onError: (message: string | null) => void;
+    onFieldErrors?: (errors: RoomFormFieldErrors) => void;
     onSuccess: (apiRoom: TApiRoom, validInput: CreateRoomFormInput) => void;
 }
 
@@ -235,22 +311,37 @@ export async function executeSubmitRoom<TApiRoom>(
         return false;
     }
 
-    const validationError = validateCreateRoomInput(deps.input);
+    const fieldErrors = deps.onFieldErrors ? validateCreateRoomFields(deps.input) : {};
+    const firstFieldError = Object.values(fieldErrors).find(Boolean);
+    const validationError = firstFieldError ?? validateCreateRoomInput(deps.input);
     if (validationError) {
-        deps.onError(validationError);
+        if (deps.onFieldErrors) {
+            deps.onFieldErrors(fieldErrors);
+            deps.onError(firstFieldError ? null : validationError);
+        } else {
+            deps.onError(validationError);
+        }
         return false;
     }
 
     deps.lockRef.current = true;
     deps.onSubmittingChange?.(true);
     deps.onError(null);
+    deps.onFieldErrors?.({});
 
     try {
         const apiRoom = await deps.executeRequest(deps.input);
         deps.onSuccess(apiRoom, deps.input);
         return true;
     } catch (err) {
-        deps.onError(formatRoomCreationError(err));
+        if (deps.onFieldErrors) {
+            const apiFieldErrors = extractRoomFieldErrors(err);
+            deps.onFieldErrors(apiFieldErrors);
+            const hasFieldErrors = Object.keys(apiFieldErrors).length > 0;
+            deps.onError(hasFieldErrors ? null : formatRoomCreationError(err));
+        } else {
+            deps.onError(formatRoomCreationError(err));
+        }
         return false;
     } finally {
         deps.lockRef.current = false;

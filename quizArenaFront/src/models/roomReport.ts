@@ -8,10 +8,12 @@
 import type { GameMode } from '../services/socket';
 import type { OpponentPlayer } from './game';
 import type { Question } from './question';
+import type { Room } from './room';
 import type {
     ApiGameDetailedResults,
     ApiGameHistoryItem,
     ApiGameStatus,
+    ApiRoomAggregatedStats,
 } from '../services/roomStorageService';
 
 export interface QuestionResult {
@@ -31,6 +33,8 @@ export interface PlayerResult {
 export interface RoomResults {
     /** Perguntas na ordem em que foram jogadas. */
     questionIds: string[];
+    /** Enunciados preservados do snapshot da partida (indexados por id da questão/snapshot). */
+    questionStatements?: Record<string, string>;
     /** Participantes simulados da demonstração (fixos por sala). */
     simulatedPlayers: OpponentPlayer[];
     /** Alunos reais que concluíram a partida. */
@@ -181,11 +185,17 @@ export function buildRoomReport(results: RoomResults | null, questionBank: Quest
         const answeredCount = answers.length;
         const incorrectCount = Math.max(0, answeredCount - correctCount);
         const unansweredCount = Math.max(0, participantCount - answeredCount);
+        const snapshotStatement = results.questionStatements?.[questionId]?.trim();
+        const bankStatement = questionBank
+            .find((question) => question.id === questionId)
+            ?.statement?.trim();
+
         return {
             questionId,
             statement:
-                questionBank.find((question) => question.id === questionId)?.statement ??
-                'Pergunta removida do banco',
+                snapshotStatement ||
+                bankStatement ||
+                'Enunciado indisponível para esta partida',
             roundNumber: index + 1,
             correctCount,
             answeredCount,
@@ -511,31 +521,231 @@ export function buildRoomReportFromServerGame(
     };
 }
 
-export interface ExecuteLoadRoomGamesParams {
-    roomId: string | null;
-    requestSeqRef: { current: number };
-    fetchRoomGames: (roomId: string) => Promise<ApiGameHistoryItem[]>;
-    onLoadingChange?: (loading: boolean) => void;
-    onError: (message: string | null) => void;
-    onSuccess: (games: ApiGameHistoryItem[]) => void;
+export function buildEmptyRoomAggregatedStats(roomId: string): ApiRoomAggregatedStats {
+    return {
+        roomId,
+        finishedGamesCount: 0,
+        totalParticipations: 0,
+        averagePlayersPerGame: null,
+        averageScore: null,
+        totalAnswers: 0,
+        totalCorrectAnswers: 0,
+        totalWrongAnswers: 0,
+        averageCorrectRate: null,
+        lastFinishedGameAt: null,
+        hardestQuestions: [],
+        easiestQuestions: [],
+        questionPerformance: [],
+    };
 }
 
 /**
- * Carrega o histórico persistido de partidas de uma sala com proteção contra respostas fora de ordem.
+ * Calcula métricas consolidadas a partir dos itens de histórico já carregados da sala
+ * quando o backend ainda não enviou `stats` (ex.: mocks de testes unitários).
+ * Contabiliza exclusivamente partidas `FINISHED`, sem contaminar com `CANCELLED` ou `IN_PROGRESS`.
+ */
+export function buildRoomAggregatedStatsFromHistory(
+    roomId: string,
+    games: readonly ApiGameHistoryItem[],
+): ApiRoomAggregatedStats {
+    const finishedGames = games.filter((game) => game.roomId === roomId && game.status === 'FINISHED');
+    if (finishedGames.length === 0) {
+        return buildEmptyRoomAggregatedStats(roomId);
+    }
+
+    let totalParticipations = 0;
+    let totalScoreSum = 0;
+    let totalAnswers = 0;
+    let totalCorrectAnswers = 0;
+    let lastFinishedGameAt: string | null = null;
+    let lastFinishedTs = -1;
+
+    for (const game of finishedGames) {
+        totalParticipations += game.ranking.length;
+        for (const entry of game.ranking) {
+            totalScoreSum += entry.score;
+            totalAnswers += Math.max(0, entry.answeredCount);
+            totalCorrectAnswers += Math.max(0, entry.correctCount);
+        }
+        const refDate = game.finishedAt ?? game.startedAt ?? game.createdAt;
+        const ts = Date.parse(refDate);
+        if (!Number.isNaN(ts) && ts > lastFinishedTs) {
+            lastFinishedTs = ts;
+            lastFinishedGameAt = refDate;
+        }
+    }
+
+    return {
+        roomId,
+        finishedGamesCount: finishedGames.length,
+        totalParticipations,
+        averagePlayersPerGame: totalParticipations / finishedGames.length,
+        averageScore: totalParticipations > 0 ? totalScoreSum / totalParticipations : null,
+        totalAnswers,
+        totalCorrectAnswers,
+        totalWrongAnswers: Math.max(0, totalAnswers - totalCorrectAnswers),
+        averageCorrectRate: totalAnswers > 0 ? totalCorrectAnswers / totalAnswers : null,
+        lastFinishedGameAt,
+        hardestQuestions: [],
+        easiestQuestions: [],
+        questionPerformance: [],
+    };
+}
+
+export function formatDecimalStat(value: number | null | undefined, digits = 1): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return '—';
+    }
+    return value.toLocaleString('pt-BR', {
+        minimumFractionDigits: Number.isInteger(value) ? 0 : digits,
+        maximumFractionDigits: digits,
+    });
+}
+
+export function computeGameHistoryAccuracyRate(
+    game: Pick<ApiGameHistoryItem, 'averageCorrectRate' | 'answeredCount' | 'correctCount' | 'ranking'>,
+): number | null {
+    if (typeof game.averageCorrectRate === 'number' && !Number.isNaN(game.averageCorrectRate)) {
+        return game.averageCorrectRate;
+    }
+
+    const totalAnswered =
+        typeof game.answeredCount === 'number'
+            ? game.answeredCount
+            : game.ranking.reduce((sum, entry) => sum + Math.max(0, entry.answeredCount), 0);
+    if (totalAnswered <= 0) {
+        return null;
+    }
+
+    const totalCorrect =
+        typeof game.correctCount === 'number'
+            ? game.correctCount
+            : game.ranking.reduce((sum, entry) => sum + Math.max(0, entry.correctCount), 0);
+
+    return totalCorrect / totalAnswered;
+}
+
+export interface RoomOverviewDashboardEntry {
+    room: Room;
+    stats: ApiRoomAggregatedStats;
+}
+
+export interface ExecuteLoadOverviewAnalyticsParams {
+    rooms: readonly Room[];
+    requestSeqRef: { current: number };
+    fetchRoomGamesWithStats: (
+        roomId: string,
+    ) => Promise<{ games: ApiGameHistoryItem[]; stats: ApiRoomAggregatedStats | null }>;
+    cachedStatsByRoomId?: ReadonlyMap<string, ApiRoomAggregatedStats>;
+    onLoadingChange?: (loading: boolean) => void;
+    onError: (message: string | null) => void;
+    onSuccess: (entries: RoomOverviewDashboardEntry[]) => void;
+}
+
+/**
+ * Carrega os dashboards analíticos consolidados exclusivamente para salas que já
+ * possuem ao menos uma partida finalizada, preservando isolamento e evitando dados obsoletos.
+ */
+export async function executeLoadOverviewAnalytics({
+    rooms,
+    requestSeqRef,
+    fetchRoomGamesWithStats,
+    cachedStatsByRoomId,
+    onLoadingChange,
+    onError,
+    onSuccess,
+}: ExecuteLoadOverviewAnalyticsParams): Promise<RoomOverviewDashboardEntry[] | null> {
+    requestSeqRef.current += 1;
+    const seq = requestSeqRef.current;
+
+    const playedRooms = rooms.filter((room) => (room.finishedGamesCount ?? 0) > 0);
+    if (playedRooms.length === 0) {
+        onSuccess([]);
+        onError(null);
+        onLoadingChange?.(false);
+        return [];
+    }
+
+    onLoadingChange?.(true);
+    onError(null);
+
+    try {
+        const loadedEntries = await Promise.all(
+            playedRooms.map(async (room): Promise<RoomOverviewDashboardEntry | null> => {
+                const cached = cachedStatsByRoomId?.get(room.id);
+                if (
+                    cached &&
+                    cached.finishedGamesCount === room.finishedGamesCount &&
+                    (cached.lastFinishedGameAt ?? null) === (room.lastGameFinishedAt ?? null)
+                ) {
+                    return cached.finishedGamesCount > 0 ? { room, stats: cached } : null;
+                }
+
+                const result = await fetchRoomGamesWithStats(room.id);
+                const stats = result.stats ?? buildRoomAggregatedStatsFromHistory(room.id, result.games);
+                return stats.finishedGamesCount > 0 ? { room, stats } : null;
+            }),
+        );
+
+        if (requestSeqRef.current !== seq) {
+            return null;
+        }
+
+        const validEntries = loadedEntries.filter(
+            (entry): entry is RoomOverviewDashboardEntry => entry !== null,
+        );
+        onSuccess(validEntries);
+        return validEntries;
+    } catch (error) {
+        if (requestSeqRef.current !== seq) {
+            return null;
+        }
+        onError(
+            error instanceof Error && error.message.trim()
+                ? error.message.trim()
+                : 'Não foi possível carregar os dashboards analíticos das salas.',
+        );
+        return null;
+    } finally {
+        if (requestSeqRef.current === seq) {
+            onLoadingChange?.(false);
+        }
+    }
+}
+
+export interface ExecuteLoadRoomGamesParams {
+    roomId: string | null;
+    requestSeqRef: { current: number };
+    fetchRoomGames?: (roomId: string) => Promise<ApiGameHistoryItem[]>;
+    fetchRoomGamesWithStats?: (
+        roomId: string,
+    ) => Promise<{ games: ApiGameHistoryItem[]; stats: ApiRoomAggregatedStats | null }>;
+    onLoadingChange?: (loading: boolean) => void;
+    onError: (message: string | null) => void;
+    onSuccess: (games: ApiGameHistoryItem[]) => void;
+    onStatsSuccess?: (stats: ApiRoomAggregatedStats | null) => void;
+}
+
+/**
+ * Carrega o histórico persistido (e estatísticas agregadas, quando disponíveis) de uma sala
+ * com proteção contra respostas fora de ordem.
  */
 export async function executeLoadRoomGames({
     roomId,
     requestSeqRef,
     fetchRoomGames,
+    fetchRoomGamesWithStats,
     onLoadingChange,
     onError,
     onSuccess,
+    onStatsSuccess,
 }: ExecuteLoadRoomGamesParams): Promise<ApiGameHistoryItem[] | null> {
     requestSeqRef.current += 1;
     const seq = requestSeqRef.current;
 
     if (!roomId) {
         onSuccess([]);
+        onStatsSuccess?.(null);
         onError(null);
         onLoadingChange?.(false);
         return null;
@@ -545,11 +755,25 @@ export async function executeLoadRoomGames({
     onError(null);
 
     try {
-        const games = await fetchRoomGames(roomId);
+        let games: ApiGameHistoryItem[];
+        let stats: ApiRoomAggregatedStats | null = null;
+
+        if (fetchRoomGamesWithStats) {
+            const result = await fetchRoomGamesWithStats(roomId);
+            games = result.games;
+            stats = result.stats ?? buildRoomAggregatedStatsFromHistory(roomId, games);
+        } else if (fetchRoomGames) {
+            games = await fetchRoomGames(roomId);
+            stats = buildRoomAggregatedStatsFromHistory(roomId, games);
+        } else {
+            games = [];
+        }
+
         if (requestSeqRef.current !== seq) {
             return null;
         }
         onSuccess(games);
+        onStatsSuccess?.(stats);
         return games;
     } catch (error) {
         if (requestSeqRef.current !== seq) {

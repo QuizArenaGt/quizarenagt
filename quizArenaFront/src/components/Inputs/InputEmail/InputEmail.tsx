@@ -1,4 +1,3 @@
-
 import type { ChangeEvent } from 'react';
 import './InputEmail.css';
 
@@ -10,6 +9,7 @@ interface InputEmailProps {
     placeholder?: string;
     autoComplete?: string;
     disabled?: boolean;
+    error?: string | null;
 }
 
 export default function InputEmail({
@@ -20,7 +20,9 @@ export default function InputEmail({
     placeholder = 'Digite seu email',
     autoComplete = 'email',
     disabled = false,
+    error = null,
 }: InputEmailProps) {
+    const errorId = `${id}-error`;
 
     function handleEmailChange(
         event: ChangeEvent<HTMLInputElement>
@@ -61,9 +63,17 @@ export default function InputEmail({
                     onChange={handleEmailChange}
                     autoComplete={autoComplete}
                     disabled={disabled}
-                    required
+                    aria-required="true"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
                 />
             </div>
+
+            {error && (
+                <p id={errorId} className="input-error" role="alert">
+                    {error}
+                </p>
+            )}
         </div>
     );
 }

@@ -73,12 +73,14 @@ describe('Dashboard Shell & Navegação por Contexto de Sala', () => {
         assert.match(settingsSource, /Excluir sala/);
         assert.match(settingsSource, /Projetar código em tela cheia/);
 
-        // Fluxo contextual dentro de DashboardForm preserva Overview, Perguntas, Partidas e Configurações
+        // Fluxo contextual dentro de DashboardForm preserva Visão Geral analítica global e workspace operacional da sala
         assert.match(dashboardSource, /roomSection === 'overview'/);
         assert.match(dashboardSource, /roomSection === 'questions'/);
         assert.match(dashboardSource, /roomSection === 'games'/);
         assert.match(dashboardSource, /roomSection === 'settings'/);
         assert.match(dashboardSource, /<OverviewStats/);
+        assert.doesNotMatch(dashboardSource, /<RoomAggregatedStats/);
+        assert.doesNotMatch(dashboardSource, /variant="overview"/);
     });
 
     it('filterRoomsByName realiza busca parcial, case-insensitive, ignora código e limpa vazio', () => {

@@ -30,9 +30,11 @@ import {
     type Room,
 } from '../../../models/room';
 import {
+    computeGameHistoryAccuracyRate,
     filterRoomGamesByStatus,
     formatGameDuration,
     formatGameStatusLabel,
+    formatRate,
     formatShortGameMode,
     type GameHistoryStatusFilter,
 } from '../../../models/roomReport';
@@ -44,8 +46,8 @@ import QuestionFormModal from '../../../views/Dashboard/QuestionFormModal/Questi
 import RoomCodeModal from '../../../views/Dashboard/RoomCodeModal/RoomCodeModal';
 import RoomReportModal from '../../../views/Dashboard/RoomReportModal/RoomReportModal';
 import ProfileModal from '../../../views/Dashboard/ProfileModal/ProfileModal';
-import { useProfileViewModel } from '../../../viewmodels/useProfileViewModel';
 import OverviewStats from '../../../views/Dashboard/OverviewStats/OverviewStats';
+import { useProfileViewModel } from '../../../viewmodels/useProfileViewModel';
 import type { GameMode } from '../../../services/socket';
 import RoomDiscoveryList from './RoomDiscoveryList';
 import RoomOverviewStatusBar from './RoomOverviewStatusBar';
@@ -62,7 +64,11 @@ export default function DashboardForm({
     authenticatedUserId = null,
 }: DashboardFormProps = {}) {
     const [searchParams, setSearchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<DashboardTabId>('rooms');
+    const [activeTab, setActiveTab] = useState<DashboardTabId>(() =>
+        searchParams.get('aba') === 'visao-geral' && !searchParams.get('sala')?.trim()
+            ? 'overview'
+            : 'rooms',
+    );
     const [isManagingRoom, setIsManagingRoom] = useState<boolean>(() =>
         Boolean(searchParams.get('sala')?.trim()),
     );
@@ -131,7 +137,7 @@ export default function DashboardForm({
         activeTab === 'overview'
             ? {
                   title: 'Visão Geral',
-                  subtitle: 'Resumo da plataforma, sessões ativas e estatísticas dos quizzes.',
+                  subtitle: 'Desempenho analítico dos quizzes e questões, consolidado por sala.',
               }
             : showingRoomWorkspace
               ? {
@@ -147,9 +153,10 @@ export default function DashboardForm({
         setIsManagingRoom(false);
         setSearchParams(
             (prev) => {
-                if (!prev.has('sala')) return prev;
+                if (!prev.has('sala') && !prev.has('aba')) return prev;
                 const next = new URLSearchParams(prev);
                 next.delete('sala');
+                next.delete('aba');
                 return next;
             },
             { replace: true },
@@ -160,7 +167,18 @@ export default function DashboardForm({
         setActiveTab(tab);
         if (tab === 'rooms') {
             exitRoomWorkspace();
+            return;
         }
+        setIsManagingRoom(false);
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('sala');
+                next.set('aba', 'visao-geral');
+                return next;
+            },
+            { replace: true },
+        );
     }
 
     function handleEnterRoom(room: Room) {
@@ -195,6 +213,7 @@ export default function DashboardForm({
             setRoomSection('overview');
         }
     }
+    const recordedRoomGames = roomsVm.roomGames.filter((item) => item.status !== 'WAITING');
     const activeLobbyPlayersCount = activeRoom
         ? countEligiblePlayers(activeRoom.players)
         : 0;
@@ -256,53 +275,14 @@ export default function DashboardForm({
                 onOpenProfile={profileVm.open}
                 onLogout={handleLogout}
             >
-                {/* ABA GLOBAL: Visão Geral */}
+                {/* ABA GLOBAL: Visão Geral (Dashboard Analítico por Sala) */}
                 {activeTab === 'overview' && (
-                    <>
-                        <section className="overview-hero" aria-label="Resumo rápido">
-                            <div className="overview-hero__copy">
-                                <h2>Bem-vindo ao Painel da Quiz Arena</h2>
-                                <p>
-                                    Crie uma sala, cadastre pelo menos {MIN_ROOM_QUESTIONS} perguntas, compartilhe o
-                                    código com os jogadores e conduza a partida em tempo real.
-                                </p>
-                            </div>
-                            <div className="overview-hero__actions">
-                                <button
-                                    type="button"
-                                    className="overview-hero__cta"
-                                    onClick={() => handleSelectGlobalTab('rooms')}
-                                >
-                                    {roomsVm.rooms.length > 0 ? 'Ir para Salas' : '+ Criar Primeira Sala'}
-                                </button>
-                            </div>
-                        </section>
-
-                        <div className="overview-grid">
-                            <div className="stat-card">
-                                <span>Salas na Sessão</span>
-                                <h3>{roomsVm.rooms.length}</h3>
-                            </div>
-                            <div className="stat-card">
-                                <span>Salas em Andamento</span>
-                                <h3>
-                                    {roomsVm.rooms.filter((room) => room.backendStatus === 'IN_PROGRESS').length}
-                                </h3>
-                            </div>
-                            <div className="stat-card">
-                                <span>Salas Finalizadas</span>
-                                <h3>
-                                    {roomsVm.rooms.filter((room) => room.status === 'Finalizado').length}
-                                </h3>
-                            </div>
-                        </div>
-
-                        <OverviewStats
-                            rooms={roomsVm.rooms}
-                            questions={questionBank.questions}
-                            onOpenReport={(room) => roomsVm.openReport(room, questionBank.questions)}
-                        />
-                    </>
+                    <OverviewStats
+                        rooms={roomsVm.rooms}
+                        activeRoomStats={roomsVm.roomStats}
+                        isLoadingHostRooms={roomsVm.isLoadingHostRooms}
+                        onGoToRooms={() => handleSelectGlobalTab('rooms')}
+                    />
                 )}
 
                 {/* ABA GLOBAL: Salas — Listagem de descoberta */}
@@ -326,7 +306,7 @@ export default function DashboardForm({
                         room={activeRoom}
                         activeSection={roomSection}
                         questionCount={questionBank.activeCount}
-                        gamesCount={roomsVm.roomGames.length}
+                        gamesCount={recordedRoomGames.length}
                         onSelectSection={setRoomSection}
                         onBackToList={handleBackToRoomsList}
                         onShowCode={roomsVm.showCode}
@@ -348,7 +328,7 @@ export default function DashboardForm({
                                     activeRoundNumber={roomsVm.activeRound?.roundNumber ?? null}
                                     closedRoundNumber={roomsVm.closedRound?.roundNumber ?? null}
                                     answeredCount={roomsVm.answeredPlayers.length}
-                                    gamesCount={roomsVm.roomGames.length}
+                                    gamesCount={recordedRoomGames.length}
                                 />
 
                                 <div className="room-overview-grid">
@@ -838,16 +818,16 @@ export default function DashboardForm({
                         {/* SEÇÃO INTERNA: Partidas da sala */}
                         {roomSection === 'games' && (() => {
                             const gameNumberById = new Map(
-                                roomsVm.roomGames.map((item, idx) => [
+                                recordedRoomGames.map((item, idx) => [
                                     item.id,
-                                    roomsVm.roomGames.length - idx,
+                                    recordedRoomGames.length - idx,
                                 ]),
                             );
                             const distinctStatuses = Array.from(
-                                new Set(roomsVm.roomGames.map((item) => item.status)),
+                                new Set(recordedRoomGames.map((item) => item.status)),
                             );
                             const filteredGames = filterRoomGamesByStatus(
-                                roomsVm.roomGames,
+                                recordedRoomGames,
                                 gameStatusFilter,
                             );
                             const statusBadgeVariant = (status: ApiGameStatus) => {
@@ -861,7 +841,7 @@ export default function DashboardForm({
                                 <div className="room-section-surface">
                                     <div className="room-section-header">
                                         <div>
-                                            <h2>Histórico de Partidas ({roomsVm.roomGames.length})</h2>
+                                            <h2>Histórico de Partidas ({recordedRoomGames.length})</h2>
                                             <p className="room-section-header__meta">
                                                 Consulte o andamento, participantes, vencedor e relatório completo de cada partida.
                                             </p>
@@ -890,7 +870,7 @@ export default function DashboardForm({
                                         <div className="room-detail-panel">
                                             <LoadingState label="Carregando histórico de partidas…" />
                                         </div>
-                                    ) : roomsVm.roomGames.length === 0 ? (
+                                    ) : recordedRoomGames.length === 0 ? (
                                         <EmptyState
                                             icon="trophy"
                                             title="Nenhuma partida registrada nesta sala ainda"
@@ -919,10 +899,10 @@ export default function DashboardForm({
                                                         aria-pressed={gameStatusFilter === 'ALL'}
                                                         onClick={() => setGameStatusFilter('ALL')}
                                                     >
-                                                        Todas ({roomsVm.roomGames.length})
+                                                        Todas ({recordedRoomGames.length})
                                                     </button>
                                                     {distinctStatuses.map((status) => {
-                                                        const count = roomsVm.roomGames.filter(
+                                                        const count = recordedRoomGames.filter(
                                                             (item) => item.status === status,
                                                         ).length;
                                                         return (
@@ -960,7 +940,7 @@ export default function DashboardForm({
                                                     <div className="game-history__head" aria-hidden="true">
                                                         <span>Partida e data</span>
                                                         <span>Status e duração</span>
-                                                        <span>Jogadores</span>
+                                                        <span>Participação</span>
                                                         <span>Resultado</span>
                                                         <span className="game-history__head-action">Relatório</span>
                                                     </div>
@@ -1004,7 +984,7 @@ export default function DashboardForm({
 
                                                                     <div className="game-history__col-players">
                                                                         <span className="game-history__mobile-label">
-                                                                            Participantes
+                                                                            Participação e acerto
                                                                         </span>
                                                                         <span className="game-history__players-value">
                                                                             <Icon name="users" size={14} />
@@ -1013,6 +993,16 @@ export default function DashboardForm({
                                                                                 ? 'jogador'
                                                                                 : 'jogadores'}
                                                                         </span>
+                                                                        {(() => {
+                                                                            const avgRate = computeGameHistoryAccuracyRate(game);
+                                                                            return (
+                                                                                <span className="game-history__players-accuracy">
+                                                                                    {avgRate !== null
+                                                                                        ? `Acerto médio: ${formatRate(avgRate)}`
+                                                                                        : 'Sem respostas'}
+                                                                                </span>
+                                                                            );
+                                                                        })()}
                                                                     </div>
 
                                                                     <div className="game-history__col-result">
@@ -1089,7 +1079,11 @@ export default function DashboardForm({
                 closeDisabled={roomsVm.isSubmittingRoom}
                 title={roomsVm.isEditing ? 'Editar Sala' : 'Criar e Configurar Nova Sala'}
             >
-                <form className="room-modal-form" onSubmit={(e) => void handleRoomModalSubmit(e)}>
+                <form
+                    className="room-modal-form"
+                    onSubmit={(e) => void handleRoomModalSubmit(e)}
+                    noValidate
+                >
                     <div className="form-group">
                         <label htmlFor="room-name">Nome da Sala</label>
                         <input
@@ -1099,8 +1093,16 @@ export default function DashboardForm({
                             onChange={(e) => roomsVm.setName(e.target.value)}
                             placeholder="Ex: Arena de Programação"
                             disabled={roomsVm.isSubmittingRoom}
-                            required
+                            className={roomsVm.fieldErrors.name ? 'is-invalid' : undefined}
+                            aria-required="true"
+                            aria-invalid={Boolean(roomsVm.fieldErrors.name)}
+                            aria-describedby={roomsVm.fieldErrors.name ? 'room-name-error' : undefined}
                         />
+                        {roomsVm.fieldErrors.name && (
+                            <p id="room-name-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.name}
+                            </p>
+                        )}
                     </div>
                     <div className="form-group">
                         <label htmlFor="room-theme">Tema</label>
@@ -1111,21 +1113,52 @@ export default function DashboardForm({
                             onChange={(e) => roomsVm.setTheme(e.target.value)}
                             placeholder="Ex: React & TypeScript"
                             disabled={roomsVm.isSubmittingRoom}
-                            required
+                            className={roomsVm.fieldErrors.theme ? 'is-invalid' : undefined}
+                            aria-required="true"
+                            aria-invalid={Boolean(roomsVm.fieldErrors.theme)}
+                            aria-describedby={roomsVm.fieldErrors.theme ? 'room-theme-error' : undefined}
                         />
+                        {roomsVm.fieldErrors.theme && (
+                            <p id="room-theme-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.theme}
+                            </p>
+                        )}
                     </div>
                     <div className="form-group">
                         <label htmlFor="room-max-players">Máximo de Jogadores (2 a 50)</label>
                         <input
                             id="room-max-players"
                             type="number"
-                            min={2}
-                            max={50}
-                            value={roomsVm.form.maxPlayers}
-                            onChange={(e) => roomsVm.setMaxPlayers(Number(e.target.value))}
+                            inputMode="numeric"
+                            value={
+                                Number.isNaN(roomsVm.form.maxPlayers)
+                                    ? ''
+                                    : String(roomsVm.form.maxPlayers)
+                            }
+                            onChange={(e) =>
+                                roomsVm.setMaxPlayers(
+                                    e.target.value === '' ? Number.NaN : Number(e.target.value),
+                                )
+                            }
                             disabled={roomsVm.isSubmittingRoom}
-                            required
+                            className={roomsVm.fieldErrors.maxPlayers ? 'is-invalid' : undefined}
+                            aria-required="true"
+                            aria-invalid={Boolean(roomsVm.fieldErrors.maxPlayers)}
+                            aria-describedby={
+                                roomsVm.fieldErrors.maxPlayers
+                                    ? 'room-max-players-error'
+                                    : undefined
+                            }
                         />
+                        {roomsVm.fieldErrors.maxPlayers && (
+                            <p
+                                id="room-max-players-error"
+                                className="room-field-error"
+                                role="alert"
+                            >
+                                {roomsVm.fieldErrors.maxPlayers}
+                            </p>
+                        )}
                     </div>
                     <div className="form-group">
                         <label htmlFor="room-time">Tempo Limite por Questão (segundos)</label>
@@ -1134,6 +1167,11 @@ export default function DashboardForm({
                             value={roomsVm.form.timeLimit}
                             onChange={(e) => roomsVm.setTimeLimit(Number(e.target.value))}
                             disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.timeLimit ? 'is-invalid' : undefined}
+                            aria-invalid={Boolean(roomsVm.fieldErrors.timeLimit)}
+                            aria-describedby={
+                                roomsVm.fieldErrors.timeLimit ? 'room-time-error' : undefined
+                            }
                         >
                             {ROOM_TIME_OPTIONS.map((seconds) => (
                                 <option key={seconds} value={seconds}>
@@ -1141,6 +1179,11 @@ export default function DashboardForm({
                                 </option>
                             ))}
                         </select>
+                        {roomsVm.fieldErrors.timeLimit && (
+                            <p id="room-time-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.timeLimit}
+                            </p>
+                        )}
                     </div>
                     <div className="form-group">
                         <label htmlFor="room-mode">Modo de Jogo</label>
@@ -1149,6 +1192,11 @@ export default function DashboardForm({
                             value={roomsVm.form.gameMode}
                             onChange={(e) => roomsVm.setGameMode(e.target.value as GameMode)}
                             disabled={roomsVm.isSubmittingRoom}
+                            className={roomsVm.fieldErrors.gameMode ? 'is-invalid' : undefined}
+                            aria-invalid={Boolean(roomsVm.fieldErrors.gameMode)}
+                            aria-describedby={
+                                roomsVm.fieldErrors.gameMode ? 'room-mode-error' : undefined
+                            }
                         >
                             {(Object.keys(GAME_MODE_LABEL) as GameMode[]).map((mode) => (
                                 <option key={mode} value={mode}>
@@ -1156,6 +1204,11 @@ export default function DashboardForm({
                                 </option>
                             ))}
                         </select>
+                        {roomsVm.fieldErrors.gameMode && (
+                            <p id="room-mode-error" className="room-field-error" role="alert">
+                                {roomsVm.fieldErrors.gameMode}
+                            </p>
+                        )}
                     </div>
 
                     {roomsVm.formError && (

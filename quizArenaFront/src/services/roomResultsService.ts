@@ -22,12 +22,21 @@ export function recordRoundClosedResult(
 
     const existing: RoomResults = memoryStore[roomId] ?? {
         questionIds: [],
+        questionStatements: {},
         simulatedPlayers: [],
         players: [],
     };
 
     if (!existing.questionIds.includes(questionId)) {
         existing.questionIds.push(questionId);
+    }
+
+    const statement = round.question.statement?.trim();
+    if (statement) {
+        existing.questionStatements = {
+            ...(existing.questionStatements ?? {}),
+            [questionId]: statement,
+        };
     }
 
     const allParticipants = new Map<
@@ -80,12 +89,24 @@ export function recordRoundClosedResult(
     memoryStore[roomId] = existing;
 }
 
-export function savePlayerResult(roomId: string, result: PlayerResult): void {
+export function savePlayerResult(
+    roomId: string,
+    result: PlayerResult,
+    questionStatements?: Record<string, string>,
+): void {
     const existing: RoomResults = memoryStore[roomId] ?? {
         questionIds: result.answers.map((a) => a.questionId),
+        questionStatements: {},
         simulatedPlayers: [],
         players: [],
     };
+
+    if (questionStatements) {
+        existing.questionStatements = {
+            ...(existing.questionStatements ?? {}),
+            ...questionStatements,
+        };
+    }
 
     existing.players = [
         ...existing.players.filter((player) => player.nickname !== result.nickname),

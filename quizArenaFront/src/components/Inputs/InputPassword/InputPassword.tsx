@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import type { ChangeEvent } from 'react';
 
@@ -12,9 +11,9 @@ interface InputPasswordProps {
     password: string;
     setPassword: (password: string) => void;
     autoComplete?: string;
-    minLength?: number;
     maxLength?: number;
     disabled?: boolean;
+    error?: string | null;
 }
 
 export default function InputPassword({
@@ -25,12 +24,12 @@ export default function InputPassword({
     password,
     setPassword,
     autoComplete = 'current-password',
-    minLength,
     maxLength,
     disabled = false,
+    error = null,
 }: InputPasswordProps) {
-
     const [showPassword, setShowPassword] = useState(false);
+    const errorId = `${id}-error`;
 
     function handlePasswordChange(
         event: ChangeEvent<HTMLInputElement>
@@ -75,10 +74,11 @@ export default function InputPassword({
                     value={password}
                     onChange={handlePasswordChange}
                     autoComplete={autoComplete}
-                    minLength={minLength}
                     maxLength={maxLength}
                     disabled={disabled}
-                    required
+                    aria-required="true"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
                 />
 
                 <button
@@ -132,6 +132,12 @@ export default function InputPassword({
                     )}
                 </button>
             </div>
+
+            {error && (
+                <p id={errorId} className="input-error" role="alert">
+                    {error}
+                </p>
+            )}
         </div>
     );
 }

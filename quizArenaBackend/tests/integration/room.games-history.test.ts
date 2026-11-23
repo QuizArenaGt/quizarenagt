@@ -58,15 +58,17 @@ async function createHostAndRoom(email = hostEmail) {
     expect(roomRes.status).toBe(201);
     const room = roomRes.body;
 
+    const createdQuestions: Array<{ id: string; statement: string }> = [];
     for (const q of validRoomQuestions(5)) {
         const qRes = await request(app)
             .post("/questions")
             .set("Authorization", `Bearer ${token}`)
             .send({ roomId: room.id, ...q });
         expect(qRes.status).toBe(201);
+        createdQuestions.push(qRes.body as { id: string; statement: string });
     }
 
-    return { host, token, room };
+    return { host, token, room, questions: createdQuestions };
 }
 
 describe("GET /rooms/:id/games & GET /rooms/:id/games/:gameId/results - Integração", () => {
@@ -278,5 +280,201 @@ describe("GET /rooms/:id/games & GET /rooms/:id/games/:gameId/results - Integra�
         expect(detailRes.body.game.status).toBe("CANCELLED");
         expect(detailRes.body.game.winner).toBeNull();
         expect(detailRes.body.game.ranking).toHaveLength(1);
+    });
+
+    it("deve preservar os enunciados históricos do snapshot mesmo após editar ou excluir as perguntas originais do banco", async () => {
+        const { token, room, questions } = await createHostAndRoom(hostEmail);
+
+        const p1Join = await request(app)
+            .post("/rooms/join")
+            .send({ code: room.code, nickname: "Clara" });
+        const p2Join = await request(app)
+            .post("/rooms/join")
+            .send({ code: room.code, nickname: "Davi" });
+        const p1Token = p1Join.body.sessionToken as string;
+        const gameId = p1Join.body.player.gameId as string;
+
+        const startRes = await request(app)
+            .post(`/rooms/${room.id}/start`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(startRes.status).toBe(200);
+
+        const round1Res = await request(app)
+            .post(`/rooms/${room.id}/rounds`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(round1Res.status).toBe(201);
+        const round1Id = round1Res.body.round.id as string;
+
+        const lobbyP1 = await request(app)
+            .get(`/rooms/${room.code}`)
+            .set("Authorization", `Bearer ${p1Token}`);
+        const firstCorrectOpt = lobbyP1.body.room.currentGame.activeRound.question.options[0].id as string;
+        await request(app)
+            .post(`/rounds/${round1Id}/answer`)
+            .set("Authorization", `Bearer ${p1Token}`)
+            .send({ optionId: firstCorrectOpt });
+
+        await request(app)
+            .post(`/rounds/${round1Id}/close`)
+            .set("Authorization", `Bearer ${token}`);
+
+        await request(app)
+            .post(`/rooms/${room.id}/finish`)
+            .set("Authorization", `Bearer ${token}`);
+
+        // Inicia replay para tornar a sala WAITING novamente e altera/remove a pergunta original do banco
+        await request(app)
+            .post(`/rooms/${room.id}/play-again`)
+            .set("Authorization", `Bearer ${token}`);
+
+        expect(p2Join.status).toBe(201);
+
+        const editedOriginalQuestion = questions[0]!;
+        const deletedOriginalQuestion = questions[1]!;
+
+        const updateRes = await request(app)
+            .put(`/questions/${editedOriginalQuestion.id}`)
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+                statement: "Enunciado editado após a partida",
+                options: [
+                    { text: "Nova opção A", isCorrect: true },
+                    { text: "Nova opção B", isCorrect: false },
+                ],
+            });
+        expect(updateRes.status).toBe(200);
+
+        const deleteRes = await request(app)
+            .delete(`/questions/${deletedOriginalQuestion.id}`)
+            .set("Authorization", `Bearer ${token}`);
+        expect([200, 204]).toContain(deleteRes.status);
+
+        // Relatório da partida encerrada continua exibindo exatamente o enunciado do snapshot
+        const resultsRes = await request(app)
+            .get(`/rooms/${room.id}/games/${gameId}/results`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(resultsRes.status).toBe(200);
+        expect(resultsRes.body.game.questions).toHaveLength(1);
+        expect(resultsRes.body.game.questions[0].statement).toBe("Pergunta de teste 1");
+    });
+
+    it("deve calcular estatísticas agregadas por sala (excluindo CANCELLED/IN_PROGRESS/WAITING), isolar salas e expor contadores em GET /rooms", async () => {
+        const { token, room, questions } = await createHostAndRoom(hostEmail);
+
+        // Cria uma segunda sala do mesmo host para garantir isolamento estrito por sala
+        const roomBRes = await request(app)
+            .post("/rooms")
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+                name: "Sala Isolada B",
+                theme: "Ciência",
+                maxPlayers: 10,
+                questionTime: 30,
+                gameMode: "HARDCORE",
+            });
+        expect(roomBRes.status).toBe(201);
+        const roomB = roomBRes.body as { id: string; code: string };
+
+        // Partida 1 na Sala A (FINISHED, 2 jogadores, 1 rodada com 1 acerto e 1 erro)
+        const g1P1 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "Ana" });
+        const g1P2 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "Bruno" });
+        const g1Id = g1P1.body.player.gameId as string;
+
+        await request(app).post(`/rooms/${room.id}/start`).set("Authorization", `Bearer ${token}`);
+        const g1RoundRes = await request(app)
+            .post(`/rooms/${room.id}/rounds`)
+            .set("Authorization", `Bearer ${token}`);
+        const g1RoundId = g1RoundRes.body.round.id as string;
+        const g1CorrectOpt = g1RoundRes.body.round.question.options[0].id as string;
+        const g1WrongOpt = g1RoundRes.body.round.question.options[1].id as string;
+
+        await request(app)
+            .post(`/rounds/${g1RoundId}/answer`)
+            .set("Authorization", `Bearer ${g1P1.body.sessionToken as string}`)
+            .send({ optionId: g1CorrectOpt });
+        await request(app)
+            .post(`/rounds/${g1RoundId}/answer`)
+            .set("Authorization", `Bearer ${g1P2.body.sessionToken as string}`)
+            .send({ optionId: g1WrongOpt });
+        await request(app).post(`/rooms/${room.id}/finish`).set("Authorization", `Bearer ${token}`);
+
+        // Replay -> Partida 2 na Sala A (CANCELLED após saída voluntária — não deve contaminar stats)
+        await request(app).post(`/rooms/${room.id}/play-again`).set("Authorization", `Bearer ${token}`);
+        const cP1 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "C1" });
+        const cP2 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "C2" });
+        await request(app).post(`/rooms/${room.id}/start`).set("Authorization", `Bearer ${token}`);
+        await request(app).post("/rooms/leave").set("Authorization", `Bearer ${cP1.body.sessionToken as string}`);
+        await request(app).post("/rooms/leave").set("Authorization", `Bearer ${cP2.body.sessionToken as string}`);
+
+        // Replay -> Partida 3 na Sala A (FINISHED, 3 jogadores, 1 rodada com 3 acertos)
+        await request(app).post(`/rooms/${room.id}/play-again`).set("Authorization", `Bearer ${token}`);
+        const g3P1 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "Ana" });
+        const g3P2 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "Carla" });
+        const g3P3 = await request(app).post("/rooms/join").send({ code: room.code, nickname: "Davi" });
+
+        await request(app).post(`/rooms/${room.id}/start`).set("Authorization", `Bearer ${token}`);
+        const g3RoundRes = await request(app)
+            .post(`/rooms/${room.id}/rounds`)
+            .set("Authorization", `Bearer ${token}`);
+        const g3RoundId = g3RoundRes.body.round.id as string;
+        const g3CorrectOpt = g3RoundRes.body.round.question.options[0].id as string;
+
+        for (const pTok of [g3P1.body.sessionToken, g3P2.body.sessionToken, g3P3.body.sessionToken]) {
+            await request(app)
+                .post(`/rounds/${g3RoundId}/answer`)
+                .set("Authorization", `Bearer ${pTok as string}`)
+                .send({ optionId: g3CorrectOpt });
+        }
+        await request(app).post(`/rooms/${room.id}/finish`).set("Authorization", `Bearer ${token}`);
+
+        // Inicia mais um replay em WAITING — partidas antigas e stats da Sala A continuam íntegros
+        await request(app).post(`/rooms/${room.id}/play-again`).set("Authorization", `Bearer ${token}`);
+
+        // GET /rooms traz resumo de questões, partidas finalizadas e última data por sala
+        const hostRoomsRes = await request(app)
+            .get("/rooms")
+            .set("Authorization", `Bearer ${token}`);
+        expect(hostRoomsRes.status).toBe(200);
+        const listedA = hostRoomsRes.body.rooms.find((r: { id: string }) => r.id === room.id);
+        const listedB = hostRoomsRes.body.rooms.find((r: { id: string }) => r.id === roomB.id);
+        expect(listedA.activeQuestionsCount).toBe(questions.length);
+        expect(listedA.finishedGamesCount).toBe(2);
+        expect(typeof listedA.lastGameFinishedAt).toBe("string");
+        expect(listedB.activeQuestionsCount).toBe(0);
+        expect(listedB.finishedGamesCount).toBe(0);
+        expect(listedB.lastGameFinishedAt).toBeNull();
+
+        // GET /rooms/:id/games da Sala A retorna histórico (4 sessões) e agregados de 2 FINISHED apenas
+        const gamesARes = await request(app)
+            .get(`/rooms/${room.id}/games`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(gamesARes.status).toBe(200);
+        expect(gamesARes.body.games).toHaveLength(4);
+        expect(gamesARes.body.stats.roomId).toBe(room.id);
+        expect(gamesARes.body.stats.finishedGamesCount).toBe(2);
+        expect(gamesARes.body.stats.totalParticipations).toBe(5);
+        expect(gamesARes.body.stats.averagePlayersPerGame).toBeCloseTo(2.5, 5);
+        expect(gamesARes.body.stats.totalAnswers).toBe(5);
+        expect(gamesARes.body.stats.totalCorrectAnswers).toBe(4);
+        expect(gamesARes.body.stats.averageCorrectRate).toBeCloseTo(0.8, 5);
+        expect(gamesARes.body.stats.questionPerformance[0]?.gamesPlayedCount).toBe(2);
+
+        // Relatório individual da Partida 1 continua acessível e isolado (2 jogadores, 50% de acerto)
+        const g1Report = await request(app)
+            .get(`/rooms/${room.id}/games/${g1Id}/results`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(g1Report.status).toBe(200);
+        expect(g1Report.body.game.playerCount).toBe(2);
+        expect(g1Report.body.game.questions[0].answeredCount).toBe(2);
+        expect(g1Report.body.game.questions[0].correctCount).toBe(1);
+
+        // GET /rooms/:id/games da Sala B não é afetado pelos dados da Sala A
+        const gamesBRes = await request(app)
+            .get(`/rooms/${roomB.id}/games`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(gamesBRes.status).toBe(200);
+        expect(gamesBRes.body.stats.finishedGamesCount).toBe(0);
+        expect(gamesBRes.body.stats.totalParticipations).toBe(0);
+        expect(gamesBRes.body.stats.averageCorrectRate).toBeNull();
     });
 });
