@@ -25,4 +25,19 @@ export class UserRepository{
             data,
         });
     }
+
+    async updatePasswordAndBumpTokenVersion(
+        id: string,
+        passwordHash: string,
+    ): Promise<User> {
+        return prisma.user.update({
+            where: { id },
+            data: {
+                password: passwordHash,
+                tokenVersion: {
+                    increment: 1,
+                },
+            },
+        });
+    }
 }

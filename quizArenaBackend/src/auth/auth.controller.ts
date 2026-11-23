@@ -4,9 +4,13 @@ import { UserService } from "../users/user.service.js";
 import {
     EmailAlreadyExistsError,
     InvalidCredentialsError,
+    InvalidCurrentPasswordError,
+    SamePasswordError,
 } from "../users/user.errors.js";
+import { EmailNotConfiguredError } from "../email/emailConfig.js";
 import { AuthService } from "./auth.service.js";
 import { JwtService } from "./jwt.service.js";
+import { validateChangePassword } from "./change-password.dto.js";
 import { validateRegisterUser } from "./register.dto.js";
 import { validateLogin } from "./login.dto.js";
 import { validateRecoverPassword } from "./recover.dto.js";
@@ -79,6 +83,7 @@ export class AuthController {
             const token = this.jwtService.generate({
                 id: user.id,
                 role: user.role,
+                tokenVersion: user.tokenVersion,
             });
 
             res.status(200).json({
@@ -129,8 +134,15 @@ export class AuthController {
                 message:
                     "Se o e-mail estiver cadastrado, você receberá instruções para recuperar sua senha.",
             });
-        } catch {
-            console.error("Erro interno ao solicitar recuperação de senha.");
+        } catch (error: unknown) {
+            if (error instanceof EmailNotConfiguredError) {
+                console.error(
+                    "Falha de configuração SMTP ao solicitar recuperação de senha:",
+                    error.message,
+                );
+            } else {
+                console.error("Erro interno ao solicitar recuperação de senha.");
+            }
 
             res.status(500).json({
                 message:
@@ -177,6 +189,79 @@ export class AuthController {
 
             res.status(500).json({
                 message: "Erro interno ao redefinir senha.",
+            });
+        }
+    }
+
+    async changePassword(
+        req: Request,
+        res: Response,
+    ): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const validation = validateChangePassword(req.body);
+
+        if (!validation.success) {
+            res.status(400).json({
+                message: "Dados inválidos.",
+                errors: validation.errors,
+            });
+            return;
+        }
+
+        try {
+            const updatedUser = await this.authService.changePassword(
+                req.user.id,
+                validation.data,
+            );
+
+            const token = this.jwtService.generate({
+                id: updatedUser.id,
+                role: updatedUser.role,
+                tokenVersion: updatedUser.tokenVersion,
+            });
+
+            res.status(200).json({
+                message: "Senha alterada com sucesso!",
+                token,
+            });
+        } catch (error: unknown) {
+            if (error instanceof InvalidCurrentPasswordError) {
+                res.status(401).json({
+                    message: error.message,
+                    errors: {
+                        currentPassword: error.message,
+                    },
+                });
+                return;
+            }
+
+            if (error instanceof SamePasswordError) {
+                res.status(400).json({
+                    message: "Dados inválidos.",
+                    errors: {
+                        newPassword: error.message,
+                    },
+                });
+                return;
+            }
+
+            if (error instanceof InvalidCredentialsError) {
+                res.status(401).json({
+                    message: "Autenticação necessária.",
+                });
+                return;
+            }
+
+            console.error("Erro interno ao alterar senha.");
+
+            res.status(500).json({
+                message: "Erro interno ao alterar senha.",
             });
         }
     }

@@ -2,9 +2,8 @@
  * MODEL — conteúdo estático da landing page.
  *
  * Mantido fora das Views para que os textos possam ser revisados sem
- * tocar em componentes. O status de cada recurso reflete o que o backend
- * oferece hoje: apenas cadastro e login estão implementados; quizzes,
- * salas, partidas e ranking ainda são previstos.
+ * tocar em componentes. Todos os recursos listados abaixo já estão
+ * implementados e disponíveis na plataforma.
  */
 import type {
     AudienceBenefits,
@@ -89,21 +88,21 @@ export const PLATFORM_FEATURES: PlatformFeature[] = [
         title: 'Criação de quizzes',
         description: 'Perguntas com alternativas, organizadas em quizzes reutilizáveis.',
         icon: 'edit',
-        status: 'planned',
+        status: 'available',
     },
     {
         id: 'live-matches',
         title: 'Partidas simultâneas',
         description: 'Toda a turma conectada à mesma sessão, respondendo em tempo real.',
         icon: 'bolt',
-        status: 'planned',
+        status: 'available',
     },
     {
         id: 'results',
         title: 'Resultados e ranking',
         description: 'Pontuações e classificação para acompanhar a aprendizagem.',
         icon: 'trophy',
-        status: 'planned',
+        status: 'available',
     },
 ];
 

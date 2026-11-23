@@ -68,7 +68,12 @@ export class PasswordResetTokenRepository {
 
             await tx.user.update({
                 where: { id: token.userId },
-                data: { password: passwordHash },
+                data: {
+                    password: passwordHash,
+                    tokenVersion: {
+                        increment: 1,
+                    },
+                },
             });
 
             await tx.passwordResetToken.deleteMany({

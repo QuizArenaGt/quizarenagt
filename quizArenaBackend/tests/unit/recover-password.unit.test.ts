@@ -265,6 +265,49 @@ describe("RecoverPasswordService (regras de token e rollback SMTP)", () => {
             service.resetPassword("race-lost", "NovaSenha123"),
         ).rejects.toThrow("Token inválido ou expirado.");
     });
+
+    it("resetPassword conclui normalmente e registra log se desconexão de sockets falhar após consume", async () => {
+        const callOrder: string[] = [];
+        const consoleErrorSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => undefined);
+
+        const service = new RecoverPasswordService(
+            { findByEmail: vi.fn() } as never,
+            { sendPasswordResetEmail: vi.fn() } as never,
+            {
+                findByTokenHash: vi.fn().mockResolvedValue({
+                    id: "tok-ok",
+                    userId: "user-reset-1",
+                    tokenHash: "h",
+                    expiresAt: new Date(Date.now() + 60_000),
+                    createdAt: new Date(),
+                }),
+                deleteByTokenHash: vi.fn(),
+                replaceForUser: vi.fn(),
+                consume: vi.fn(async () => {
+                    callOrder.push("db-consume");
+                    return true;
+                }),
+            } as never,
+            async () => {
+                callOrder.push("disconnect-sockets");
+                throw new Error("Falha simulada ao fechar sockets");
+            },
+        );
+
+        await expect(
+            service.resetPassword("valid-token", "NovaSenha123"),
+        ).resolves.toBeUndefined();
+
+        expect(callOrder).toEqual(["db-consume", "disconnect-sockets"]);
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Falha ao encerrar conexões Socket.IO após atualização de senha:",
+            "Falha simulada ao fechar sockets",
+        );
+
+        consoleErrorSpy.mockRestore();
+    });
 });
 
 describe("createRateLimiter middleware", () => {

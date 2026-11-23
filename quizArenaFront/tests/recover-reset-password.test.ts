@@ -7,13 +7,16 @@ import {
     AUTH_PASSWORD_MAX_BYTES,
     AUTH_PASSWORD_MIN_LENGTH,
     formatAuthApiError,
+    validateChangePasswordFields,
     validateRecoverPasswordFields,
     validateResetPasswordFields,
 } from '../src/features/auth/validation.ts';
 import {
+    changePassword,
     recoverPassword,
     resetPassword,
 } from '../src/features/auth/services/authService.ts';
+import { PLATFORM_FEATURES } from '../src/models/landingContent.ts';
 import { ApiError } from '../src/services/api.ts';
 
 function readFrontFile(relativePath: string): string {
@@ -173,5 +176,137 @@ describe('Recuperação e redefinição de senha (Frontend)', () => {
         assert.match(appSource, /<HomeView \/>/);
         assert.match(appSource, /<ProtectedRoute \/>/);
         assert.doesNotMatch(appSource, /HomePage/);
+    });
+
+    it('5. validateChangePasswordFields e changePassword cobrem senha atual, nova senha diferente, 72 bytes UTF-8 e Bearer token', async () => {
+        assert.deepEqual(
+            validateChangePasswordFields({
+                currentPassword: '',
+                newPassword: '',
+                confirmPassword: '',
+            }),
+            {
+                currentPassword: 'Informe sua senha atual.',
+                newPassword: 'Informe uma nova senha.',
+                confirmPassword: 'Confirme sua nova senha.',
+            },
+        );
+
+        assert.deepEqual(
+            validateChangePasswordFields({
+                currentPassword: 'MesmaSenha123',
+                newPassword: 'MesmaSenha123',
+                confirmPassword: 'MesmaSenha123',
+            }),
+            {
+                newPassword: 'A nova senha deve ser diferente da senha atual.',
+            },
+        );
+
+        assert.deepEqual(
+            validateChangePasswordFields({
+                currentPassword: 'SenhaAtual123',
+                newPassword: 'NovaSenha456',
+                confirmPassword: 'OutraSenha789',
+            }),
+            {
+                confirmPassword: 'As senhas não coincidem.',
+            },
+        );
+
+        const over72Bytes = '🔐'.repeat(19);
+        const overResult = validateChangePasswordFields({
+            currentPassword: 'SenhaAtual123',
+            newPassword: over72Bytes,
+            confirmPassword: over72Bytes,
+        });
+        assert.match(overResult.newPassword ?? '', new RegExp(String(AUTH_PASSWORD_MAX_BYTES)));
+
+        assert.deepEqual(
+            validateChangePasswordFields({
+                currentPassword: 'SenhaAtual123',
+                newPassword: 'NovaSenha456',
+                confirmPassword: 'NovaSenha456',
+            }),
+            {},
+        );
+
+        const originalFetch = globalThis.fetch;
+        const originalLocalStorage = globalThis.localStorage;
+        let capturedAuthHeader: string | null = null;
+        let capturedUrl = '';
+
+        try {
+            Object.defineProperty(globalThis, 'localStorage', {
+                configurable: true,
+                value: {
+                    getItem: (key: string) => (key === 'token' ? 'jwt-atual-123' : null),
+                    setItem: () => undefined,
+                    removeItem: () => undefined,
+                },
+            });
+
+            globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+                capturedUrl = typeof input === 'string' ? input : input.toString();
+                capturedAuthHeader = new Headers(init?.headers).get('Authorization');
+
+                return new Response(
+                    JSON.stringify({
+                        message: 'Senha alterada com sucesso!',
+                        token: 'jwt-novo-456',
+                    }),
+                    { status: 200, headers: { 'Content-Type': 'application/json' } },
+                );
+            }) as typeof fetch;
+
+            const result = await changePassword({
+                currentPassword: 'SenhaAtual123',
+                newPassword: 'NovaSenha456',
+            });
+
+            assert.ok(capturedUrl.endsWith('/auth/change-password'));
+            assert.equal(capturedAuthHeader, 'Bearer jwt-atual-123');
+            assert.equal(result.message, 'Senha alterada com sucesso!');
+            assert.equal(result.token, 'jwt-novo-456');
+        } finally {
+            globalThis.fetch = originalFetch;
+            Object.defineProperty(globalThis, 'localStorage', {
+                configurable: true,
+                value: originalLocalStorage,
+            });
+        }
+    });
+
+    it('6. Seção de recursos da landing page comunica todos os recursos como disponíveis e ProfileModal expõe alteração de senha', () => {
+        assert.equal(PLATFORM_FEATURES.length, 4);
+        assert.ok(
+            PLATFORM_FEATURES.every((feature) => feature.status === 'available'),
+            'Todos os recursos da landing page devem estar disponíveis',
+        );
+
+        const landingContentSource = readFrontFile('src/models/landingContent.ts');
+        const featuresSectionSource = readFrontFile('src/views/Home/sections/FeaturesSection.tsx');
+        assert.doesNotMatch(landingContentSource, /status:\s*'planned'/);
+        assert.doesNotMatch(featuresSectionSource, /em desenvolvimento|Em breve/i);
+
+        const profileModalSource = readFrontFile('src/views/Dashboard/ProfileModal/ProfileModal.tsx');
+        const profileVmSource = readFrontFile('src/viewmodels/useProfileViewModel.ts');
+        assert.match(profileModalSource, /Alterar senha/);
+        assert.match(profileModalSource, /id="profile-current-password"/);
+        assert.match(profileModalSource, /id="profile-new-password"/);
+        assert.match(profileModalSource, /id="profile-confirm-password"/);
+        assert.match(profileVmSource, /changePassword/);
+        assert.match(profileVmSource, /localStorage\.setItem\('token', response\.token\)/);
+        assert.match(profileVmSource, /notifyAuthTokenUpdated\(\)/);
+
+        const socketSource = readFrontFile('src/services/socket.ts');
+        assert.match(socketSource, /AUTH_TOKEN_UPDATED_EVENT/);
+        assert.match(socketSource, /notifyAuthTokenUpdated/);
+        assert.match(socketSource, /isSocketAuthRejectionError/);
+
+        const roomsVmSource = readFrontFile('src/viewmodels/useRoomsViewModel.ts');
+        assert.match(roomsVmSource, /AUTH_TOKEN_UPDATED_EVENT/);
+        assert.match(roomsVmSource, /isSocketAuthRejectionError/);
+        assert.match(roomsVmSource, /socket\.removeAllListeners\(\);\s*\r?\n\s*socket\.disconnect\(\);/);
     });
 });

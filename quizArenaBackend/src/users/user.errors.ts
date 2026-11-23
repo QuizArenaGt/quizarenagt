@@ -12,3 +12,17 @@ export class InvalidCredentialsError extends Error {
         this.name = "InvalidCredentialsError";
     }
 }
+
+export class InvalidCurrentPasswordError extends Error {
+    constructor() {
+        super("Senha atual incorreta.");
+        this.name = "InvalidCurrentPasswordError";
+    }
+}
+
+export class SamePasswordError extends Error {
+    constructor() {
+        super("A nova senha deve ser diferente da senha atual.");
+        this.name = "SamePasswordError";
+    }
+}

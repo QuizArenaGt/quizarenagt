@@ -17,7 +17,7 @@ export default function FeaturesSection({ id, features }: FeaturesSectionProps) 
                     id={titleId}
                     eyebrow="Recursos"
                     title="O que a plataforma oferece"
-                    description="Alguns recursos já estão disponíveis e outros estão em desenvolvimento pela equipe."
+                    description="Todos os recursos essenciais para criar, conduzir e acompanhar partidas já estão disponíveis na plataforma."
                 />
 
                 <div className="home-grid home-grid--four">

@@ -3,6 +3,7 @@ import { Router } from "express";
 import { AuthController } from "./auth.controller.js";
 import { authenticateToken } from "./auth.middleware.js";
 import {
+    changePasswordLimiter,
     recoverPasswordEmailLimiter,
     recoverPasswordIpLimiter,
     resetPasswordLimiter,
@@ -33,6 +34,15 @@ authRoutes.post(
     resetPasswordLimiter.middleware,
     (req, res) => {
         void authController.resetPassword(req, res);
+    },
+);
+
+authRoutes.post(
+    "/change-password",
+    authenticateToken,
+    changePasswordLimiter.middleware,
+    (req, res) => {
+        void authController.changePassword(req, res);
     },
 );
 

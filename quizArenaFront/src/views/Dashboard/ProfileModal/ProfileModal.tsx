@@ -1,8 +1,13 @@
 import type { FormEvent } from 'react';
+import InputPassword from '../../../components/Inputs/InputPassword/InputPassword';
 import Alert from '../../../components/ui/Alert/Alert';
 import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import Modal from '../../../components/ui/Modal/Modal';
+import type {
+    AuthFieldErrors,
+    ChangePasswordField,
+} from '../../../features/auth/validation';
 import {
     NAME_MAX_LENGTH,
     formatPhone,
@@ -12,6 +17,7 @@ import {
     type ProfileField,
     type UserProfile,
 } from '../../../models/profile';
+import type { ChangePasswordDraft } from '../../../viewmodels/useProfileViewModel';
 import './ProfileModal.css';
 
 interface ProfileModalProps {
@@ -25,10 +31,17 @@ interface ProfileModalProps {
     savedMessage: string | null;
     onFieldChange: (field: ProfileField, value: string) => void;
     onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+    passwordDraft: ChangePasswordDraft;
+    passwordFieldErrors: AuthFieldErrors<ChangePasswordField>;
+    passwordError: string | null;
+    passwordSuccess: string | null;
+    isChangingPassword: boolean;
+    onPasswordFieldChange: (field: ChangePasswordField, value: string) => void;
+    onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => void;
     onClose: () => void;
 }
 
-/** VIEW — edição do perfil e situação da licença do usuário logado. */
+/** VIEW — edição do perfil, alteração de senha e situação da licença do usuário logado. */
 export default function ProfileModal({
     isOpen,
     profile,
@@ -40,6 +53,13 @@ export default function ProfileModal({
     savedMessage,
     onFieldChange,
     onSubmit,
+    passwordDraft,
+    passwordFieldErrors,
+    passwordError,
+    passwordSuccess,
+    isChangingPassword,
+    onPasswordFieldChange,
+    onPasswordSubmit,
     onClose,
 }: ProfileModalProps) {
     return (
@@ -57,6 +77,8 @@ export default function ProfileModal({
                     </div>
 
                     <form className="profile__form" onSubmit={onSubmit} noValidate>
+                        <h3 className="profile__section-title">Dados pessoais</h3>
+
                         <ProfileInput
                             field="name"
                             label="Nome"
@@ -106,6 +128,71 @@ export default function ProfileModal({
                             </Button>
                         </div>
                     </form>
+
+                    <section className="profile__security" aria-labelledby="profile-security-title">
+                        <h3 id="profile-security-title" className="profile__section-title">
+                            Alterar senha
+                        </h3>
+                        <p className="profile__security-subtitle">
+                            Atualize sua senha de acesso informando a senha atual.
+                        </p>
+
+                        <form className="profile__password-form" onSubmit={onPasswordSubmit} noValidate>
+                            <InputPassword
+                                id="profile-current-password"
+                                name="currentPassword"
+                                label="Senha atual"
+                                textPlaceholder="Senha atual"
+                                password={passwordDraft.currentPassword}
+                                setPassword={(value) => onPasswordFieldChange('currentPassword', value)}
+                                autoComplete="current-password"
+                                disabled={isChangingPassword}
+                                error={passwordFieldErrors.currentPassword}
+                            />
+
+                            <InputPassword
+                                id="profile-new-password"
+                                name="newPassword"
+                                label="Nova senha"
+                                textPlaceholder="Mín. 8 caracteres"
+                                password={passwordDraft.newPassword}
+                                setPassword={(value) => onPasswordFieldChange('newPassword', value)}
+                                autoComplete="new-password"
+                                disabled={isChangingPassword}
+                                error={passwordFieldErrors.newPassword}
+                            />
+
+                            <InputPassword
+                                id="profile-confirm-password"
+                                name="confirmPassword"
+                                label="Confirmar nova senha"
+                                textPlaceholder="Repita a senha"
+                                password={passwordDraft.confirmPassword}
+                                setPassword={(value) => onPasswordFieldChange('confirmPassword', value)}
+                                autoComplete="new-password"
+                                disabled={isChangingPassword}
+                                error={passwordFieldErrors.confirmPassword}
+                            />
+
+                            {passwordError && (
+                                <Alert variant="error">{passwordError}</Alert>
+                            )}
+
+                            {passwordSuccess && (
+                                <Alert variant="success">{passwordSuccess}</Alert>
+                            )}
+
+                            <div className="profile__actions">
+                                <Button
+                                    type="submit"
+                                    isLoading={isChangingPassword}
+                                    disabled={isChangingPassword}
+                                >
+                                    {isChangingPassword ? 'Alterando…' : 'Alterar senha'}
+                                </Button>
+                            </div>
+                        </form>
+                    </section>
 
                     <section className="profile__license" aria-labelledby="profile-license-title">
                         <div className="profile__license-header">

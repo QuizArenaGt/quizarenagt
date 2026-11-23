@@ -4,6 +4,10 @@ import { hash } from "bcryptjs";
 
 import { UserService } from "../users/user.service.js";
 import { EmailService } from "../email/emailService.js";
+import {
+    disconnectUserSockets,
+    disconnectUserSocketsSafely,
+} from "../realtime/room-events.js";
 import { PasswordResetTokenRepository } from "./passwordResetToken.repository.js";
 
 export class RecoverPasswordService {
@@ -12,6 +16,9 @@ export class RecoverPasswordService {
         private readonly emailService = new EmailService(),
         private readonly passwordResetTokenRepository =
             new PasswordResetTokenRepository(),
+        private readonly disconnectSocketsForUser: (
+            userId: string,
+        ) => Promise<void> = disconnectUserSockets,
     ) {}
 
     async requestPasswordReset(email: string): Promise<void> {
@@ -98,5 +105,10 @@ export class RecoverPasswordService {
         if (!consumed) {
             throw new Error("Token inválido ou expirado.");
         }
+
+        await disconnectUserSocketsSafely(
+            tokenRecord.userId,
+            this.disconnectSocketsForUser,
+        );
     }
 }

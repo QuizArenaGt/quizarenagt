@@ -42,7 +42,8 @@ describe('Auth & Session UX', () => {
         const source = readFrontFile('src/features/auth/components/RecoverPasswordForm/RecoverPasswordForm.tsx');
 
         assert.match(source, /<AuthBrandPanel[\s\S]*title="Recuperar senha"[\s\S]*description=/);
-        assert.match(source, /error instanceof Error[\s\S]*\? error\.message/);
+        assert.match(source, /formatAuthApiError\(/);
+        assert.match(source, /err instanceof ApiError/);
         assert.match(source, /<Alert variant="error">\{error\}<\/Alert>/);
         assert.match(source, /<Alert variant="success">\{success\}<\/Alert>/);
         assert.match(source, /<Button[\s\S]*type="submit"[\s\S]*isLoading=\{isLoading\}/);

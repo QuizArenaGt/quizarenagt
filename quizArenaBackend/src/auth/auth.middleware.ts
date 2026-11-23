@@ -1,13 +1,14 @@
 import type { Request, Response, NextFunction } from "express";
+import { prisma } from "../database/prisma.js";
 import { JwtService } from "./jwt.service.js";
 
 const jwtService = new JwtService();
 
-export function authenticateToken(
+export async function authenticateToken(
     req: Request,
     res: Response,
     next: NextFunction,
-): void {
+): Promise<void> {
     const authorization = req.headers.authorization;
 
     if (!authorization?.startsWith("Bearer ")) {
@@ -29,9 +30,25 @@ export function authenticateToken(
     try {
         const payload = jwtService.verify(token);
 
+        const user = await prisma.user.findUnique({
+            where: { id: payload.sub },
+            select: {
+                id: true,
+                role: true,
+                tokenVersion: true,
+            },
+        });
+
+        if (!user || user.tokenVersion !== (payload.tv ?? 0)) {
+            res.status(401).json({
+                message: "Token inválido ou expirado.",
+            });
+            return;
+        }
+
         req.user = {
-            id: payload.sub,
-            role: payload.role,
+            id: user.id,
+            role: user.role,
         };
 
         next();

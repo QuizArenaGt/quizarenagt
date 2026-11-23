@@ -74,4 +74,49 @@ describe("AuthService", () => {
             }),
         ).rejects.toThrow(databaseError);
     });
+
+    it("changePassword só desconecta sockets após persistir nova senha e não falha se a desconexão lançar erro", async () => {
+        const updatedUser = {
+            ...user,
+            tokenVersion: 1,
+        } as User;
+        const callOrder: string[] = [];
+
+        const findById = vi.fn().mockResolvedValue(user);
+        const updatePasswordAndBumpTokenVersion = vi.fn(async () => {
+            callOrder.push("db-update");
+            return updatedUser;
+        });
+        const disconnectSockets = vi.fn(async () => {
+            callOrder.push("disconnect-sockets");
+            throw new Error("Erro transitório no Socket.IO");
+        });
+        const consoleErrorSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => undefined);
+
+        const serviceWithSocketFail = new AuthService(
+            {
+                findByEmail,
+                findById,
+                updatePasswordAndBumpTokenVersion,
+            },
+            disconnectSockets,
+        );
+
+        const result = await serviceWithSocketFail.changePassword(user.id, {
+            currentPassword: "Senha123",
+            newPassword: "NovaSenha456",
+        });
+
+        expect(callOrder).toEqual(["db-update", "disconnect-sockets"]);
+        expect(result).toEqual(updatedUser);
+        expect(disconnectSockets).toHaveBeenCalledWith(user.id);
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Falha ao encerrar conexões Socket.IO após atualização de senha:",
+            "Erro transitório no Socket.IO",
+        );
+
+        consoleErrorSpy.mockRestore();
+    });
 });

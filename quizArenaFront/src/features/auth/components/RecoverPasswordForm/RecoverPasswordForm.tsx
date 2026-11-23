@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import '../LoginForm/LoginForm.css';
 
+import { ApiError } from '../../../../services/api';
 import { recoverPassword } from '../../services/authService';
 import type { RecoverPasswordRequest } from '../../types/auth';
 import {
+    formatAuthApiError,
     validateRecoverPasswordFields,
     type AuthFieldErrors,
     type RecoverPasswordField,
@@ -37,6 +39,8 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
 
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (isLoading) return;
+
         setError(null);
         setSuccess(null);
 
@@ -61,11 +65,17 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
             );
             setEmail('');
             onSuccess?.();
-        } catch (error) {
+        } catch (err) {
+            if (err instanceof ApiError && err.status === 400 && err.errors?.email) {
+                setFieldErrors({ email: err.errors.email });
+                return;
+            }
+
             setError(
-                error instanceof Error
-                    ? error.message
-                    : 'Não foi possível enviar as instruções. Tente novamente.'
+                formatAuthApiError(
+                    err,
+                    'Não foi possível enviar as instruções. Tente novamente.',
+                ),
             );
         } finally {
             setIsLoading(false);

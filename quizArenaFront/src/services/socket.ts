@@ -212,6 +212,23 @@ export interface GameCreatedPayload {
     } | null;
 }
 
+export const AUTH_TOKEN_UPDATED_EVENT = 'quizarena:auth-token-updated';
+
+export function notifyAuthTokenUpdated(): void {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event(AUTH_TOKEN_UPDATED_EVENT));
+    }
+}
+
+export function isSocketAuthRejectionError(
+    error: Error | { message?: string } | null | undefined,
+): boolean {
+    const message = error?.message ?? '';
+    return /token inválido|autenticação necessária|acesso à sala não autorizado/i.test(
+        message,
+    );
+}
+
 export function createHostSocket(token: string, roomCode: string): Socket {
     return io(API_URL, {
         auth: {

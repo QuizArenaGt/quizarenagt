@@ -68,6 +68,18 @@ export function createSocketServer(
             }
 
             if (payload) {
+                const hostUser = await prisma.user.findUnique({
+                    where: { id: payload.sub },
+                    select: { tokenVersion: true },
+                });
+
+                if (
+                    !hostUser ||
+                    hostUser.tokenVersion !== (payload.tv ?? 0)
+                ) {
+                    return next(new Error("Token inválido ou expirado."));
+                }
+
                 const normalizedRoomCode =
                     typeof auth.roomCode === "string"
                         ? normalizeRoomCode(auth.roomCode)
@@ -205,6 +217,10 @@ export function createSocketServer(
         const identity = socket.data.identity as SocketIdentity;
 
         socket.join(`room:${identity.roomId}`);
+
+        if (identity.type === "HOST") {
+            socket.join(`user:${identity.userId}`);
+        }
 
         if (identity.type === "PLAYER") {
             presenceRegistry.handleSocketConnected({
