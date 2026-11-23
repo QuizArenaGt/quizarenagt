@@ -249,4 +249,74 @@ export class QuestionController {
             });
         }
     }
+
+    async importToRoom(req: Request, res: Response): Promise<void> {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        const roomId = req.params.id;
+
+        if (typeof roomId !== "string" || !roomId.trim()) {
+            res.status(400).json({
+                message: "Identificador da sala inválido.",
+                errors: {
+                    roomId: "O identificador da sala é obrigatório.",
+                },
+            });
+            return;
+        }
+
+        try {
+            const questions = await this.questionService.importQuestions(
+                roomId,
+                req.user.id,
+                req.body,
+            );
+
+            res.status(201).json({
+                message: `${questions.length} ${questions.length === 1 ? "pergunta importada" : "perguntas importadas"} com sucesso.`,
+                importedCount: questions.length,
+                questions,
+            });
+        } catch (error: unknown) {
+            if (error instanceof InvalidQuestionDataError) {
+                res.status(400).json({
+                    message: "Dados inválidos.",
+                    errors: error.errors,
+                });
+                return;
+            }
+
+            if (error instanceof QuestionRoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof QuestionRoomAccessDeniedError) {
+                res.status(403).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof QuestionRoomNotEditableError) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao importar perguntas:", error);
+
+            res.status(500).json({
+                message: "Erro interno ao importar perguntas.",
+            });
+        }
+    }
 }

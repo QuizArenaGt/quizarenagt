@@ -14,6 +14,7 @@ import type { QuestionService } from "../../src/questions/question.service.js";
 describe("QuestionController", () => {
     let questionService: {
         createQuestion: ReturnType<typeof vi.fn>;
+        importQuestions: ReturnType<typeof vi.fn>;
     };
     let controller: QuestionController;
     type AuthenticatedRequest = Request & {
@@ -49,6 +50,7 @@ describe("QuestionController", () => {
     beforeEach(() => {
         questionService = {
             createQuestion: vi.fn(),
+            importQuestions: vi.fn(),
         };
 
         controller = new QuestionController(
@@ -206,5 +208,59 @@ describe("QuestionController", () => {
             message: "Erro interno ao criar pergunta.",
         });
         expect(consoleSpy).toHaveBeenCalled();
+    });
+
+    describe("importToRoom", () => {
+        it("deve importar perguntas e retornar 201 com contagem e lista ordenada", async () => {
+            const imported = [
+                {
+                    id: "q-1",
+                    roomId: "room-test-uuid",
+                    statement: "Pergunta 1",
+                    type: QuestionType.MULTIPLE_CHOICE,
+                    isActive: true,
+                    options: [],
+                },
+            ];
+            questionService.importQuestions.mockResolvedValue(imported);
+
+            req.params = { id: "room-test-uuid" };
+            req.body = { questions: [{ statement: "Pergunta 1" }] };
+
+            await controller.importToRoom(
+                req as Request,
+                res as unknown as Response,
+            );
+
+            expect(questionService.importQuestions).toHaveBeenCalledWith(
+                "room-test-uuid",
+                authenticatedUser.id,
+                req.body,
+            );
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "1 pergunta importada com sucesso.",
+                importedCount: 1,
+                questions: imported,
+            });
+        });
+
+        it("deve retornar 401 sem autenticação e 400 sem id de sala válido", async () => {
+            req.user = undefined as unknown as AuthenticatedRequest["user"];
+            req.params = { id: "room-test-uuid" };
+            await controller.importToRoom(
+                req as Request,
+                res as unknown as Response,
+            );
+            expect(res.status).toHaveBeenCalledWith(401);
+
+            req.user = authenticatedUser;
+            req.params = { id: "   " };
+            await controller.importToRoom(
+                req as Request,
+                res as unknown as Response,
+            );
+            expect(res.status).toHaveBeenCalledWith(400);
+        });
     });
 });

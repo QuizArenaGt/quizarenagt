@@ -5,16 +5,18 @@ import {
     type QuestionOption,
 } from "@prisma/client";
 
-import { QuestionRepository } from "./question.repository.js";
 import {
-    RoomRepository,
-    selectCurrentGame,
-} from "../rooms/room.repository.js";
+    QuestionRepository,
+    type QuestionRoomMutationFailureReason,
+} from "./question.repository.js";
+import { RoomRepository } from "../rooms/room.repository.js";
 
 import {
     validateCreateQuestion,
+    validateQuestionItem,
     type CreateQuestionDto,
 } from "./create-question.dto.js";
+import { validateImportQuestions } from "./import-questions.dto.js";
 
 import {
     InvalidQuestionDataError,
@@ -30,17 +32,14 @@ export type QuestionWithOptions = Question & {
 
 type QuestionRepositoryContract = Pick<
     QuestionRepository,
-    | "create"
     | "findManyByRoomId"
-    | "findById"
-    | "update"
-    | "delete"
+    | "createInRoom"
+    | "updateInRoom"
+    | "deleteInRoom"
+    | "importManyToRoom"
 >;
 
-type RoomRepositoryContract = Pick<
-    RoomRepository,
-    "findById" | "findByIdWithCurrentGame"
->;
+type RoomRepositoryContract = Pick<RoomRepository, "findById">;
 
 export type CreateQuestionInput = {
     roomId: string;
@@ -96,33 +95,21 @@ export class QuestionService {
             );
         }
 
-        const room = await this.roomRepository.findByIdWithCurrentGame(
+        const result = await this.questionRepository.createInRoom(
             validation.data.roomId,
+            data.hostId,
+            {
+                statement: validation.data.statement,
+                type: validation.data.type ?? QuestionType.MULTIPLE_CHOICE,
+                options: validation.data.options,
+            },
         );
 
-        if (!room) {
-            throw new QuestionRoomNotFoundError();
+        if (result.success) {
+            return result.question;
         }
 
-        if (room.hostId !== data.hostId) {
-            throw new QuestionRoomAccessDeniedError();
-        }
-
-        const currentGame = selectCurrentGame(room.games);
-
-        if (
-            room.status !== "ACTIVE" ||
-            currentGame?.status === "IN_PROGRESS"
-        ) {
-            throw new QuestionRoomNotEditableError();
-        }
-
-        return this.questionRepository.create({
-            roomId: validation.data.roomId,
-            statement: validation.data.statement,
-            type: validation.data.type ?? QuestionType.MULTIPLE_CHOICE,
-            options: validation.data.options,
-        });
+        this.throwRoomMutationError(result.reason);
     }
 
     async updateQuestion(
@@ -130,22 +117,7 @@ export class QuestionService {
         hostId: string,
         body: unknown,
     ): Promise<QuestionWithOptions> {
-        const question = await this.findEditableQuestion(
-            questionId,
-            hostId,
-        );
-
-        const payload =
-            typeof body === "object" &&
-            body !== null &&
-            !Array.isArray(body)
-                ? {
-                    ...(body as Record<string, unknown>),
-                    roomId: question.roomId,
-                }
-                : body;
-
-        const validation = validateCreateQuestion(payload);
+        const validation = validateQuestionItem(body);
 
         if (!validation.success) {
             throw new InvalidQuestionDataError(
@@ -154,55 +126,97 @@ export class QuestionService {
             );
         }
 
-        return this.questionRepository.update(questionId, {
-            statement: validation.data.statement,
-            type: validation.data.type,
-            options: validation.data.options,
-        });
+        const result = await this.questionRepository.updateInRoom(
+            questionId,
+            hostId,
+            {
+                statement: validation.data.statement,
+                type: validation.data.type,
+                options: validation.data.options,
+            },
+        );
+
+        if (result.success) {
+            return result.question;
+        }
+
+        this.throwRoomMutationError(
+            result.reason,
+            "Você não tem permissão para gerenciar as perguntas desta sala.",
+        );
     }
 
     async deleteQuestion(
         questionId: string,
         hostId: string,
     ): Promise<Question> {
-        await this.findEditableQuestion(questionId, hostId);
-
-        return this.questionRepository.delete(questionId);
-    }
-
-    private async findEditableQuestion(
-        questionId: string,
-        hostId: string,
-    ): Promise<QuestionWithOptions> {
-        const question = await this.questionRepository.findById(questionId);
-
-        if (!question) {
-            throw new QuestionNotFoundError();
-        }
-
-        const room = await this.roomRepository.findByIdWithCurrentGame(
-            question.roomId,
+        const result = await this.questionRepository.deleteInRoom(
+            questionId,
+            hostId,
         );
 
-        if (!room) {
-            throw new QuestionRoomNotFoundError();
+        if (result.success) {
+            return result.question;
         }
 
-        if (room.hostId !== hostId) {
-            throw new QuestionRoomAccessDeniedError(
-                "Você não tem permissão para gerenciar as perguntas desta sala.",
+        this.throwRoomMutationError(
+            result.reason,
+            "Você não tem permissão para gerenciar as perguntas desta sala.",
+        );
+    }
+
+    async importQuestions(
+        roomId: string,
+        hostId: string,
+        body: unknown,
+    ): Promise<QuestionWithOptions[]> {
+        const normalizedRoomId = roomId.trim();
+
+        if (!normalizedRoomId) {
+            throw new InvalidQuestionDataError(
+                "Identificador da sala obrigatório.",
+                { roomId: "O identificador da sala é obrigatório." },
             );
         }
 
-        const currentGame = selectCurrentGame(room.games);
+        const validation = validateImportQuestions(body);
 
-        if (
-            room.status !== "ACTIVE" ||
-            currentGame?.status === "IN_PROGRESS"
-        ) {
-            throw new QuestionRoomNotEditableError();
+        if (!validation.success) {
+            throw new InvalidQuestionDataError(
+                "Dados da importação inválidos.",
+                validation.errors,
+            );
         }
 
-        return question;
+        const result = await this.questionRepository.importManyToRoom(
+            normalizedRoomId,
+            hostId,
+            validation.data.questions,
+        );
+
+        if (result.success) {
+            return result.questions;
+        }
+
+        this.throwRoomMutationError(result.reason);
+    }
+
+    private throwRoomMutationError(
+        reason: QuestionRoomMutationFailureReason,
+        accessDeniedMessage?: string,
+    ): never {
+        switch (reason) {
+            case "QUESTION_NOT_FOUND":
+                throw new QuestionNotFoundError();
+
+            case "ROOM_NOT_FOUND":
+                throw new QuestionRoomNotFoundError();
+
+            case "ACCESS_DENIED":
+                throw new QuestionRoomAccessDeniedError(accessDeniedMessage);
+
+            case "ROOM_NOT_EDITABLE":
+                throw new QuestionRoomNotEditableError();
+        }
     }
 }

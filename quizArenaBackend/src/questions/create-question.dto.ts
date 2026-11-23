@@ -1,16 +1,36 @@
 import { QuestionType } from "@prisma/client";
 
+export const QUESTION_STATEMENT_MAX_LENGTH = 300;
+export const QUESTION_OPTION_MAX_LENGTH = 120;
+export const TRUE_FALSE_STANDARD_OPTION_TEXTS = [
+    "Verdadeiro",
+    "Falso",
+] as const;
+
 export type CreateQuestionOptionDto = {
     text: string;
     isCorrect: boolean;
 };
 
-export type CreateQuestionDto = {
-    roomId: string;
+export type ValidatedQuestionItemDto = {
     statement: string;
     type: QuestionType;
     options: CreateQuestionOptionDto[];
 };
+
+export type CreateQuestionDto = ValidatedQuestionItemDto & {
+    roomId: string;
+};
+
+export type QuestionItemValidationResult =
+    | {
+        success: true;
+        data: ValidatedQuestionItemDto;
+    }
+    | {
+        success: false;
+        errors: Record<string, string>;
+    };
 
 export type CreateQuestionValidationResult =
     | {
@@ -31,9 +51,13 @@ function isValidQuestionType(value: unknown): value is QuestionType {
     return VALID_QUESTION_TYPES.includes(value as QuestionType);
 }
 
-export function validateCreateQuestion(
+/**
+ * Valida os campos de domínio de uma questão (enunciado, tipo e alternativas),
+ * reutilizável tanto na criação individual quanto na importação em lote.
+ */
+export function validateQuestionItem(
     body: unknown,
-): CreateQuestionValidationResult {
+): QuestionItemValidationResult {
     const errors: Record<string, string> = {};
 
     if (
@@ -44,26 +68,21 @@ export function validateCreateQuestion(
         return {
             success: false,
             errors: {
-                body: "O corpo da requisição deve ser um objeto.",
+                body: "Os dados da pergunta devem ser um objeto.",
             },
         };
     }
 
     const payload = body as Record<string, unknown>;
-    const { roomId, statement, type, options } = payload;
-
-    const normalizedRoomId =
-        typeof roomId === "string" ? roomId.trim() : "";
-
-    if (!normalizedRoomId) {
-        errors.roomId = "O identificador da sala é obrigatório.";
-    }
+    const { statement, type, options } = payload;
 
     const normalizedStatement =
         typeof statement === "string" ? statement.trim() : "";
 
     if (!normalizedStatement) {
         errors.statement = "O enunciado da pergunta é obrigatório.";
+    } else if (normalizedStatement.length > QUESTION_STATEMENT_MAX_LENGTH) {
+        errors.statement = `O enunciado da pergunta deve ter no máximo ${QUESTION_STATEMENT_MAX_LENGTH} caracteres.`;
     }
 
     let resolvedType: QuestionType = QuestionType.MULTIPLE_CHOICE;
@@ -90,7 +109,7 @@ export function validateCreateQuestion(
                 ? "Uma pergunta de verdadeiro ou falso deve possuir exatamente 2 alternativas."
                 : "Uma pergunta de múltipla escolha deve possuir entre 2 e 4 alternativas.";
     } else {
-        let hasInvalidOption = false;
+        let optionValidationError: string | null = null;
 
         for (const item of options) {
             if (
@@ -98,7 +117,8 @@ export function validateCreateQuestion(
                 item === null ||
                 Array.isArray(item)
             ) {
-                hasInvalidOption = true;
+                optionValidationError =
+                    "Cada alternativa deve possuir um texto válido e a indicação se está correta.";
                 break;
             }
 
@@ -109,7 +129,13 @@ export function validateCreateQuestion(
                     : "";
 
             if (!optionText || typeof optionPayload.isCorrect !== "boolean") {
-                hasInvalidOption = true;
+                optionValidationError =
+                    "Cada alternativa deve possuir um texto válido e a indicação se está correta.";
+                break;
+            }
+
+            if (optionText.length > QUESTION_OPTION_MAX_LENGTH) {
+                optionValidationError = `Cada alternativa deve ter no máximo ${QUESTION_OPTION_MAX_LENGTH} caracteres.`;
                 break;
             }
 
@@ -119,17 +145,36 @@ export function validateCreateQuestion(
             });
         }
 
-        if (hasInvalidOption) {
-            errors.options =
-                "Cada alternativa deve possuir um texto válido e a indicação se está correta.";
+        if (optionValidationError) {
+            errors.options = optionValidationError;
         } else {
-            const correctCount = normalizedOptions.filter(
-                (opt) => opt.isCorrect,
-            ).length;
+            const normalizedOptionTexts = normalizedOptions.map((opt) =>
+                opt.text.toLowerCase(),
+            );
+            const hasDuplicateOptions =
+                new Set(normalizedOptionTexts).size !==
+                normalizedOptionTexts.length;
 
-            if (correctCount !== 1) {
+            if (hasDuplicateOptions) {
                 errors.options =
-                    "A pergunta deve possuir exatamente 1 alternativa correta.";
+                    "As alternativas da pergunta não podem se repetir.";
+            } else if (
+                resolvedType === QuestionType.TRUE_FALSE &&
+                !TRUE_FALSE_STANDARD_OPTION_TEXTS.every((standardText) =>
+                    normalizedOptions.some((opt) => opt.text === standardText),
+                )
+            ) {
+                errors.options =
+                    'Uma pergunta de verdadeiro ou falso deve possuir as alternativas padronizadas "Verdadeiro" e "Falso".';
+            } else {
+                const correctCount = normalizedOptions.filter(
+                    (opt) => opt.isCorrect,
+                ).length;
+
+                if (correctCount !== 1) {
+                    errors.options =
+                        "A pergunta deve possuir exatamente 1 alternativa correta.";
+                }
             }
         }
     }
@@ -144,10 +189,59 @@ export function validateCreateQuestion(
     return {
         success: true,
         data: {
-            roomId: normalizedRoomId,
             statement: normalizedStatement,
             type: resolvedType,
             options: normalizedOptions,
+        },
+    };
+}
+
+export function validateCreateQuestion(
+    body: unknown,
+): CreateQuestionValidationResult {
+    if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body)
+    ) {
+        return {
+            success: false,
+            errors: {
+                body: "O corpo da requisição deve ser um objeto.",
+            },
+        };
+    }
+
+    const payload = body as Record<string, unknown>;
+    const normalizedRoomId =
+        typeof payload.roomId === "string" ? payload.roomId.trim() : "";
+
+    const errors: Record<string, string> = {};
+
+    if (!normalizedRoomId) {
+        errors.roomId = "O identificador da sala é obrigatório.";
+    }
+
+    const itemValidation = validateQuestionItem(payload);
+
+    if (!itemValidation.success) {
+        Object.assign(errors, itemValidation.errors);
+    }
+
+    if (Object.keys(errors).length > 0 || !itemValidation.success) {
+        return {
+            success: false,
+            errors,
+        };
+    }
+
+    return {
+        success: true,
+        data: {
+            roomId: normalizedRoomId,
+            statement: itemValidation.data.statement,
+            type: itemValidation.data.type,
+            options: itemValidation.data.options,
         },
     };
 }

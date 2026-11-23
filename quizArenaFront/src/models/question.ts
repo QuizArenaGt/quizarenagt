@@ -31,9 +31,12 @@ export interface Question {
 
 export const MIN_CHOICES = 2;
 export const MAX_CHOICES = 4;
+export const STATEMENT_MAX_LENGTH = 300;
+export const OPTION_MAX_LENGTH = 120;
 export const DEFAULT_THEME = 'Geral';
 export const TRUE_LABEL = 'Verdadeiro';
 export const FALSE_LABEL = 'Falso';
+export const TRUE_FALSE_STANDARD_OPTIONS = [TRUE_LABEL, FALSE_LABEL] as const;
 
 export const QUESTION_TYPE_LABEL: Record<QuestionType, string> = {
     MULTIPLE_CHOICE: 'Múltipla escolha',

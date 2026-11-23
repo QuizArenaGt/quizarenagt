@@ -22,6 +22,7 @@ import {
 } from '../../../models/roomReport';
 import { useQuestionBankViewModel } from '../../../viewmodels/useQuestionBankViewModel';
 import { useRoomsViewModel } from '../../../viewmodels/useRoomsViewModel';
+import ImportQuestionsModal from '../../../views/Dashboard/ImportQuestionsModal/ImportQuestionsModal';
 import QuestionFormModal from '../../../views/Dashboard/QuestionFormModal/QuestionFormModal';
 import RoomCodeModal from '../../../views/Dashboard/RoomCodeModal/RoomCodeModal';
 import RoomReportModal from '../../../views/Dashboard/RoomReportModal/RoomReportModal';
@@ -850,9 +851,22 @@ export default function DashboardForm({
                                                 </p>
                                             </div>
                                             {activeRoom.backendStatus === 'WAITING' && (
-                                                <button className="primary-btn" onClick={questionBank.openCreate}>
-                                                    + Cadastrar Pergunta na Sala
-                                                </button>
+                                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        type="button"
+                                                        className="secondary-btn"
+                                                        onClick={questionBank.openImport}
+                                                    >
+                                                        Importar JSON
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="primary-btn"
+                                                        onClick={questionBank.openCreate}
+                                                    >
+                                                        + Cadastrar Pergunta na Sala
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
 
@@ -952,9 +966,22 @@ export default function DashboardForm({
                                         : 'Gerenciar Perguntas da Sala'}
                                 </h2>
                                 {activeRoom && activeRoom.backendStatus === 'WAITING' && (
-                                    <button className="primary-btn" onClick={questionBank.openCreate}>
-                                        + Cadastrar Pergunta
-                                    </button>
+                                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                        <button
+                                            type="button"
+                                            className="secondary-btn"
+                                            onClick={questionBank.openImport}
+                                        >
+                                            Importar JSON
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="primary-btn"
+                                            onClick={questionBank.openCreate}
+                                        >
+                                            + Cadastrar Pergunta
+                                        </button>
+                                    </div>
                                 )}
                             </div>
 
@@ -1267,6 +1294,18 @@ export default function DashboardForm({
                 question={questionBank.editingQuestion}
                 onClose={questionBank.closeForm}
                 onSave={questionBank.saveQuestion}
+            />
+
+            {/* Modal: Importar Perguntas em Lote via JSON */}
+            <ImportQuestionsModal
+                isOpen={questionBank.isImportOpen}
+                roomId={activeRoom?.id ?? null}
+                roomName={activeRoom?.name ?? ''}
+                roomStatus={activeRoom?.backendStatus ?? null}
+                existingQuestions={questionBank.questions}
+                isImporting={questionBank.isImporting}
+                onImportBatch={questionBank.importQuestionsBatch}
+                onClose={questionBank.closeImport}
             />
         </div>
     );
