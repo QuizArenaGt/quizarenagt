@@ -45,7 +45,7 @@ vi.mock("../../src/database/prisma.js", () => ({
     prisma: prismaMock,
 }));
 
-import { createSocketServer } from "../../src/realtime/socket.server.js";
+import { createSocketServer, parseAllowedOrigins } from "../../src/realtime/socket.server.js";
 
 describe("createSocketServer - elegibilidade do GamePlayer no handshake", () => {
     beforeEach(() => {
@@ -239,5 +239,22 @@ describe("createSocketServer - elegibilidade do GamePlayer no handshake", () => 
         expect(prismaMock.room.findUnique).not.toHaveBeenCalled();
         expect(next).toHaveBeenCalledTimes(1);
         expect(next.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    });
+});
+
+describe("parseAllowedOrigins", () => {
+    it("deve retornar '*' quando FRONTEND_URL não estiver definida ou estiver vazia", () => {
+        expect(parseAllowedOrigins(undefined)).toBe("*");
+        expect(parseAllowedOrigins("")).toBe("*");
+        expect(parseAllowedOrigins("   ,  ")).toBe("*");
+    });
+
+    it("deve remover espaços e barras finais das origens informadas", () => {
+        expect(
+            parseAllowedOrigins(" https://quizarenagt.vercel.app/ , https://preview.vercel.app/// "),
+        ).toEqual([
+            "https://quizarenagt.vercel.app",
+            "https://preview.vercel.app",
+        ]);
     });
 });
