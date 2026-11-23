@@ -1,4 +1,5 @@
 import { apiRequest } from './api.ts';
+import { resolvePlayerAvatarId } from '../models/avatars.ts';
 import { normalizeRoomCode } from '../models/game.ts';
 import { mapBackendRoomStatus, type Room } from '../models/room.ts';
 import type {
@@ -16,6 +17,7 @@ export type ApiRoomLifecycleStatus = 'ACTIVE' | 'ARCHIVED';
 export interface ApiGameRankingEntry {
     id: string;
     nickname: string;
+    avatarId?: string;
     score: number;
     position: number;
     correctCount: number;
@@ -27,6 +29,7 @@ export interface ApiGameRankingEntry {
 export interface ApiGameWinner {
     id: string;
     nickname: string;
+    avatarId?: string;
     score: number;
 }
 
@@ -110,6 +113,7 @@ export interface ApiActiveRoundSummary {
     answeredPlayers: {
         id: string;
         nickname: string;
+        avatarId?: string;
     }[];
     question: RoundStartedPayload['round']['question'];
 }
@@ -202,6 +206,7 @@ export interface JoinRoomApiResponse {
         roomId: string;
         userId: string | null;
         nickname: string;
+        avatarId?: string;
         status?: 'ACTIVE' | 'LEFT' | 'ABANDONED';
         score: number;
         joinedAt: string;
@@ -217,6 +222,7 @@ export interface LeaveRoomApiResponse {
     player: {
         id: string;
         nickname: string;
+        avatarId?: string;
         status: 'ACTIVE' | 'LEFT' | 'ABANDONED';
         score: number;
     };
@@ -427,6 +433,7 @@ export async function checkRoomAvailabilityApi(
 export async function joinRoomApi(input: {
     code: string;
     nickname: string;
+    avatarId?: string;
 }): Promise<JoinRoomApiResponse> {
     return apiRequest<JoinRoomApiResponse>('/rooms/join', {
         method: 'POST',
@@ -434,6 +441,7 @@ export async function joinRoomApi(input: {
         body: JSON.stringify({
             code: normalizeRoomCode(input.code),
             nickname: input.nickname.trim(),
+            avatarId: resolvePlayerAvatarId(input.avatarId),
         }),
     });
 }

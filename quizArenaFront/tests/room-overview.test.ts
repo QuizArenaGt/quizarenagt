@@ -27,7 +27,8 @@ describe('Visão Geral da Sala (Host Workspace)', () => {
         assert.match(source, /Placar ao Vivo/);
         assert.match(source, /Classificação Final/);
         assert.match(source, /Nenhum participante conectado ainda/);
-        assert.match(source, /getInitials\(player\.nickname\)/);
+        assert.match(source, /<PlayerAvatar/);
+        assert.match(source, /avatarId=\{player\.avatarId\}/);
         assert.match(source, /Respondeu/);
         assert.match(source, /Saiu/);
         assert.match(source, /Abandonou/);

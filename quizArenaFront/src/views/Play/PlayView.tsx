@@ -4,6 +4,7 @@ import Alert from '../../components/ui/Alert/Alert';
 import ConfirmDialog from '../../components/ui/ConfirmDialog/ConfirmDialog';
 import Icon from '../../components/ui/Icon/Icon';
 import Logo from '../../components/ui/Logo/Logo';
+import { PlayerAvatar } from '../../components/ui/PlayerAvatar/PlayerAvatar';
 import { LoadingState } from '../../components/ui/Skeleton/Skeleton';
 import { getPlayExitState } from '../../models/game';
 import { usePlayViewModel } from '../../viewmodels/usePlayViewModel';
@@ -69,6 +70,18 @@ export default function PlayView() {
                         </span>
                     )}
 
+                    {isInGame && viewModel.nickname && (
+                        <span className="play__chip play__chip--player" title={viewModel.nickname}>
+                            <PlayerAvatar
+                                avatarId={viewModel.avatarId}
+                                nickname={viewModel.nickname}
+                                size="xs"
+                                decorative
+                            />
+                            <span className="play__chip-player-name">{viewModel.nickname}</span>
+                        </span>
+                    )}
+
                     {isInGame && viewModel.room && (
                         <span className="play__chip play__chip--room" title={viewModel.room.title}>
                             <Icon name="rooms" size={14} />
@@ -129,9 +142,11 @@ export default function PlayView() {
                     <NicknameStep
                         pin={viewModel.pin}
                         nickname={viewModel.nickname}
+                        avatarId={viewModel.avatarId}
                         error={viewModel.error}
                         isJoining={viewModel.isJoining}
                         onNicknameChange={viewModel.changeNickname}
+                        onAvatarSelect={viewModel.selectAvatar}
                         onSubmit={viewModel.submitNickname}
                     />
                 )}
@@ -140,6 +155,7 @@ export default function PlayView() {
                     <LobbyStep
                         room={viewModel.room}
                         nickname={viewModel.nickname}
+                        avatarId={viewModel.avatarId}
                         playerId={viewModel.playerId}
                         players={viewModel.lobbyPlayers}
                         socketStatus={socketStatus}

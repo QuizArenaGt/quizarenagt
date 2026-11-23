@@ -5,6 +5,7 @@
  * resultados registrados e as perguntas e devolvem os números prontos
  * para a tela. Isso facilita testar e trocar a origem dos dados depois.
  */
+import { resolvePlayerAvatarId } from './avatars.ts';
 import type { GameMode } from '../services/socket';
 import type { OpponentPlayer } from './game';
 import type { Question } from './question';
@@ -44,6 +45,7 @@ export interface RoomResults {
 export interface StudentReportRow {
     position: number;
     nickname: string;
+    avatarId?: string;
     isSimulated: boolean;
     score: number;
     correctCount: number;
@@ -441,6 +443,7 @@ export function buildRoomReportFromServerGame(
         return {
             position: entry.position,
             nickname: entry.nickname,
+            avatarId: resolvePlayerAvatarId(entry.avatarId),
             isSimulated: false,
             score: entry.score,
             correctCount,

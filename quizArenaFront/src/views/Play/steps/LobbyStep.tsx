@@ -1,6 +1,8 @@
 import Badge from '../../../components/ui/Badge/Badge';
 import Icon from '../../../components/ui/Icon/Icon';
+import { PlayerAvatar } from '../../../components/ui/PlayerAvatar/PlayerAvatar';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
+import { resolvePlayerAvatarId } from '../../../models/avatars';
 import type { GameRoom } from '../../../models/game';
 import type { LobbyPlayerDto } from '../../../services/socket';
 import type { PlayerSocketStatus } from '../../../viewmodels/usePlayViewModel';
@@ -8,6 +10,7 @@ import type { PlayerSocketStatus } from '../../../viewmodels/usePlayViewModel';
 interface LobbyStepProps {
     room: GameRoom;
     nickname: string;
+    avatarId?: string;
     playerId: string | null;
     players: LobbyPlayerDto[];
     socketStatus?: PlayerSocketStatus;
@@ -16,19 +19,22 @@ interface LobbyStepProps {
 export default function LobbyStep({
     room,
     nickname,
+    avatarId,
     playerId,
     players,
     socketStatus = 'connected',
 }: LobbyStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
     const hasEnoughPlayers = players.length >= 2;
+    const currentPlayerDto = players.find((p) =>
+        playerId ? p.id === playerId : p.nickname === nickname,
+    );
+    const heroAvatarId = resolvePlayerAvatarId(currentPlayerDto?.avatarId ?? avatarId);
 
     return (
         <section className="play-card play-card--wide play-lobby" aria-labelledby="play-lobby-title">
             <div className="play-lobby__hero">
-                <span className="play-lobby__avatar" aria-hidden="true">
-                    {nickname.charAt(0).toUpperCase()}
-                </span>
+                <PlayerAvatar avatarId={heroAvatarId} nickname={nickname} size="lg" selected />
 
                 <div className="play-lobby__hero-text">
                     <div className="play-lobby__badges">
@@ -75,9 +81,12 @@ export default function LobbyStep({
                         const isMe = playerId ? player.id === playerId : player.nickname === nickname;
                         return (
                             <li key={player.id} className={isMe ? 'is-current' : undefined}>
-                                <span className="play-lobby__player-dot" aria-hidden="true">
-                                    {player.nickname.charAt(0).toUpperCase()}
-                                </span>
+                                <PlayerAvatar
+                                    avatarId={player.avatarId}
+                                    nickname={player.nickname}
+                                    size="xs"
+                                    decorative
+                                />
                                 <span className="play-lobby__player-name">{player.nickname}</span>
                                 {isMe && <span className="play-lobby__you-tag">você</span>}
                             </li>

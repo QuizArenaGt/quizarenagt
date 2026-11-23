@@ -61,7 +61,7 @@
   gap: 5px;
 }
 
-.report-meta__winner svg {
+.report-meta__winner > svg {
   flex-shrink: 0;
   color: var(--color-highlight-strong);
 }

@@ -1,3 +1,4 @@
+import { PlayerAvatar } from '../../../components/ui/PlayerAvatar/PlayerAvatar';
 import type { RankingEntry } from '../../../models/game';
 
 interface PodiumProps {
@@ -23,9 +24,14 @@ export default function Podium({ ranking }: PodiumProps) {
                     key={`${entry.position}-${entry.nickname}`}
                     className={`play-podium__place play-podium__place--${Math.min(entry.position, 3)}${entry.isCurrentPlayer ? ' is-current' : ''}`}
                 >
-                    <span className="play-podium__avatar" aria-hidden="true">
-                        {entry.nickname.charAt(0).toUpperCase()}
-                    </span>
+                    <PlayerAvatar
+                        avatarId={entry.avatarId}
+                        nickname={entry.nickname}
+                        size={entry.position === 1 ? 'lg' : 'md'}
+                        decorative
+                        selected={entry.isCurrentPlayer}
+                        className="play-podium__avatar-badge"
+                    />
                     <span className="play-podium__name" title={entry.nickname}>
                         <span className="play-podium__name-text">{entry.nickname}</span>
                         {entry.isCurrentPlayer && <span className="play-podium__you">você</span>}

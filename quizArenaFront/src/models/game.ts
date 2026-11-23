@@ -5,6 +5,7 @@
  * que o frontend precisa e servem de proposta de contrato para a equipe
  * de backend.
  */
+import { DEFAULT_PLAYER_AVATAR_ID } from './avatars.ts';
 import type { Question } from './question';
 
 /** Código da sala de demonstração, usado enquanto não há salas reais. */
@@ -73,6 +74,7 @@ export function mapLobbyToPlayerGameRoom(lobby: PlayerLobbyRoomSource): GameRoom
 export interface RankingEntry {
     position: number;
     nickname: string;
+    avatarId?: string;
     score: number;
     isCurrentPlayer: boolean;
 }
@@ -241,10 +243,17 @@ export function createCleanPlayerMatchState() {
         phase: 'join' as PlayPhase,
         pin: '',
         nickname: '',
+        avatarId: DEFAULT_PLAYER_AVATAR_ID,
         room: null as GameRoom | null,
         playerId: null as string | null,
         sessionToken: null as string | null,
-        lobbyPlayers: [] as { id: string; nickname: string; score: number; joinedAt: string }[],
+        lobbyPlayers: [] as {
+            id: string;
+            nickname: string;
+            avatarId?: string;
+            score: number;
+            joinedAt: string;
+        }[],
         currentRoundId: null as string | null,
         currentQuestion: null as Question | null,
         questionNumber: 1,
@@ -481,6 +490,7 @@ export interface PersistedPlayerSessionRef {
     gameId: string;
     playerId: string;
     nickname: string;
+    avatarId?: string;
 }
 
 export interface RecoverableLobbyLike {

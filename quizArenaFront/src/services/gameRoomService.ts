@@ -1,3 +1,4 @@
+import { resolvePlayerAvatarId } from '../models/avatars.ts';
 import { normalizeRoomCode } from '../models/game.ts';
 import {
     checkRoomAvailabilityApi,
@@ -28,6 +29,7 @@ export async function verifyRoomAvailability(
 export async function joinRoomWithNickname(
     code: string,
     nickname: string,
+    avatarId?: string,
 ): Promise<JoinedRoomSession> {
     const cleanCode = normalizeRoomCode(code);
     const cleanNickname = nickname.trim();
@@ -35,6 +37,7 @@ export async function joinRoomWithNickname(
     const joinResult = await joinRoomApi({
         code: cleanCode,
         nickname: cleanNickname,
+        avatarId: resolvePlayerAvatarId(avatarId),
     });
 
     const lobby = await getRoomLobbyApi(cleanCode, joinResult.sessionToken);

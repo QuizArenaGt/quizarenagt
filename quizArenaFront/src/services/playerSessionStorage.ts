@@ -1,3 +1,4 @@
+import { resolvePlayerAvatarId } from '../models/avatars.ts';
 import { isValidRoomCode, normalizeRoomCode } from '../models/game.ts';
 
 export const PLAYER_SESSION_STORAGE_KEY = 'quizarena:player-session';
@@ -9,6 +10,7 @@ export interface PersistedPlayerSession {
     gameId: string;
     playerId: string;
     nickname: string;
+    avatarId?: string;
 }
 
 type StorageAdapter = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -62,6 +64,9 @@ function normalizePersistedSession(raw: unknown): PersistedPlayerSession | null 
         gameId: candidate.gameId.trim(),
         playerId: candidate.playerId.trim(),
         nickname: candidate.nickname.trim(),
+        ...(isNonEmptyString(candidate.avatarId)
+            ? { avatarId: resolvePlayerAvatarId(candidate.avatarId) }
+            : {}),
     };
 }
 

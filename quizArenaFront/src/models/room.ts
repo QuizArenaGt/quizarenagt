@@ -1046,7 +1046,7 @@ export function computeRemainingSecondsFromDeadline(
 export interface RecoveredHostMatchState {
     activeRound: RoundStartedPayload['round'] | null;
     closedRound: RoundClosedPayload['round'] | null;
-    answeredPlayers: { id: string; nickname: string }[];
+    answeredPlayers: { id: string; nickname: string; avatarId?: string }[];
     remainingSeconds: number;
 }
 
