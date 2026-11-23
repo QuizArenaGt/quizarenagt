@@ -15,7 +15,7 @@ import Alert from '../../../../components/ui/Alert/Alert';
 import Button from '../../../../components/ui/Button/Button';
 
 interface RecoverPasswordFormProps {
-    onSuccess: () => void;
+    onSuccess?: () => void;
 }
 
 export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormProps) {
@@ -54,9 +54,13 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
                 email: email.trim(),
             };
 
-            await recoverPassword(request);
-            setSuccess('Instruções enviadas! Verifique sua caixa de entrada.');
-            onSuccess();
+            const response = await recoverPassword(request);
+            setSuccess(
+                response.message ||
+                    'Se o e-mail estiver cadastrado, você receberá instruções para recuperar sua senha.'
+            );
+            setEmail('');
+            onSuccess?.();
         } catch (error) {
             setError(
                 error instanceof Error

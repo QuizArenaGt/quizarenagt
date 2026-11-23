@@ -29,6 +29,8 @@ model User {
 
   hostedRooms Room[]
 
+  passwordResetTokens PasswordResetToken[]
+
   @@map("users")
 }
 
@@ -240,4 +242,17 @@ model RoundAnswer {
 
   @@unique([roundId, gamePlayerId])
   @@map("round_answers")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }

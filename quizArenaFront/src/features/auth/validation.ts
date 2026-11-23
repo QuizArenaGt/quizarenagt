@@ -17,10 +17,12 @@ export const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const AUTH_NAME_MIN_LENGTH = 2;
 export const AUTH_NAME_MAX_LENGTH = 100;
 export const AUTH_PASSWORD_MIN_LENGTH = 8;
+export const AUTH_PASSWORD_MAX_BYTES = 72;
 
 export type LoginField = 'email' | 'password';
 export type RegisterField = 'name' | 'email' | 'password' | 'confirmPassword';
 export type RecoverPasswordField = 'email';
+export type ResetPasswordField = 'newPassword' | 'confirmPassword';
 
 export type AuthFieldErrors<TField extends string> = Partial<Record<TField, string>>;
 
@@ -98,6 +100,31 @@ export function validateRecoverPasswordFields(input: {
     if (emailError) {
         errors.email = emailError;
     }
+    return errors;
+}
+
+const textEncoder = new TextEncoder();
+
+export function validateResetPasswordFields(input: {
+    newPassword: string;
+    confirmPassword: string;
+}): AuthFieldErrors<ResetPasswordField> {
+    const errors: AuthFieldErrors<ResetPasswordField> = {};
+
+    if (!input.newPassword) {
+        errors.newPassword = 'Informe uma nova senha.';
+    } else if (input.newPassword.length < AUTH_PASSWORD_MIN_LENGTH) {
+        errors.newPassword = `A senha deve possuir pelo menos ${AUTH_PASSWORD_MIN_LENGTH} caracteres.`;
+    } else if (textEncoder.encode(input.newPassword).length > AUTH_PASSWORD_MAX_BYTES) {
+        errors.newPassword = `A senha deve possuir no máximo ${AUTH_PASSWORD_MAX_BYTES} caracteres.`;
+    }
+
+    if (!input.confirmPassword) {
+        errors.confirmPassword = 'Confirme sua nova senha.';
+    } else if (input.newPassword !== input.confirmPassword) {
+        errors.confirmPassword = 'As senhas não coincidem.';
+    }
+
     return errors;
 }
 

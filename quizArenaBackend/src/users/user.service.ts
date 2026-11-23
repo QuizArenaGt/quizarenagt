@@ -16,6 +16,10 @@ export class UserService {
         private readonly userRepository: UserRepositoryContract = new UserRepository(),
     ) {}
 
+    async findByEmail(email: string): Promise<User | null> {
+        return this.userRepository.findByEmail(email);
+    }
+
     async register(data: RegisterUserDto): Promise<User> {
         const existingUser = await this.userRepository.findByEmail(data.email);
 

@@ -1,5 +1,7 @@
-/frontend/node_modules
+/quizArenaFront/node_modules
 /quizArenaBackend/node_modules
+node_modules/
+.DS_Store
 .env
 .env.test
 /quizArenaBackend/dist

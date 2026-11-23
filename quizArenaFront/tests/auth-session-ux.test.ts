@@ -79,4 +79,20 @@ describe('Auth & Session UX', () => {
         assert.match(cardSource, /<Button[\s\S]*onClick=\{onRetry\}/);
         assert.match(cardSource, /<Button[\s\S]*to="\/login"/);
     });
+
+    it('ResetPasswordForm usa AuthBrandPanel, InputPassword, Alert, Button e Link para /login', () => {
+        const resetSource = readFrontFile(
+            'src/features/auth/components/ResetPasswordForm/ResetPasswordForm.tsx',
+        );
+
+        assert.match(resetSource, /import InputPassword from/);
+        assert.match(resetSource, /import AuthBrandPanel from/);
+        assert.match(resetSource, /import Alert from/);
+        assert.match(resetSource, /import Button from/);
+        assert.match(resetSource, /<AuthBrandPanel[\s\S]*title="Nova senha"/);
+        assert.match(resetSource, /id="newPassword"[\s\S]*autoComplete="new-password"/);
+        assert.match(resetSource, /id="confirmPassword"[\s\S]*autoComplete="new-password"/);
+        assert.match(resetSource, /<Link to="\/login"/);
+        assert.doesNotMatch(resetSource, /btn-submit/);
+    });
 });

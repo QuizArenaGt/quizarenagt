@@ -2,11 +2,15 @@
 import type {
     LoginRequest,
     LoginResponse,
+    RecoverPasswordRequest,
+    RecoverPasswordResponse,
     RegisterRequest,
     RegisterResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
 } from "../types/auth";
 
-import { apiRequest } from "../../../services/api";
+import { apiRequest } from "../../../services/api.ts";
 
 export async function login(
     request: LoginRequest,
@@ -29,10 +33,21 @@ export async function register(
 }
 
 export async function recoverPassword(
-    request: { email: string },
-): Promise<{ message: string }> {
-    void request;
-    throw new Error(
-        "A recuperação de senha ainda não está disponível no servidor.",
-    );
+    request: RecoverPasswordRequest,
+): Promise<RecoverPasswordResponse> {
+    return apiRequest<RecoverPasswordResponse>("/auth/recover-password", {
+        method: "POST",
+        auth: false,
+        body: JSON.stringify(request),
+    });
+}
+
+export async function resetPassword(
+    request: ResetPasswordRequest,
+): Promise<ResetPasswordResponse> {
+    return apiRequest<ResetPasswordResponse>("/auth/reset-password", {
+        method: "POST",
+        auth: false,
+        body: JSON.stringify(request),
+    });
 }
