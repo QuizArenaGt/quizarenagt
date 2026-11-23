@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
 import { selectCurrentGame } from "../rooms/room.repository.js";
+import { filterActiveGamePlayers } from "../rooms/game-player-eligibility.js";
 
 export type RoundWithQuestion = Prisma.RoundGetPayload<{
     include: {
@@ -32,6 +33,7 @@ export type ClosedRoundWithDetails = Prisma.RoundGetPayload<{
                     select: {
                         id: true;
                         nickname: true;
+                        status: true;
                         score: true;
                     };
                     orderBy: { joinedAt: "asc" };
@@ -128,6 +130,7 @@ const closeRoundInclude = {
                 select: {
                     id: true,
                     nickname: true,
+                    status: true,
                     score: true,
                 },
                 orderBy: { joinedAt: "asc" as const },
@@ -259,9 +262,14 @@ export class RoundRepository {
 
             const allowBeforeExpiration = options?.allowBeforeExpiration ?? false;
             const timeExpired = now.getTime() >= expiresAt.getTime();
+            const activePlayers = filterActiveGamePlayers(game.players);
+            const activePlayerIds = new Set(activePlayers.map((player) => player.id));
+            const activeAnswersCount = round.answers.filter((answer) =>
+                activePlayerIds.has(answer.gamePlayerId),
+            ).length;
             const allPlayersAnswered =
-                game.players.length > 0 &&
-                round.answers.length >= game.players.length;
+                activePlayers.length > 0 &&
+                activeAnswersCount >= activePlayers.length;
 
             if (!allowBeforeExpiration && !timeExpired && !allPlayersAnswered) {
                 return { success: false, reason: "ROUND_NOT_READY" };

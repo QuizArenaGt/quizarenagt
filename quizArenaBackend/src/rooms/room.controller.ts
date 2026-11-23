@@ -15,11 +15,19 @@ import {
     RoomStartRequirementsError,
     RoomGameNotFoundError,
 } from "./room.errors.js";
-import { emitRoomEvent } from "../realtime/room-events.js";
+import {
+    disconnectPlayerSockets,
+    emitRoomEvent,
+} from "../realtime/room-events.js";
+import { RoundService } from "../rounds/round.service.js";
+
+type RoundAutoCloseContract = Pick<RoundService, "tryCloseRoundIfReady">;
 
 export class RoomController {
     constructor(
         private readonly roomService = new RoomService(),
+        private readonly roundService: RoundAutoCloseContract =
+            new RoundService(),
     ) { }
 
     async create(req: Request, res: Response): Promise<void> {
@@ -691,6 +699,91 @@ export class RoomController {
 
             res.status(500).json({
                 message: "Erro interno ao consultar resultados da partida.",
+            });
+        }
+    }
+
+    async leave(req: Request, res: Response): Promise<void> {
+        if (!req.roomPlayer) {
+            res.status(401).json({
+                message: "Autenticação necessária.",
+            });
+            return;
+        }
+
+        try {
+            const result = await this.roomService.leaveRoom(
+                req.roomPlayer.id,
+                req.roomPlayer.roomId,
+            );
+
+            await disconnectPlayerSockets(result.roomId, result.player.id);
+
+            emitRoomEvent(result.roomId, "player:left", {
+                roomId: result.roomId,
+                gameId: result.gameId,
+                gameStatus: result.gameStatus,
+                player: result.player,
+                eligiblePlayerCount: result.eligiblePlayerCount,
+            });
+
+            if (result.cancelledGame) {
+                emitRoomEvent(result.roomId, "game:finished", {
+                    roomId: result.roomId,
+                    gameId: result.cancelledGame.gameId,
+                    status: result.cancelledGame.status,
+                    reason: result.cancelledGame.reason,
+                    finishedAt: result.cancelledGame.finishedAt,
+                    ranking: result.cancelledGame.ranking,
+                });
+            } else if (result.openRoundId) {
+                try {
+                    await this.roundService.tryCloseRoundIfReady(
+                        result.openRoundId,
+                    );
+                } catch (closeError: unknown) {
+                    console.error(
+                        "Falha não crítica ao verificar encerramento antecipado da rodada após saída:",
+                        closeError,
+                    );
+                }
+            }
+
+            res.status(200).json({
+                message: "Você saiu da sala.",
+                roomId: result.roomId,
+                gameId: result.gameId,
+                gameStatus: result.gameStatus,
+                player: result.player,
+                eligiblePlayerCount: result.eligiblePlayerCount,
+                gameCancelled: Boolean(result.cancelledGame),
+            });
+        } catch (error: unknown) {
+            if (error instanceof RoomAuthenticationError) {
+                res.status(401).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomNotFoundError) {
+                res.status(404).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (error instanceof RoomNotEditableError) {
+                res.status(409).json({
+                    message: error.message,
+                });
+                return;
+            }
+
+            console.error("Erro interno ao sair da sala.");
+
+            res.status(500).json({
+                message: "Erro interno ao sair da sala.",
             });
         }
     }

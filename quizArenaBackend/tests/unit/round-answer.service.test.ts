@@ -66,6 +66,7 @@ describe("RoundAnswerService", () => {
         it.each([
             ["ROUND_NOT_FOUND", RoundAnswerRoundNotFoundError],
             ["PLAYER_NOT_IN_ROOM", RoundAnswerPlayerNotInRoomError],
+            ["PLAYER_INACTIVE", RoundAnswerPlayerNotInRoomError],
             ["ROUND_NOT_OPEN", RoundAnswerRoundNotOpenError],
             ["GAME_NOT_IN_PROGRESS", RoundAnswerGameNotInProgressError],
             ["OPTION_NOT_VALID", RoundAnswerOptionNotValidError],

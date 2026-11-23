@@ -36,6 +36,7 @@ describe("authenticateRoomPlayer", () => {
             gameId: "game-2",
             userId: null,
             nickname: "Alice",
+            status: "ACTIVE",
             sessionTokenHash: "hash-1",
             score: 0,
             joinedAt: new Date("2026-11-18T12:00:00.000Z"),
@@ -76,6 +77,7 @@ describe("authenticateRoomPlayer", () => {
             gameId: "game-1",
             userId: null,
             nickname: "Alice",
+            status: "ACTIVE",
             sessionTokenHash: "hash-old",
             score: 100,
             joinedAt: new Date("2026-11-18T11:00:00.000Z"),
@@ -112,6 +114,7 @@ describe("authenticateRoomPlayer", () => {
             gameId: "game-1",
             userId: null,
             nickname: "Alice",
+            status: "ACTIVE",
             sessionTokenHash: "hash-1",
             score: 0,
             joinedAt: new Date("2026-11-18T12:00:00.000Z"),
@@ -129,6 +132,79 @@ describe("authenticateRoomPlayer", () => {
 
         const req = {
             headers: { authorization: "Bearer token" },
+        } as unknown as Request;
+        const res = createResponseMock();
+        const next = vi.fn() as unknown as NextFunction;
+
+        await authenticateRoomPlayer(req, res, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(401);
+    });
+
+    it.each(["LEFT", "ABANDONED"] as const)(
+        "deve rejeitar com 401 participante com status %s",
+        async (status) => {
+            findBySessionTokenHashMock.mockResolvedValue({
+                id: "gp-inactive",
+                gameId: "game-2",
+                userId: null,
+                nickname: "Alice",
+                status,
+                sessionTokenHash: "hash-inactive",
+                score: 0,
+                joinedAt: new Date("2026-11-18T12:00:00.000Z"),
+                game: {
+                    id: "game-2",
+                    roomId: "room-1",
+                    status: "IN_PROGRESS",
+                    room: {
+                        id: "room-1",
+                        status: "ACTIVE",
+                        games: [{ id: "game-2", status: "IN_PROGRESS" }],
+                    },
+                },
+            });
+
+            const req = {
+                headers: { authorization: "Bearer inactive-token" },
+            } as unknown as Request;
+            const res = createResponseMock();
+            const next = vi.fn() as unknown as NextFunction;
+
+            await authenticateRoomPlayer(req, res, next);
+
+            expect(next).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(401);
+        },
+    );
+
+    it("deve rejeitar com 401 participante com reconnectDeadlineAt expirado mesmo antes do worker rodar", async () => {
+        findBySessionTokenHashMock.mockResolvedValue({
+            id: "gp-expired-http",
+            gameId: "game-2",
+            userId: null,
+            nickname: "Alice",
+            status: "ACTIVE",
+            disconnectedAt: new Date(Date.now() - 65_000),
+            reconnectDeadlineAt: new Date(Date.now() - 5_000),
+            sessionTokenHash: "hash-expired",
+            score: 0,
+            joinedAt: new Date("2026-11-18T12:00:00.000Z"),
+            game: {
+                id: "game-2",
+                roomId: "room-1",
+                status: "IN_PROGRESS",
+                room: {
+                    id: "room-1",
+                    status: "ACTIVE",
+                    games: [{ id: "game-2", status: "IN_PROGRESS" }],
+                },
+            },
+        });
+
+        const req = {
+            headers: { authorization: "Bearer expired-token" },
         } as unknown as Request;
         const res = createResponseMock();
         const next = vi.fn() as unknown as NextFunction;

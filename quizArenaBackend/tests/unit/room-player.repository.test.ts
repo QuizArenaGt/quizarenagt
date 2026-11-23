@@ -6,10 +6,22 @@ const { prismaMock, transactionClient } = vi.hoisted(() => {
         room: {
             findUnique: vi.fn(),
         },
+        game: {
+            findUnique: vi.fn(),
+            updateMany: vi.fn(),
+        },
         gamePlayer: {
             findUnique: vi.fn(),
+            findFirst: vi.fn(),
+            findMany: vi.fn(),
             count: vi.fn(),
             create: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+        },
+        round: {
+            findFirst: vi.fn(),
+            updateMany: vi.fn(),
         },
     };
 
@@ -18,6 +30,7 @@ const { prismaMock, transactionClient } = vi.hoisted(() => {
         prismaMock: {
             gamePlayer: {
                 findUnique: vi.fn(),
+                findFirst: vi.fn(),
                 findMany: vi.fn(),
                 count: vi.fn(),
                 create: vi.fn(),
@@ -162,20 +175,19 @@ describe("RoomPlayerRepository", () => {
     });
 
     describe("findByGameAndNickname", () => {
-        it("deve buscar participante por gameId e nickname", async () => {
-            prismaMock.gamePlayer.findUnique.mockResolvedValue(playerFixture);
+        it("deve buscar participante ativo por gameId e nickname", async () => {
+            prismaMock.gamePlayer.findFirst.mockResolvedValue(playerFixture);
 
             const result = await repository.findByGameAndNickname(
                 playerFixture.gameId,
                 playerFixture.nickname,
             );
 
-            expect(prismaMock.gamePlayer.findUnique).toHaveBeenCalledWith({
+            expect(prismaMock.gamePlayer.findFirst).toHaveBeenCalledWith({
                 where: {
-                    gameId_nickname: {
-                        gameId: playerFixture.gameId,
-                        nickname: playerFixture.nickname,
-                    },
+                    gameId: playerFixture.gameId,
+                    nickname: playerFixture.nickname,
+                    status: "ACTIVE",
                 },
             });
             expect(result).toEqual(playerFixture);
@@ -259,7 +271,7 @@ describe("RoomPlayerRepository", () => {
     describe("createIfRoomHasCapacity", () => {
         it("deve criar GamePlayer na partida WAITING quando houver vaga", async () => {
             transactionClient.room.findUnique.mockResolvedValue(roomFixture);
-            transactionClient.gamePlayer.findUnique.mockResolvedValue(null);
+            transactionClient.gamePlayer.findFirst.mockResolvedValue(null);
             transactionClient.gamePlayer.count.mockResolvedValue(2);
             transactionClient.gamePlayer.create.mockResolvedValue(playerFixture);
 
@@ -325,9 +337,9 @@ describe("RoomPlayerRepository", () => {
             ).rejects.toThrow("ROOM_NOT_JOINABLE");
         });
 
-        it("deve lançar DUPLICATE_NICKNAME quando o nickname já estiver em uso no Game", async () => {
+        it("deve lançar DUPLICATE_NICKNAME quando o nickname já estiver em uso por jogador ativo no Game", async () => {
             transactionClient.room.findUnique.mockResolvedValue(roomFixture);
-            transactionClient.gamePlayer.findUnique.mockResolvedValue(playerFixture);
+            transactionClient.gamePlayer.findFirst.mockResolvedValue(playerFixture);
 
             await expect(
                 repository.createIfRoomHasCapacity({
@@ -343,7 +355,7 @@ describe("RoomPlayerRepository", () => {
                 ...roomFixture,
                 games: [{ ...roomFixture.games[0], maxPlayers: 2 }],
             });
-            transactionClient.gamePlayer.findUnique.mockResolvedValue(null);
+            transactionClient.gamePlayer.findFirst.mockResolvedValue(null);
             transactionClient.gamePlayer.count.mockResolvedValue(2);
 
             await expect(
@@ -353,6 +365,201 @@ describe("RoomPlayerRepository", () => {
                     sessionTokenHash: "hash",
                 }),
             ).rejects.toThrow("ROOM_FULL");
+        });
+    });
+
+    describe("leaveRoom", () => {
+        it("em WAITING deve remover o GamePlayer do banco e retornar contagem atualizada", async () => {
+            transactionClient.room.findUnique.mockResolvedValue({
+                ...roomFixture,
+                games: [{ id: "game-1", status: "WAITING" }],
+            });
+            transactionClient.gamePlayer.findUnique.mockResolvedValue({
+                id: "gp-1",
+                gameId: "game-1",
+                nickname: "Alice",
+                status: "ACTIVE",
+                score: 0,
+            });
+            transactionClient.gamePlayer.count.mockResolvedValue(1);
+
+            const result = await repository.leaveRoom("gp-1", roomFixture.id);
+
+            expect(transactionClient.gamePlayer.delete).toHaveBeenCalledWith({
+                where: { id: "gp-1" },
+            });
+            expect(transactionClient.gamePlayer.update).not.toHaveBeenCalled();
+            expect(result).toEqual({
+                success: true,
+                roomId: roomFixture.id,
+                gameId: "game-1",
+                gameStatus: "WAITING",
+                player: {
+                    id: "gp-1",
+                    nickname: "Alice",
+                    status: "LEFT",
+                    score: 0,
+                },
+                eligiblePlayerCount: 1,
+                openRoundId: null,
+            });
+        });
+
+        it("em IN_PROGRESS deve marcar LEFT, anular sessionTokenHash e identificar rodada OPEN", async () => {
+            transactionClient.room.findUnique.mockResolvedValue({
+                ...roomFixture,
+                games: [{ id: "game-1", status: "IN_PROGRESS" }],
+            });
+            transactionClient.gamePlayer.findUnique.mockResolvedValue({
+                id: "gp-1",
+                gameId: "game-1",
+                nickname: "Alice",
+                status: "ACTIVE",
+                score: 140,
+            });
+            transactionClient.gamePlayer.update.mockResolvedValue({
+                id: "gp-1",
+                nickname: "Alice",
+                status: "LEFT",
+                score: 140,
+            });
+            transactionClient.gamePlayer.count.mockResolvedValue(2);
+            transactionClient.round.findFirst.mockResolvedValue({ id: "round-1" });
+
+            const result = await repository.leaveRoom("gp-1", roomFixture.id);
+
+            expect(transactionClient.gamePlayer.update).toHaveBeenCalledWith({
+                where: { id: "gp-1" },
+                data: {
+                    status: "LEFT",
+                    sessionTokenHash: null,
+                },
+                select: {
+                    id: true,
+                    nickname: true,
+                    status: true,
+                    score: true,
+                },
+            });
+            expect(transactionClient.gamePlayer.delete).not.toHaveBeenCalled();
+            expect(result).toEqual({
+                success: true,
+                roomId: roomFixture.id,
+                gameId: "game-1",
+                gameStatus: "IN_PROGRESS",
+                player: {
+                    id: "gp-1",
+                    nickname: "Alice",
+                    status: "LEFT",
+                    score: 140,
+                },
+                eligiblePlayerCount: 2,
+                openRoundId: "round-1",
+                cancelledGame: null,
+            });
+        });
+
+        it("em IN_PROGRESS com menos de 2 jogadores elegíveis restantes deve cancelar a partida e fechar rodada OPEN atomicamente", async () => {
+            const finishedAt = new Date("2026-11-22T21:00:00.000Z");
+            transactionClient.room.findUnique.mockResolvedValue({
+                ...roomFixture,
+                games: [{ id: "game-1", status: "IN_PROGRESS" }],
+            });
+            transactionClient.gamePlayer.findUnique.mockResolvedValue({
+                id: "gp-1",
+                gameId: "game-1",
+                nickname: "Alice",
+                status: "ACTIVE",
+                score: 80,
+            });
+            transactionClient.gamePlayer.update.mockResolvedValue({
+                id: "gp-1",
+                nickname: "Alice",
+                status: "LEFT",
+                score: 80,
+            });
+            transactionClient.gamePlayer.count.mockResolvedValue(1);
+            transactionClient.game.findUnique.mockResolvedValue({
+                id: "game-1",
+                status: "IN_PROGRESS",
+            });
+            transactionClient.$queryRaw
+                .mockResolvedValueOnce([]) // room FOR UPDATE
+                .mockResolvedValueOnce([{ now: finishedAt }]) // SELECT NOW()
+                .mockResolvedValueOnce([{ id: "round-1" }]); // open rounds FOR UPDATE
+            transactionClient.round.updateMany.mockResolvedValue({ count: 1 });
+            transactionClient.game.updateMany.mockResolvedValue({ count: 1 });
+            transactionClient.gamePlayer.findMany.mockResolvedValue([
+                { id: "gp-2", nickname: "Bob", score: 100 },
+            ]);
+
+            const result = await repository.leaveRoom("gp-1", roomFixture.id);
+
+            expect(transactionClient.round.updateMany).toHaveBeenCalledWith({
+                where: { gameId: "game-1", status: "OPEN" },
+                data: { status: "CLOSED", closedAt: finishedAt },
+            });
+            expect(transactionClient.game.updateMany).toHaveBeenCalledWith({
+                where: { id: "game-1", status: "IN_PROGRESS" },
+                data: { status: "CANCELLED", finishedAt },
+            });
+            expect(result).toEqual({
+                success: true,
+                roomId: roomFixture.id,
+                gameId: "game-1",
+                gameStatus: "IN_PROGRESS",
+                player: {
+                    id: "gp-1",
+                    nickname: "Alice",
+                    status: "LEFT",
+                    score: 80,
+                },
+                eligiblePlayerCount: 1,
+                openRoundId: null,
+                cancelledGame: {
+                    gameId: "game-1",
+                    status: "CANCELLED",
+                    reason: "INSUFFICIENT_PLAYERS",
+                    finishedAt,
+                    ranking: [{ id: "gp-2", nickname: "Bob", score: 100, position: 1 }],
+                },
+            });
+        });
+
+        it("deve rejeitar com PLAYER_NOT_ACTIVE em saída duplicada/inativa e GAME_NOT_LEAVABLE quando FINISHED", async () => {
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                games: [{ id: "game-1", status: "IN_PROGRESS" }],
+            });
+            transactionClient.gamePlayer.findUnique.mockResolvedValueOnce({
+                id: "gp-1",
+                gameId: "game-1",
+                nickname: "Alice",
+                status: "LEFT",
+                score: 140,
+            });
+
+            expect(await repository.leaveRoom("gp-1", roomFixture.id)).toEqual({
+                success: false,
+                reason: "PLAYER_NOT_ACTIVE",
+            });
+
+            transactionClient.room.findUnique.mockResolvedValueOnce({
+                ...roomFixture,
+                games: [{ id: "game-1", status: "FINISHED" }],
+            });
+            transactionClient.gamePlayer.findUnique.mockResolvedValueOnce({
+                id: "gp-1",
+                gameId: "game-1",
+                nickname: "Alice",
+                status: "ACTIVE",
+                score: 140,
+            });
+
+            expect(await repository.leaveRoom("gp-1", roomFixture.id)).toEqual({
+                success: false,
+                reason: "GAME_NOT_LEAVABLE",
+            });
         });
     });
 });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
     RoundService,
+    buildRoundClosedPayload,
     type CreateNextRoundResponse,
 } from "../../src/rounds/round.service.js";
 
@@ -183,7 +184,7 @@ describe("RoundService", () => {
                 expiresAt: new Date("2026-11-20T16:30:30.000Z"),
                 game: {
                     roomId: "room-test-uuid",
-                    players: [{ id: "gp-1", nickname: "Alice", score: 130 }],
+                    players: [{ id: "gp-1", nickname: "Alice", status: "ACTIVE" as const, score: 130 }],
                 },
                 answers: [],
             };
@@ -222,6 +223,67 @@ describe("RoundService", () => {
             expect(repositoryMock.closeRound).toHaveBeenCalledWith("round-test-uuid");
             expect(emitMock).not.toHaveBeenCalled();
             expect(res).toBeNull();
+        });
+
+        it("buildRoundClosedPayload deve incluir apenas ACTIVE (inclusive desconectado dentro da janela de 60s) no ranking competitivo e excluir LEFT e ABANDONED sem alterar dados originais", () => {
+            const closedRound = {
+                ...roundFixture,
+                status: "CLOSED" as const,
+                closedAt: new Date("2026-11-20T16:30:10.000Z"),
+                expiresAt: new Date("2026-11-20T16:30:30.000Z"),
+                answers: [
+                    {
+                        id: "ans-1",
+                        isCorrect: true,
+                        points: 120,
+                        answeredAt: new Date("2026-11-20T16:00:05.000Z"),
+                        gamePlayer: { id: "gp-1", nickname: "Alice" },
+                        option: { id: "option-1", text: "Alternativa 1" },
+                    },
+                ],
+            };
+
+            const players = [
+                {
+                    id: "gp-1",
+                    nickname: "Alice",
+                    status: "ACTIVE" as const,
+                    score: 120,
+                },
+                {
+                    id: "gp-2",
+                    nickname: "Bob",
+                    status: "ACTIVE" as const,
+                    score: 150,
+                    disconnectedAt: new Date("2026-11-20T16:30:00.000Z"),
+                    reconnectDeadlineAt: new Date("2026-11-20T16:31:00.000Z"),
+                },
+                {
+                    id: "gp-3",
+                    nickname: "Carol",
+                    status: "LEFT" as const,
+                    score: 200,
+                },
+                {
+                    id: "gp-4",
+                    nickname: "Dave",
+                    status: "ABANDONED" as const,
+                    score: 90,
+                },
+            ];
+
+            const payload = buildRoundClosedPayload(closedRound, players);
+
+            expect(payload.round.unansweredPlayers).toEqual([
+                { id: "gp-2", nickname: "Bob" },
+            ]);
+            expect(payload.round.ranking).toEqual([
+                { id: "gp-2", nickname: "Bob", score: 150 },
+                { id: "gp-1", nickname: "Alice", score: 120 },
+            ]);
+            // Dados históricos de LEFT e ABANDONED não foram modificados
+            expect(players[2]?.score).toBe(200);
+            expect(players[3]?.score).toBe(90);
         });
     });
 });

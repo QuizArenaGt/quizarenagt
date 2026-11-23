@@ -1,12 +1,14 @@
 import type { Request, Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { emitRoomEventMock } = vi.hoisted(() => ({
+const { emitRoomEventMock, disconnectPlayerSocketsMock } = vi.hoisted(() => ({
     emitRoomEventMock: vi.fn(),
+    disconnectPlayerSocketsMock: vi.fn(),
 }));
 
 vi.mock("../../src/realtime/room-events.js", () => ({
     emitRoomEvent: emitRoomEventMock,
+    disconnectPlayerSockets: disconnectPlayerSocketsMock,
 }));
 
 import { RoomController } from "../../src/rooms/room.controller.js";
@@ -45,8 +47,13 @@ describe("RoomController", () => {
         archiveRoom: ReturnType<typeof vi.fn>;
         finishRoom: ReturnType<typeof vi.fn>;
         joinRoom: ReturnType<typeof vi.fn>;
+        leaveRoom: ReturnType<typeof vi.fn>;
         checkRoomAvailability: ReturnType<typeof vi.fn>;
         getRoomLobby: ReturnType<typeof vi.fn>;
+    };
+
+    let roundServiceMock: {
+        tryCloseRoundIfReady: ReturnType<typeof vi.fn>;
     };
 
     let controller: RoomController;
@@ -107,10 +114,17 @@ describe("RoomController", () => {
             archiveRoom: vi.fn(),
             finishRoom: vi.fn(),
             joinRoom: vi.fn(),
+            leaveRoom: vi.fn(),
             checkRoomAvailability: vi.fn(),
             getRoomLobby: vi.fn(),
         };
-        controller = new RoomController(roomServiceMock as never);
+        roundServiceMock = {
+            tryCloseRoundIfReady: vi.fn(),
+        };
+        controller = new RoomController(
+            roomServiceMock as never,
+            roundServiceMock as never,
+        );
     });
 
     describe("create", () => {
@@ -598,6 +612,152 @@ describe("RoomController", () => {
             const forbiddenRes = createResponseMock();
             await controller.finish(req, forbiddenRes);
             expect(forbiddenRes.status).toHaveBeenCalledWith(403);
+        });
+    });
+
+    describe("leave", () => {
+        it("deve desconectar socket, emitir player:left e verificar fechamento antecipado de rodada aberta", async () => {
+            roomServiceMock.leaveRoom.mockResolvedValue({
+                roomId: "room-test-uuid",
+                gameId: "game-test-uuid",
+                gameStatus: "IN_PROGRESS",
+                player: {
+                    id: "player-uuid",
+                    nickname: "Alice",
+                    status: "LEFT",
+                    score: 120,
+                },
+                eligiblePlayerCount: 2,
+                openRoundId: "round-open-uuid",
+            });
+
+            const req = {
+                roomPlayer: {
+                    id: "player-uuid",
+                    roomId: "room-test-uuid",
+                },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.leave(req, res);
+
+            expect(roomServiceMock.leaveRoom).toHaveBeenCalledWith(
+                "player-uuid",
+                "room-test-uuid",
+            );
+            expect(disconnectPlayerSocketsMock).toHaveBeenCalledWith(
+                "room-test-uuid",
+                "player-uuid",
+            );
+            expect(emitRoomEventMock).toHaveBeenCalledWith(
+                "room-test-uuid",
+                "player:left",
+                {
+                    roomId: "room-test-uuid",
+                    gameId: "game-test-uuid",
+                    gameStatus: "IN_PROGRESS",
+                    player: {
+                        id: "player-uuid",
+                        nickname: "Alice",
+                        status: "LEFT",
+                        score: 120,
+                    },
+                    eligiblePlayerCount: 2,
+                },
+            );
+            expect(roundServiceMock.tryCloseRoundIfReady).toHaveBeenCalledWith(
+                "round-open-uuid",
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
+        });
+
+        it("deve emitir game:finished CANCELLED após player:left e ignorar tryCloseRoundIfReady quando restar menos de 2 elegíveis", async () => {
+            const finishedAt = new Date("2026-11-22T21:00:00.000Z");
+            roomServiceMock.leaveRoom.mockResolvedValue({
+                roomId: "room-test-uuid",
+                gameId: "game-test-uuid",
+                gameStatus: "IN_PROGRESS",
+                player: {
+                    id: "player-uuid",
+                    nickname: "Alice",
+                    status: "LEFT",
+                    score: 120,
+                },
+                eligiblePlayerCount: 1,
+                openRoundId: null,
+                cancelledGame: {
+                    gameId: "game-test-uuid",
+                    status: "CANCELLED",
+                    reason: "INSUFFICIENT_PLAYERS",
+                    finishedAt,
+                    ranking: [
+                        { id: "player-2", nickname: "Bob", score: 90, position: 1 },
+                    ],
+                },
+            });
+
+            const req = {
+                roomPlayer: {
+                    id: "player-uuid",
+                    roomId: "room-test-uuid",
+                },
+            } as unknown as Request;
+            const res = createResponseMock();
+
+            await controller.leave(req, res);
+
+            expect(emitRoomEventMock).toHaveBeenNthCalledWith(
+                1,
+                "room-test-uuid",
+                "player:left",
+                expect.objectContaining({
+                    eligiblePlayerCount: 1,
+                }),
+            );
+            expect(emitRoomEventMock).toHaveBeenNthCalledWith(
+                2,
+                "room-test-uuid",
+                "game:finished",
+                {
+                    roomId: "room-test-uuid",
+                    gameId: "game-test-uuid",
+                    status: "CANCELLED",
+                    reason: "INSUFFICIENT_PLAYERS",
+                    finishedAt,
+                    ranking: [
+                        { id: "player-2", nickname: "Bob", score: 90, position: 1 },
+                    ],
+                },
+            );
+            expect(roundServiceMock.tryCloseRoundIfReady).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith(
+                expect.objectContaining({ gameCancelled: true }),
+            );
+        });
+
+        it("deve mapear 401 sem roomPlayer ou sessão inválida e 409 quando partida não aceita saída", async () => {
+            const noPlayerRes = createResponseMock();
+            await controller.leave({} as unknown as Request, noPlayerRes);
+            expect(noPlayerRes.status).toHaveBeenCalledWith(401);
+
+            const req = {
+                roomPlayer: { id: "player-uuid", roomId: "room-test-uuid" },
+            } as unknown as Request;
+
+            roomServiceMock.leaveRoom.mockRejectedValueOnce(
+                new RoomAuthenticationError("Sessão de participante inválida."),
+            );
+            const invalidRes = createResponseMock();
+            await controller.leave(req, invalidRes);
+            expect(invalidRes.status).toHaveBeenCalledWith(401);
+
+            roomServiceMock.leaveRoom.mockRejectedValueOnce(
+                new RoomNotEditableError("Partida já encerrada."),
+            );
+            const conflictRes = createResponseMock();
+            await controller.leave(req, conflictRes);
+            expect(conflictRes.status).toHaveBeenCalledWith(409);
         });
     });
 });

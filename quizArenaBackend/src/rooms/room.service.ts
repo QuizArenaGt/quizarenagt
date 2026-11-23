@@ -3,6 +3,7 @@ import type {
     Game,
     GameMode,
     GamePlayer,
+    GamePlayerStatus,
     GameStatus,
     QuestionType,
     Room,
@@ -46,6 +47,12 @@ import {
     generateRoomPlayerSessionToken,
     hashRoomPlayerSessionToken,
 } from "./room-player-session-token.js";
+import {
+    countActiveGamePlayers,
+    filterActiveGamePlayers,
+    isGamePlayerActive,
+} from "./game-player-eligibility.js";
+import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
 import { JwtService } from "../auth/jwt.service.js";
 
 
@@ -73,8 +80,25 @@ type RoomCodeGeneratorContract = Pick<
 
 type RoomPlayerRepositoryContract = Pick<
     RoomPlayerRepository,
-    "createIfRoomHasCapacity" | "findBySessionTokenHash"
+    "createIfRoomHasCapacity" | "findBySessionTokenHash" | "leaveRoom"
 >;
+
+import type { CancelledGameSummary } from "./game-cancellation.js";
+
+export type LeaveRoomResultSummary = {
+    roomId: string;
+    gameId: string;
+    gameStatus: "WAITING" | "IN_PROGRESS";
+    player: {
+        id: string;
+        nickname: string;
+        status: GamePlayerStatus;
+        score: number;
+    };
+    eligiblePlayerCount: number;
+    openRoundId: string | null;
+    cancelledGame?: CancelledGameSummary | null;
+};
 
 type JwtServiceContract = Pick<JwtService, "verify">;
 
@@ -90,7 +114,10 @@ export type UpdateRoomInput = {
 };
 
 export type JoinRoomResult = {
-    player: Omit<GamePlayer, "sessionTokenHash"> & { roomId: string };
+    player: Omit<
+        GamePlayer,
+        "sessionTokenHash" | "disconnectedAt" | "reconnectDeadlineAt"
+    > & { roomId: string };
     sessionToken: string;
 };
 
@@ -118,6 +145,7 @@ export type RoomAvailabilityResult = {
 type LobbyPlayerProjection = {
     id: string;
     nickname: string;
+    status?: GamePlayerStatus;
     score: number;
     joinedAt: Date;
 };
@@ -414,7 +442,10 @@ function projectRoomWithGame(
         explicitGame ??
         (room.games ? selectCurrentGame(room.games) : null);
 
-    const players = selectedGame?.players ?? [];
+    const allPlayers = selectedGame?.players ?? [];
+    const activePlayers = filterActiveGamePlayers(allPlayers);
+    const exposedPlayers =
+        selectedGame?.status === "WAITING" ? activePlayers : allPlayers;
     const gameRounds = selectedGame?.rounds ?? [];
     const openRound =
         gameRounds.find((round) => round.status === "OPEN") ?? null;
@@ -432,7 +463,7 @@ function projectRoomWithGame(
               expiresAt: openRound.expiresAt,
               timeLimit: openRound.timeLimit,
               answeredCount: openRound.answers.length,
-              eligiblePlayerCount: players.length,
+              eligiblePlayerCount: activePlayers.length,
               answeredPlayers: openRound.answers.map((answer) => ({
                   id: answer.gamePlayer.id,
                   nickname: answer.gamePlayer.nickname,
@@ -453,7 +484,7 @@ function projectRoomWithGame(
 
     const lastClosedRound: RoundClosedWirePayload["round"] | null =
         !openRound && latestClosedRound
-            ? buildRoundClosedPayload(latestClosedRound, players).round
+            ? buildRoundClosedPayload(latestClosedRound, allPlayers).round
             : null;
 
     const completedRounds: CompletedRoundSummaryProjection[] = [...closedRounds]
@@ -477,15 +508,15 @@ function projectRoomWithGame(
               startedAt: selectedGame.startedAt,
               finishedAt: selectedGame.finishedAt,
               createdAt: selectedGame.createdAt,
-              playerCount: players.length,
-              eligiblePlayerCount: players.length,
+              playerCount: exposedPlayers.length,
+              eligiblePlayerCount: activePlayers.length,
               totalQuestions:
                   selectedGame.questionSnapshot?._count?.questions ?? 0,
               completedRoundsCount: completedRounds.length,
               completedRounds,
               activeRound,
               lastClosedRound,
-              players,
+              players: exposedPlayers,
           }
         : null;
 
@@ -512,7 +543,7 @@ function projectRoomWithGame(
         archivedAt: room.archivedAt,
         createdAt: room.createdAt,
         updatedAt: room.updatedAt,
-        players,
+        players: exposedPlayers,
         currentGame,
     };
 }
@@ -530,14 +561,14 @@ function isNicknameUniqueConstraint(error: unknown): boolean {
 
     if (Array.isArray(target)) {
         return (
-            target.includes("gameId") &&
-            target.includes("nickname")
+            (target.includes("gameId") && target.includes("nickname")) ||
+            target.some((item) => String(item).includes("nickname"))
         );
     }
 
     if (typeof target === "string") {
         return (
-            target.includes("gameId") &&
+            (target.includes("gameId") && target.includes("nickname")) ||
             target.includes("nickname")
         );
     }
@@ -629,13 +660,17 @@ export class RoomService {
         const waitingGame =
             currentGame?.status === "WAITING" ? currentGame : null;
 
+        const activeWaitingPlayerCount = waitingGame
+            ? countActiveGamePlayers(waitingGame.players)
+            : 0;
+
         if (
             waitingGame &&
             validation.data.maxPlayers !== undefined &&
-            validation.data.maxPlayers < waitingGame.players.length
+            validation.data.maxPlayers < activeWaitingPlayerCount
         ) {
             throw new InvalidRoomDataError("Dados da sala inválidos.", {
-                maxPlayers: `A quantidade máxima não pode ser menor que os ${waitingGame.players.length} jogadores já presentes no lobby.`,
+                maxPlayers: `A quantidade máxima não pode ser menor que os ${activeWaitingPlayerCount} jogadores já presentes no lobby.`,
             });
         }
 
@@ -865,6 +900,7 @@ export class RoomService {
             roomId: createdPlayer.roomId,
             userId: createdPlayer.userId,
             nickname: createdPlayer.nickname,
+            status: createdPlayer.status,
             score: createdPlayer.score,
             joinedAt: createdPlayer.joinedAt,
         };
@@ -921,7 +957,7 @@ export class RoomService {
             );
         }
 
-        if (currentGame.players.length >= currentGame.maxPlayers) {
+        if (countActiveGamePlayers(currentGame.players) >= currentGame.maxPlayers) {
             throw new RoomFullError();
         }
 
@@ -981,8 +1017,16 @@ export class RoomService {
                 sessionTokenHash,
             );
 
-        if (!player || !player.game) {
+        if (!player || !player.game || !isGamePlayerActive(player)) {
             throw new RoomAuthenticationError();
+        }
+
+        if (
+            player.reconnectDeadlineAt &&
+            player.reconnectDeadlineAt.getTime() <= Date.now() &&
+            (getPlayerPresenceRegistry()?.getActiveSocketCount(player.id) ?? 0) === 0
+        ) {
+            throw new RoomAuthenticationError("Prazo de reconexão expirado.");
         }
 
         const room = await this.roomRepository.findByCodeWithLobby(code);
@@ -1111,6 +1155,45 @@ export class RoomService {
             questionCount: questions.length,
             questions,
         };
+    }
+
+    async leaveRoom(
+        gamePlayerId: string,
+        roomId: string,
+    ): Promise<LeaveRoomResultSummary> {
+        const result = await this.roomPlayerRepository.leaveRoom(
+            gamePlayerId,
+            roomId,
+        );
+
+        if (result.success) {
+            return {
+                roomId: result.roomId,
+                gameId: result.gameId,
+                gameStatus: result.gameStatus,
+                player: result.player,
+                eligiblePlayerCount: result.eligiblePlayerCount,
+                openRoundId: result.openRoundId,
+                cancelledGame: result.cancelledGame ?? null,
+            };
+        }
+
+        switch (result.reason) {
+            case "ROOM_NOT_FOUND":
+                throw new RoomNotFoundError();
+
+            case "PLAYER_NOT_ACTIVE":
+                throw new RoomAuthenticationError(
+                    "Sessão de participante inválida.",
+                );
+
+            case "ROOM_ARCHIVED":
+            case "GAME_NOT_FOUND":
+            case "GAME_NOT_LEAVABLE":
+                throw new RoomNotEditableError(
+                    "Não é possível sair desta partida no estado atual.",
+                );
+        }
     }
 
 }

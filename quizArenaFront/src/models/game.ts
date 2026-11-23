@@ -326,3 +326,161 @@ export async function executeVerifyRoomCode({
         setIsLoading(false);
     }
 }
+
+export function formatLeaveRoomError(error: unknown): string {
+    if (error instanceof Error && error.message.trim().length > 0) {
+        return error.message;
+    }
+
+    return 'Não foi possível sair da sala. Tente novamente.';
+}
+
+export interface ExecuteLeaveRoomParams {
+    phase: PlayPhase;
+    sessionToken: string | null;
+    lockRef: { current: boolean };
+    requestLeave: (sessionToken: string) => Promise<unknown>;
+    setIsLeaving: (leaving: boolean) => void;
+    setError: (error: string | null) => void;
+    onLeft: () => void;
+}
+
+/**
+ * Executa a saída voluntária do jogador evitando duplicação de chamadas,
+ * tratando loading/erros e limpando o estado local apenas após confirmação.
+ */
+export async function executeLeaveRoom({
+    phase,
+    sessionToken,
+    lockRef,
+    requestLeave,
+    setIsLeaving,
+    setError,
+    onLeft,
+}: ExecuteLeaveRoomParams): Promise<boolean> {
+    if (lockRef.current) {
+        return false;
+    }
+
+    if (!sessionToken || phase === 'join' || phase === 'nickname' || phase === 'finished') {
+        onLeft();
+        return true;
+    }
+
+    lockRef.current = true;
+    setIsLeaving(true);
+    setError(null);
+
+    try {
+        await requestLeave(sessionToken);
+        onLeft();
+        return true;
+    } catch (error) {
+        setError(formatLeaveRoomError(error));
+        return false;
+    } finally {
+        lockRef.current = false;
+        setIsLeaving(false);
+    }
+}
+
+/**
+ * Indica se o erro HTTP significa sessão definitivamente inválida, expirada,
+ * pertencente a jogador LEFT/removido ou sala encerrada/arquivada.
+ */
+export function shouldClearPlayerSessionOnError(error: unknown): boolean {
+    if (!isHttpErrorLike(error)) {
+        return false;
+    }
+
+    return error.status === 401 || error.status === 403 || error.status === 404 || error.status === 409;
+}
+
+export interface PersistedPlayerSessionRef {
+    sessionToken: string;
+    roomCode: string;
+    roomId: string;
+    gameId: string;
+    playerId: string;
+    nickname: string;
+}
+
+export interface RecoverableLobbyLike {
+    id: string;
+    code: string;
+    roomStatus?: string;
+    currentGame?: {
+        id: string;
+        status: string;
+    } | null;
+}
+
+export interface ExecuteRecoverPlayerSessionParams<TLobby extends RecoverableLobbyLike> {
+    persistedSession: PersistedPlayerSessionRef | null;
+    lockRef: { current: boolean };
+    fetchLobby: (roomCode: string, sessionToken: string) => Promise<TLobby>;
+    setIsRecovering: (recovering: boolean) => void;
+    setError: (error: string | null) => void;
+    onRecovered: (lobby: TLobby, session: PersistedPlayerSessionRef) => void;
+    onSessionInvalid: () => void;
+}
+
+/**
+ * Coordena a recuperação idempotente da sessão do jogador ao abrir ou atualizar /jogar,
+ * validando a sessão via backend sem executar novo joinRoom nem entrar em loop.
+ */
+export async function executeRecoverPlayerSession<TLobby extends RecoverableLobbyLike>({
+    persistedSession,
+    lockRef,
+    fetchLobby,
+    setIsRecovering,
+    setError,
+    onRecovered,
+    onSessionInvalid,
+}: ExecuteRecoverPlayerSessionParams<TLobby>): Promise<'none' | 'skipped' | 'recovered' | 'invalid' | 'error'> {
+    if (!persistedSession) {
+        setIsRecovering(false);
+        return 'none';
+    }
+
+    if (lockRef.current) {
+        return 'skipped';
+    }
+
+    lockRef.current = true;
+    setIsRecovering(true);
+    setError(null);
+
+    try {
+        const lobby = await fetchLobby(persistedSession.roomCode, persistedSession.sessionToken);
+        const currentGame = lobby?.currentGame;
+
+        if (
+            !lobby ||
+            lobby.roomStatus === 'ARCHIVED' ||
+            !currentGame ||
+            currentGame.id !== persistedSession.gameId
+        ) {
+            onSessionInvalid();
+            return 'invalid';
+        }
+
+        onRecovered(lobby, persistedSession);
+        return 'recovered';
+    } catch (error) {
+        if (shouldClearPlayerSessionOnError(error)) {
+            onSessionInvalid();
+            return 'invalid';
+        }
+
+        setError(
+            error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : 'Não foi possível recuperar sua sessão.',
+        );
+        return 'error';
+    } finally {
+        lockRef.current = false;
+        setIsRecovering(false);
+    }
+}

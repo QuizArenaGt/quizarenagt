@@ -89,6 +89,7 @@ describe("RoundAnswerRepository", () => {
         transactionClient.round.findUnique.mockResolvedValue(roundFixture);
         transactionClient.gamePlayer.findUnique.mockResolvedValue({
             gameId: roundFixture.gameId,
+            status: "ACTIVE",
         });
         transactionClient.roundAnswer.findUnique.mockResolvedValue(null);
         const createdAnswer = {
@@ -131,6 +132,7 @@ describe("RoundAnswerRepository", () => {
         transactionClient.round.findUnique.mockResolvedValue(roundFixture);
         transactionClient.gamePlayer.findUnique.mockResolvedValue({
             gameId: roundFixture.gameId,
+            status: "ACTIVE",
         });
         transactionClient.roundAnswer.findUnique.mockResolvedValue(null);
         transactionClient.roundAnswer.create.mockResolvedValue({
@@ -222,6 +224,7 @@ describe("RoundAnswerRepository", () => {
         });
         transactionClient.gamePlayer.findUnique.mockResolvedValue({
             gameId: roundFixture.gameId,
+            status: "ACTIVE",
         });
 
         const result = await repository.submitAnswer(
@@ -239,6 +242,7 @@ describe("RoundAnswerRepository", () => {
     it("deve rejeitar partida finalizada, cancelada ou sala arquivada", async () => {
         transactionClient.gamePlayer.findUnique.mockResolvedValue({
             gameId: roundFixture.gameId,
+            status: "ACTIVE",
         });
 
         transactionClient.round.findUnique.mockResolvedValueOnce({
@@ -273,6 +277,7 @@ describe("RoundAnswerRepository", () => {
         transactionClient.round.findUnique.mockResolvedValue(roundFixture);
         transactionClient.gamePlayer.findUnique.mockResolvedValue({
             gameId: roundFixture.gameId,
+            status: "ACTIVE",
         });
 
         expect(
@@ -304,4 +309,28 @@ describe("RoundAnswerRepository", () => {
             ),
         ).toEqual({ success: false, reason: "ROUND_TIME_EXPIRED" });
     });
+
+    it.each(["LEFT", "ABANDONED"] as const)(
+        "deve rejeitar envio de resposta para participante com status %s sem registrar resposta ou alterar pontuação",
+        async (status) => {
+            transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+            transactionClient.gamePlayer.findUnique.mockResolvedValue({
+                gameId: roundFixture.gameId,
+                status,
+            });
+
+            const result = await repository.submitAnswer(
+                roundFixture.id,
+                "gp-inactive",
+                "option-correct",
+            );
+
+            expect(result).toEqual({
+                success: false,
+                reason: "PLAYER_INACTIVE",
+            });
+            expect(transactionClient.roundAnswer.create).not.toHaveBeenCalled();
+            expect(transactionClient.gamePlayer.update).not.toHaveBeenCalled();
+        },
+    );
 });

@@ -345,8 +345,8 @@ describe("RoundRepository", () => {
                     status: "ACTIVE" as const,
                 },
                 players: [
-                    { id: "gp-1", nickname: "Alice", score: 120 },
-                    { id: "gp-2", nickname: "Bob", score: 0 },
+                    { id: "gp-1", nickname: "Alice", status: "ACTIVE" as const, score: 120 },
+                    { id: "gp-2", nickname: "Bob", status: "ACTIVE" as const, score: 0 },
                 ],
             },
             snapshotQuestion: {
@@ -438,6 +438,71 @@ describe("RoundRepository", () => {
                 round: closed,
                 alreadyClosed: false,
                 gameFinished: false,
+            });
+        });
+
+        it("deve encerrar automaticamente quando todos os jogadores ACTIVE responderem, ignorando LEFT e ABANDONED", async () => {
+            const roundWithInactivePlayers = {
+                ...openRoundFixture,
+                openedAt: new Date(),
+                expiresAt: new Date(Date.now() + 25_000),
+                game: {
+                    ...openRoundFixture.game,
+                    players: [
+                        { id: "gp-1", nickname: "Alice", status: "ACTIVE" as const, score: 120 },
+                        { id: "gp-2", nickname: "Bob", status: "LEFT" as const, score: 80 },
+                        { id: "gp-3", nickname: "Carol", status: "ABANDONED" as const, score: 50 },
+                    ],
+                },
+                answers: [{ gamePlayerId: "gp-1" }],
+            };
+
+            transactionClient.round.findUnique.mockResolvedValueOnce(
+                roundWithInactivePlayers,
+            );
+            const closed = {
+                ...roundWithInactivePlayers,
+                status: "CLOSED" as const,
+                closedAt: new Date(),
+            };
+            transactionClient.round.update.mockResolvedValueOnce(closed);
+
+            const result = await repository.closeRound("round-1");
+
+            expect(transactionClient.round.update).toHaveBeenCalledTimes(1);
+            expect(result).toEqual({
+                success: true,
+                round: closed,
+                alreadyClosed: false,
+                gameFinished: false,
+            });
+        });
+
+        it("não deve contar resposta de jogador inativo para encerramento antecipado se jogador ACTIVE ainda não respondeu", async () => {
+            const roundWithPendingActive = {
+                ...openRoundFixture,
+                openedAt: new Date(),
+                expiresAt: new Date(Date.now() + 25_000),
+                game: {
+                    ...openRoundFixture.game,
+                    players: [
+                        { id: "gp-1", nickname: "Alice", status: "ACTIVE" as const, score: 0 },
+                        { id: "gp-2", nickname: "Bob", status: "LEFT" as const, score: 100 },
+                    ],
+                },
+                answers: [{ gamePlayerId: "gp-2" }],
+            };
+
+            transactionClient.round.findUnique.mockResolvedValueOnce(
+                roundWithPendingActive,
+            );
+
+            const result = await repository.closeRound("round-1");
+
+            expect(transactionClient.round.update).not.toHaveBeenCalled();
+            expect(result).toEqual({
+                success: false,
+                reason: "ROUND_NOT_READY",
             });
         });
     });

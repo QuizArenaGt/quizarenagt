@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     createCleanPlayerMatchState,
+    executeLeaveRoom,
+    executeRecoverPlayerSession,
     executeVerifyRoomCode,
     formatRoomAvailabilityError,
     NICKNAME_MAX_LENGTH,
     NICKNAME_MIN_LENGTH,
     normalizeRoomCodeInput,
+    shouldClearPlayerSessionOnError,
     type GameRoom,
     type PlayPhase,
     type PlayerAnswer,
@@ -16,14 +19,23 @@ import type { Question } from '../models/question';
 import {
     fetchPlayerLobby,
     joinRoomWithNickname,
+    leaveRoomSession,
     submitPlayerRoundAnswer,
     verifyRoomAvailability,
 } from '../services/gameRoomService';
+import {
+    clearPlayerSession,
+    loadPlayerSession,
+    savePlayerSession,
+} from '../services/playerSessionStorage';
 import { computeRemainingSecondsFromDeadline } from '../models/room';
+import type { ApiRoomLobby } from '../services/roomStorageService';
 import {
     createPlayerSocket,
+    type GameFinishedPayload,
     type LobbyPlayerDto,
     type PlayerJoinedPayload,
+    type PlayerLeftPayload,
     type RoomUpdatedPayload,
     type RoundClosedPayload,
     type RoundStartedPayload,
@@ -45,6 +57,11 @@ export function usePlayViewModel() {
 
     const [error, setError] = useState<string | null>(null);
     const [isJoining, setIsJoining] = useState(false);
+    const [isRecovering, setIsRecovering] = useState(() => loadPlayerSession() !== null);
+    const [canConnectSocket, setCanConnectSocket] = useState(false);
+    const [totalQuestions, setTotalQuestions] = useState(0);
+    const [isLeaving, setIsLeaving] = useState(false);
+    const [leaveError, setLeaveError] = useState<string | null>(null);
 
     // Estado da rodada e perguntas recebidas do servidor
     const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
@@ -64,12 +81,15 @@ export function usePlayViewModel() {
     const [answers, setAnswers] = useState<PlayerAnswer[]>([]);
     const [serverRanking, setServerRanking] = useState<RankingEntry[]>([]);
     const [serverTotalScore, setServerTotalScore] = useState(0);
+    const [isGameCancelled, setIsGameCancelled] = useState(false);
 
     const deadlineRef = useRef(0);
     const hasAnsweredRef = useRef(false);
     const currentRoundIdRef = useRef<string | null>(null);
     const currentQuestionTypeRef = useRef<Question['type']>('MULTIPLE_CHOICE');
     const isCheckingPinRef = useRef(false);
+    const isRecoveringRef = useRef(false);
+    const isLeavingRef = useRef(false);
 
     const lastAnswer = answers.length > 0 ? answers[answers.length - 1] : null;
     const correctCount = useMemo(
@@ -124,10 +144,24 @@ export function usePlayViewModel() {
 
         try {
             const session = await joinRoomWithNickname(pin, trimmedNickname);
+            const resolvedGameId =
+                session.player.gameId ?? session.lobby.currentGame?.id ?? '';
+
+            if (resolvedGameId) {
+                savePlayerSession({
+                    sessionToken: session.sessionToken,
+                    roomCode: session.lobby.code,
+                    roomId: session.lobby.id,
+                    gameId: resolvedGameId,
+                    playerId: session.player.id,
+                    nickname: session.player.nickname,
+                });
+            }
+
             setNickname(session.player.nickname);
             setPlayerId(session.player.id);
-            setSessionToken(session.sessionToken);
             setLobbyPlayers(session.lobby.players);
+            setTotalQuestions(session.lobby.currentGame?.totalQuestions ?? 0);
             setCurrentTimeLimit(session.lobby.questionTime);
             setRoom({
                 pin: session.lobby.code,
@@ -138,6 +172,9 @@ export function usePlayViewModel() {
                 opponents: [],
                 isDemo: false,
             });
+            setCanConnectSocket(true);
+            setSessionToken(session.sessionToken);
+            setIsGameCancelled(false);
             setPhase('lobby');
         } catch (joinErr) {
             setError(formatRoomAvailabilityError(joinErr));
@@ -147,16 +184,10 @@ export function usePlayViewModel() {
         }
     }
 
-    // ===== Conexão Socket.IO em Tempo Real do Jogador =====
+    // ===== Aplicação de estado e Recuperação de Sessão =====
 
-    useEffect(() => {
-        if (!sessionToken || !playerId) return;
-
-        const roomCode = room?.pin ?? pin;
-        const socket = createPlayerSocket(sessionToken);
-        let hasConnectedOnce = false;
-
-        const applyRoundClosed = (payload: RoundClosedPayload) => {
+    const applyRoundClosed = useCallback(
+        (payload: RoundClosedPayload, activePlayerId: string | null = playerId) => {
             const { round } = payload;
 
             const revealedQuestion: Question = {
@@ -172,7 +203,7 @@ export function usePlayViewModel() {
                 })),
             };
 
-            const myServerAnswer = round.answers.find((ans) => ans.player.id === playerId);
+            const myServerAnswer = round.answers.find((ans) => ans.player.id === activePlayerId);
 
             const roundAnswer: PlayerAnswer = {
                 questionId: round.question.id,
@@ -185,10 +216,10 @@ export function usePlayViewModel() {
                 position: idx + 1,
                 nickname: entry.nickname,
                 score: entry.score,
-                isCurrentPlayer: entry.id === playerId,
+                isCurrentPlayer: entry.id === activePlayerId,
             }));
 
-            const myRankingEntry = round.ranking.find((entry) => entry.id === playerId);
+            const myRankingEntry = round.ranking.find((entry) => entry.id === activePlayerId);
 
             setCurrentQuestion(revealedQuestion);
             setPlayedQuestions((current) => {
@@ -211,34 +242,19 @@ export function usePlayViewModel() {
             }
             setRemainingSeconds(0);
             setPhase('feedback');
-        };
+        },
+        [playerId],
+    );
 
-        const applyRoundStarted = (round: RoundStartedPayload['round']) => {
-            const parsedExpires = round.expiresAt ? Date.parse(round.expiresAt) : Number.NaN;
-            const openedAtMs = new Date(round.openedAt).getTime();
-            const deadlineMs = !Number.isNaN(parsedExpires)
-                ? parsedExpires
-                : openedAtMs + round.timeLimit * 1000;
-            deadlineRef.current = deadlineMs;
+    const applyRoundStarted = useCallback((round: RoundStartedPayload['round']) => {
+        const parsedExpires = round.expiresAt ? Date.parse(round.expiresAt) : Number.NaN;
+        const openedAtMs = new Date(round.openedAt).getTime();
+        const deadlineMs = !Number.isNaN(parsedExpires)
+            ? parsedExpires
+            : openedAtMs + round.timeLimit * 1000;
+        deadlineRef.current = deadlineMs;
 
-            if (currentRoundIdRef.current === round.id) {
-                setRemainingSeconds(
-                    computeRemainingSecondsFromDeadline(
-                        round.expiresAt,
-                        round.openedAt,
-                        round.timeLimit,
-                    ),
-                );
-                return;
-            }
-
-            currentRoundIdRef.current = round.id;
-            hasAnsweredRef.current = false;
-            currentQuestionTypeRef.current = round.question.type;
-
-            setCurrentRoundId(round.id);
-            setQuestionNumber(round.roundNumber);
-            setCurrentTimeLimit(round.timeLimit);
+        if (currentRoundIdRef.current === round.id) {
             setRemainingSeconds(
                 computeRemainingSecondsFromDeadline(
                     round.expiresAt,
@@ -246,27 +262,199 @@ export function usePlayViewModel() {
                     round.timeLimit,
                 ),
             );
-            setSelectedOptionId(null);
-            setHasSubmittedAnswer(false);
-            setIsSubmittingAnswer(false);
-            setAnswerError(null);
+            return;
+        }
 
-            // As alternativas enviadas em round:started não possuem gabarito (isCorrect)
-            setCurrentQuestion({
-                id: round.question.id,
-                statement: round.question.statement,
-                type: round.question.type,
-                isActive: true,
-                theme: 'Geral',
-                options: round.question.options.map((opt) => ({
-                    id: opt.id,
-                    text: opt.text,
-                    isCorrect: false,
-                })),
+        currentRoundIdRef.current = round.id;
+        hasAnsweredRef.current = false;
+        currentQuestionTypeRef.current = round.question.type;
+
+        setCurrentRoundId(round.id);
+        setQuestionNumber(round.roundNumber);
+        setCurrentTimeLimit(round.timeLimit);
+        setRemainingSeconds(
+            computeRemainingSecondsFromDeadline(
+                round.expiresAt,
+                round.openedAt,
+                round.timeLimit,
+            ),
+        );
+        setSelectedOptionId(null);
+        setHasSubmittedAnswer(false);
+        setIsSubmittingAnswer(false);
+        setAnswerError(null);
+
+        // As alternativas enviadas em round:started não possuem gabarito (isCorrect)
+        setCurrentQuestion({
+            id: round.question.id,
+            statement: round.question.statement,
+            type: round.question.type,
+            isActive: true,
+            theme: 'Geral',
+            options: round.question.options.map((opt) => ({
+                id: opt.id,
+                text: opt.text,
+                isCorrect: false,
+            })),
+        });
+
+        setPhase('question');
+    }, []);
+
+    const applyLobbySnapshot = useCallback(
+        (lobby: ApiRoomLobby, activePlayerId: string | null) => {
+            setLobbyPlayers(lobby.players);
+            setCurrentTimeLimit(lobby.questionTime);
+            setPinState(lobby.code);
+            setRoom({
+                pin: lobby.code,
+                roomId: lobby.id,
+                title: `Sala de ${lobby.host.name}`,
+                timePerQuestion: lobby.questionTime,
+                questions: [],
+                opponents: [],
+                isDemo: false,
             });
 
-            setPhase('question');
+            const cg = lobby.currentGame;
+            if (!cg) {
+                setPhase('lobby');
+                return;
+            }
+
+            setTotalQuestions(cg.totalQuestions ?? 0);
+
+            const meInGame = cg.players?.find((entry) => entry.id === activePlayerId);
+            if (meInGame) {
+                setServerTotalScore(meInGame.score);
+            }
+
+            if (cg.status === 'WAITING') {
+                setPhase('lobby');
+                return;
+            }
+
+            if (cg.status === 'IN_PROGRESS') {
+                if (cg.activeRound && cg.activeRound.status === 'OPEN') {
+                    applyRoundStarted({
+                        id: cg.activeRound.id,
+                        roundNumber: cg.activeRound.roundNumber,
+                        status: cg.activeRound.status,
+                        openedAt: cg.activeRound.openedAt,
+                        expiresAt: cg.activeRound.expiresAt,
+                        timeLimit: cg.activeRound.timeLimit,
+                        question: cg.activeRound.question,
+                    });
+
+                    const alreadyAnswered =
+                        cg.activeRound.answeredPlayers?.some(
+                            (entry) => entry.id === activePlayerId,
+                        ) ?? false;
+                    if (alreadyAnswered) {
+                        hasAnsweredRef.current = true;
+                        setHasSubmittedAnswer(true);
+                    }
+                    return;
+                }
+
+                if (cg.lastClosedRound) {
+                    applyRoundClosed({ round: cg.lastClosedRound }, activePlayerId);
+                    return;
+                }
+
+                setPhase('lobby');
+                return;
+            }
+
+            if (cg.status === 'FINISHED' || cg.status === 'CANCELLED') {
+                if (cg.lastClosedRound) {
+                    applyRoundClosed({ round: cg.lastClosedRound }, activePlayerId);
+                }
+
+                if (!cg.lastClosedRound && Array.isArray(cg.players) && cg.players.length > 0) {
+                    const sorted = [...cg.players].sort((a, b) => b.score - a.score);
+                    const updatedRanking: RankingEntry[] = sorted.map((entry, idx) => ({
+                        position: idx + 1,
+                        nickname: entry.nickname,
+                        score: entry.score,
+                        isCurrentPlayer: entry.id === activePlayerId,
+                    }));
+                    setServerRanking(updatedRanking);
+                    const me = sorted.find((entry) => entry.id === activePlayerId);
+                    if (me) {
+                        setServerTotalScore(me.score);
+                    }
+                }
+
+                currentRoundIdRef.current = null;
+                setCurrentRoundId(null);
+                setIsSubmittingAnswer(false);
+                setRemainingSeconds(0);
+                setCanConnectSocket(false);
+                setIsGameCancelled(cg.status === 'CANCELLED');
+                setPhase('finished');
+            }
+        },
+        [applyRoundClosed, applyRoundStarted],
+    );
+
+    // Recuperação automática idempotente ao abrir ou recarregar /jogar (HTTP antes do Socket.IO)
+    useEffect(() => {
+        let cancelled = false;
+        const persistedSession = loadPlayerSession();
+
+        void executeRecoverPlayerSession({
+            persistedSession,
+            lockRef: isRecoveringRef,
+            fetchLobby: fetchPlayerLobby,
+            setIsRecovering: (value) => {
+                if (!cancelled) setIsRecovering(value);
+            },
+            setError: (value) => {
+                if (!cancelled) setError(value);
+            },
+            onRecovered: (lobby, recovered) => {
+                if (cancelled) return;
+
+                setPlayerId(recovered.playerId);
+                setNickname(
+                    lobby.currentGame?.players?.find((p) => p.id === recovered.playerId)
+                        ?.nickname ?? recovered.nickname,
+                );
+                applyLobbySnapshot(lobby, recovered.playerId);
+
+                const status = lobby.currentGame?.status;
+                const isLiveMatch = status === 'WAITING' || status === 'IN_PROGRESS';
+                setCanConnectSocket(isLiveMatch);
+                setSessionToken(recovered.sessionToken);
+            },
+            onSessionInvalid: () => {
+                if (cancelled) return;
+                clearPlayerSession();
+                setCanConnectSocket(false);
+                setSessionToken(null);
+                setPlayerId(null);
+                setRoom(null);
+                setLobbyPlayers([]);
+                setPhase('join');
+                navigate('/', { replace: true });
+            },
+        });
+
+        return () => {
+            cancelled = true;
+            isRecoveringRef.current = false;
         };
+    }, [applyLobbySnapshot, navigate]);
+
+    // ===== Conexão Socket.IO em Tempo Real do Jogador =====
+
+    useEffect(() => {
+        if (!sessionToken || !playerId || !canConnectSocket) return;
+
+        const roomCode = room?.pin ?? pin;
+        const socket = createPlayerSocket(sessionToken);
+        let hasConnectedOnce = false;
 
         socket.on('connect', () => {
             if (!hasConnectedOnce) {
@@ -278,31 +466,19 @@ export function usePlayViewModel() {
 
             void fetchPlayerLobby(roomCode, sessionToken)
                 .then((lobby) => {
-                    setLobbyPlayers(lobby.players);
-                    const cg = lobby.currentGame;
-                    if (!cg) return;
-
-                    if (cg.activeRound && cg.activeRound.status === 'OPEN') {
-                        applyRoundStarted({
-                            id: cg.activeRound.id,
-                            roundNumber: cg.activeRound.roundNumber,
-                            status: cg.activeRound.status,
-                            openedAt: cg.activeRound.openedAt,
-                            expiresAt: cg.activeRound.expiresAt,
-                            timeLimit: cg.activeRound.timeLimit,
-                            question: cg.activeRound.question,
-                        });
-                    } else if (cg.lastClosedRound) {
-                        applyRoundClosed({ round: cg.lastClosedRound });
-                    }
-
-                    if (cg.status === 'FINISHED') {
-                        setRemainingSeconds(0);
-                        setPhase('finished');
-                    }
+                    applyLobbySnapshot(lobby, playerId);
                 })
-                .catch(() => {
-                    // Reconexão silenciosa: mantém estado corrente caso a partida já tenha encerrado
+                .catch((err) => {
+                    if (shouldClearPlayerSessionOnError(err)) {
+                        clearPlayerSession();
+                        setCanConnectSocket(false);
+                        setSessionToken(null);
+                        setPlayerId(null);
+                        setRoom(null);
+                        setLobbyPlayers([]);
+                        setPhase('join');
+                        navigate('/', { replace: true });
+                    }
                 });
         });
 
@@ -313,6 +489,11 @@ export function usePlayViewModel() {
                     ? current.map((p) => (p.id === payload.player.id ? payload.player : p))
                     : [...current, payload.player];
             });
+        });
+
+        socket.on('player:left', (payload: PlayerLeftPayload) => {
+            if (payload.player.id === playerId) return;
+            setLobbyPlayers((current) => current.filter((p) => p.id !== payload.player.id));
         });
 
         socket.on('room:updated', (payload: RoomUpdatedPayload) => {
@@ -332,18 +513,47 @@ export function usePlayViewModel() {
         });
 
         socket.on('round:closed', (payload: RoundClosedPayload) => {
-            applyRoundClosed(payload);
+            applyRoundClosed(payload, playerId);
         });
 
-        socket.on('game:finished', () => {
+        socket.on('game:finished', (payload?: GameFinishedPayload) => {
+            if (Array.isArray(payload?.ranking) && payload.ranking.length > 0) {
+                const updatedRanking: RankingEntry[] = payload.ranking.map((entry, idx) => ({
+                    position: entry.position ?? idx + 1,
+                    nickname: entry.nickname,
+                    score: entry.score,
+                    isCurrentPlayer: entry.id === playerId,
+                }));
+                setServerRanking(updatedRanking);
+                const myEntry = payload.ranking.find((entry) => entry.id === playerId);
+                if (myEntry) {
+                    setServerTotalScore(myEntry.score);
+                }
+            }
+            currentRoundIdRef.current = null;
+            setCurrentRoundId(null);
+            setIsSubmittingAnswer(false);
             setRemainingSeconds(0);
+            setCanConnectSocket(false);
+            setIsGameCancelled(payload?.status === 'CANCELLED');
             setPhase('finished');
         });
 
         return () => {
+            socket.removeAllListeners();
             socket.disconnect();
         };
-    }, [sessionToken, playerId, room?.pin, pin]);
+    }, [
+        applyLobbySnapshot,
+        applyRoundClosed,
+        applyRoundStarted,
+        canConnectSocket,
+        navigate,
+        pin,
+        playerId,
+        room?.pin,
+        sessionToken,
+    ]);
 
     // ===== Submissão de resposta ao Servidor (POST /rounds/:id/answer) =====
 
@@ -399,15 +609,19 @@ export function usePlayViewModel() {
     }, [phase, currentRoundId]);
 
     const resetToJoin = useCallback(() => {
+        clearPlayerSession();
         const clean = createCleanPlayerMatchState();
         deadlineRef.current = 0;
         hasAnsweredRef.current = false;
         currentRoundIdRef.current = null;
+        setCanConnectSocket(false);
+        setIsRecovering(false);
         setSessionToken(clean.sessionToken);
         setPlayerId(clean.playerId);
         setNickname(clean.nickname);
         setRoom(clean.room);
         setLobbyPlayers(clean.lobbyPlayers);
+        setTotalQuestions(0);
         setCurrentRoundId(clean.currentRoundId);
         setCurrentQuestion(clean.currentQuestion);
         setQuestionNumber(clean.questionNumber);
@@ -419,15 +633,27 @@ export function usePlayViewModel() {
         setAnswers(clean.answers);
         setServerRanking(clean.serverRanking);
         setServerTotalScore(clean.serverTotalScore);
+        setIsGameCancelled(false);
         setPinState(clean.pin);
         setError(clean.error);
+        setLeaveError(null);
         setPhase(clean.phase);
     }, []);
 
-    const leaveRoom = useCallback(() => {
-        resetToJoin();
-        navigate('/');
-    }, [navigate, resetToJoin]);
+    const leaveRoom = useCallback(async () => {
+        await executeLeaveRoom({
+            phase,
+            sessionToken,
+            lockRef: isLeavingRef,
+            requestLeave: leaveRoomSession,
+            setIsLeaving,
+            setError: setLeaveError,
+            onLeft: () => {
+                resetToJoin();
+                navigate('/');
+            },
+        });
+    }, [navigate, phase, resetToJoin, sessionToken]);
 
     return {
         phase,
@@ -436,11 +662,14 @@ export function usePlayViewModel() {
         lobbyPlayers,
         error,
         isJoining,
+        isRecovering,
+        isLeaving,
+        leaveError,
         pin,
         nickname,
         currentQuestion,
         questionNumber,
-        totalQuestions: 0,
+        totalQuestions,
         currentTimeLimit,
         remainingSeconds,
         selectedOptionId,
@@ -454,6 +683,7 @@ export function usePlayViewModel() {
         correctCount,
         ranking: serverRanking,
         playerRanking,
+        isGameCancelled,
         setPin,
         submitPin,
         changeNickname,

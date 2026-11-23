@@ -26,9 +26,50 @@ export interface GameStartedPayload {
     status: BackendRoomStatus;
 }
 
+export type PlayerStatus = 'ACTIVE' | 'LEFT' | 'ABANDONED';
+export type PlayerPresenceState = 'ONLINE' | 'DISCONNECTED' | 'RECONNECTING';
+
+export interface PlayerConnectedPayload {
+    roomId: string;
+    gameId: string;
+    player: {
+        id: string;
+        nickname: string;
+        status: PlayerStatus;
+    };
+    presence: PlayerPresenceState;
+    connectedAt: string;
+}
+
+export interface PlayerDisconnectedPayload {
+    roomId: string;
+    gameId: string;
+    player: {
+        id: string;
+        nickname: string;
+        status: PlayerStatus;
+    };
+    presence: PlayerPresenceState;
+    disconnectedAt: string;
+    reconnectDeadlineAt: string;
+}
+
+export interface PlayerReconnectedPayload {
+    roomId: string;
+    gameId: string;
+    player: {
+        id: string;
+        nickname: string;
+        status: PlayerStatus;
+    };
+    presence: PlayerPresenceState;
+    reconnectedAt: string;
+}
+
 export interface LobbyPlayerDto {
     id: string;
     nickname: string;
+    status?: PlayerStatus;
     score: number;
     joinedAt: string;
 }
@@ -36,6 +77,19 @@ export interface LobbyPlayerDto {
 export interface PlayerJoinedPayload {
     roomId: string;
     player: LobbyPlayerDto;
+}
+
+export interface PlayerLeftPayload {
+    roomId: string;
+    gameId: string;
+    gameStatus: BackendRoomStatus;
+    player: {
+        id: string;
+        nickname: string;
+        status: PlayerStatus;
+        score: number;
+    };
+    eligiblePlayerCount: number;
 }
 
 export interface RoundStartedOptionDto {
@@ -120,8 +174,20 @@ export interface RoundAnswerSubmittedPayload {
     };
 }
 
+export interface GameFinishedRankingEntryDto {
+    id: string;
+    nickname: string;
+    score: number;
+    position?: number;
+}
+
 export interface GameFinishedPayload {
     roomId: string;
+    gameId?: string;
+    status?: BackendRoomStatus;
+    reason?: string;
+    finishedAt?: string;
+    ranking?: GameFinishedRankingEntryDto[];
 }
 
 export interface GameCreatedPayload {

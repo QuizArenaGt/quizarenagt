@@ -27,14 +27,34 @@ export default function PlayView() {
                             {viewModel.totalScore} pts
                         </span>
                     )}
-                    <button type="button" className="play__leave" onClick={viewModel.leaveRoom}>
-                        Sair
+                    <button
+                        type="button"
+                        className="play__leave"
+                        onClick={() => void viewModel.leaveRoom()}
+                        disabled={viewModel.isLeaving}
+                    >
+                        {viewModel.isLeaving ? 'Saindo...' : 'Sair'}
                     </button>
                 </div>
             </header>
 
+            {viewModel.leaveError && (
+                <div className="play__leave-error" role="alert">
+                    {viewModel.leaveError}
+                </div>
+            )}
+
             <main className="play__stage">
-                {phase === 'join' && (
+                {viewModel.isRecovering && (
+                    <section className="play-card play-card--center" aria-live="polite">
+                        <h1 className="play-card__title">Recuperando sessão…</h1>
+                        <p className="play-card__text">
+                            Sincronizando sua participação na sala atual.
+                        </p>
+                    </section>
+                )}
+
+                {!viewModel.isRecovering && phase === 'join' && (
                     <JoinStep
                         pin={viewModel.pin}
                         error={viewModel.error}
@@ -44,7 +64,7 @@ export default function PlayView() {
                     />
                 )}
 
-                {phase === 'nickname' && (
+                {!viewModel.isRecovering && phase === 'nickname' && (
                     <NicknameStep
                         nickname={viewModel.nickname}
                         error={viewModel.error}
@@ -98,8 +118,9 @@ export default function PlayView() {
                         correctCount={viewModel.correctCount}
                         ranking={viewModel.ranking}
                         playerPosition={viewModel.playerRanking?.position ?? null}
+                        isGameCancelled={viewModel.isGameCancelled}
                         onPlayAgain={viewModel.playAgain}
-                        onLeave={viewModel.leaveRoom}
+                        onLeave={() => void viewModel.leaveRoom()}
                     />
                 )}
             </main>
