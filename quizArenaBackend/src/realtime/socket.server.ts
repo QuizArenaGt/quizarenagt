@@ -26,6 +26,16 @@ type SocketIdentity =
         wasDisconnectedInDb: boolean;
     };
 
+/** Normaliza as origens permitidas em FRONTEND_URL, usando "*" quando não informado. */
+export function parseAllowedOrigins(rawOrigin?: string | undefined): string[] | string {
+    const origins = (rawOrigin ?? "")
+        .split(",")
+        .map((origin) => origin.trim().replace(/\/+$/, ""))
+        .filter(Boolean);
+
+    return origins.length > 0 ? origins : "*";
+}
+
 export function createSocketServer(
     httpServer: HttpServer,
     presenceRegistry = new PlayerPresenceRegistry(),
@@ -34,7 +44,7 @@ export function createSocketServer(
 
     const io = new Server(httpServer, {
         cors: {
-            origin: process.env.FRONTEND_URL?.split(",") ?? "*",
+            origin: parseAllowedOrigins(process.env.FRONTEND_URL),
             methods: ["GET", "POST"],
         },
     });
