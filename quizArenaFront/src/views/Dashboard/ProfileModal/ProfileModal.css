@@ -1,9 +1,10 @@
 .profile {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
     "identity identity"
-    "form license";
+    "form security"
+    "license license";
   gap: var(--space-6);
   text-align: left;
 }
@@ -96,6 +97,30 @@
   gap: var(--space-3);
 }
 
+/* Alteração de senha */
+.profile__security {
+  grid-area: security;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+  align-self: start;
+}
+
+.profile__security-subtitle {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.profile__password-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 /* Licença */
 .profile__license {
   grid-area: license;
@@ -146,6 +171,7 @@
     grid-template-areas:
       "identity"
       "form"
+      "security"
       "license";
   }
 }

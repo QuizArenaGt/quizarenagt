@@ -123,8 +123,20 @@ export const resetPasswordLimiter = createRateLimiter({
         "Muitas tentativas de redefinição de senha. Aguarde alguns minutos antes de tentar novamente.",
 });
 
+export const changePasswordLimiter = createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    maxRequests: 10,
+    message:
+        "Muitas tentativas de alteração de senha. Aguarde alguns minutos antes de tentar novamente.",
+    keyGenerator: (req: Request) => {
+        const ip = defaultKeyGenerator(req);
+        return req.user?.id ? `${ip}:${req.user.id}` : ip;
+    },
+});
+
 export function resetAuthRateLimiters(): void {
     recoverPasswordIpLimiter.reset();
     recoverPasswordEmailLimiter.reset();
     resetPasswordLimiter.reset();
+    changePasswordLimiter.reset();
 }

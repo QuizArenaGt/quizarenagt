@@ -25,6 +25,7 @@ const { prismaMock, middlewareRef, closeMock, ioInstanceMock } = vi.hoisted(
             closeMock,
             ioInstanceMock,
             prismaMock: {
+                user: { findUnique: vi.fn() },
                 room: { findUnique: vi.fn() },
                 gamePlayer: { findUnique: vi.fn() },
             },
@@ -209,6 +210,33 @@ describe("createSocketServer - elegibilidade do GamePlayer no handshake", () => 
 
         await middlewareRef.fn?.(socket, next);
 
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(next.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    });
+
+    it("deve rejeitar handshake de HOST quando o tokenVersion estiver desatualizado", async () => {
+        const { JwtService } = await import("../../src/auth/jwt.service.js");
+        const jwtService = new JwtService();
+        const staleToken = jwtService.generate({
+            id: "host-1",
+            role: "USER",
+            tokenVersion: 0,
+        });
+
+        prismaMock.user.findUnique.mockResolvedValue({
+            tokenVersion: 1,
+        });
+
+        const socket = {
+            id: "sock-host-stale",
+            handshake: { auth: { token: staleToken, roomCode: "ABC123" } },
+            data: {},
+        };
+        const next = vi.fn();
+
+        await middlewareRef.fn?.(socket, next);
+
+        expect(prismaMock.room.findUnique).not.toHaveBeenCalled();
         expect(next).toHaveBeenCalledTimes(1);
         expect(next.mock.calls[0]?.[0]).toBeInstanceOf(Error);
     });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ChangeEvent } from 'react';
 
+import '../InputEmail/InputEmail.css';
 import './InputPassword.css';
 
 interface InputPasswordProps {

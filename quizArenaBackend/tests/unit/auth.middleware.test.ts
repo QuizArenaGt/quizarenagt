@@ -3,6 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response, NextFunction } from "express";
 import { sign } from "jsonwebtoken";
 
+const { findUserMock } = vi.hoisted(() => ({
+    findUserMock: vi.fn(),
+}));
+
+vi.mock("../../src/database/prisma.js", () => ({
+    prisma: {
+        user: {
+            findUnique: findUserMock,
+        },
+    },
+}));
+
 import { authenticateToken } from "../../src/auth/auth.middleware.js";
 
 describe("authenticateToken", () => {
@@ -23,6 +35,14 @@ describe("authenticateToken", () => {
     const secret = process.env.JWT_SECRET!;
 
     beforeEach(() => {
+        vi.clearAllMocks();
+
+        findUserMock.mockResolvedValue({
+            id: "user-123",
+            role: "USER",
+            tokenVersion: 0,
+        });
+
         req = {
             headers: {},
         };
@@ -35,9 +55,9 @@ describe("authenticateToken", () => {
         next = vi.fn();
     });
 
-    it("deve autenticar uma requisição com token válido", () => {
+    it("deve autenticar uma requisição com token válido", async () => {
         const token = sign(
-            { role: "USER" },
+            { role: "USER", tv: 0 },
             secret,
             {
                 subject: "user-123",
@@ -50,7 +70,7 @@ describe("authenticateToken", () => {
             authorization: `Bearer ${token}`,
         };
 
-        authenticateToken(
+        await authenticateToken(
             req as Request,
             res as unknown as Response,
             next,
@@ -65,8 +85,8 @@ describe("authenticateToken", () => {
         expect(res.status).not.toHaveBeenCalled();
     });
 
-    it("deve retornar 401 quando o token estiver ausente", () => {
-        authenticateToken(
+    it("deve retornar 401 quando o token estiver ausente", async () => {
+        await authenticateToken(
             req as Request,
             res as unknown as Response,
             next,
@@ -76,12 +96,12 @@ describe("authenticateToken", () => {
         expect(next).not.toHaveBeenCalled();
     });
 
-    it("deve retornar 401 quando o formato Bearer estiver incorreto", () => {
+    it("deve retornar 401 quando o formato Bearer estiver incorreto", async () => {
         req.headers = {
             authorization: "Basic token-invalido",
         };
 
-        authenticateToken(
+        await authenticateToken(
             req as Request,
             res as unknown as Response,
             next,
@@ -91,12 +111,12 @@ describe("authenticateToken", () => {
         expect(next).not.toHaveBeenCalled();
     });
 
-    it("deve retornar 401 quando o token for inválido", () => {
+    it("deve retornar 401 quando o token for inválido", async () => {
         req.headers = {
             authorization: "Bearer token-invalido",
         };
 
-        authenticateToken(
+        await authenticateToken(
             req as Request,
             res as unknown as Response,
             next,
@@ -109,9 +129,9 @@ describe("authenticateToken", () => {
         expect(next).not.toHaveBeenCalled();
     });
 
-    it("deve retornar 401 quando o token estiver expirado", () => {
+    it("deve retornar 401 quando o token estiver expirado", async () => {
         const token = sign(
-            { role: "USER" },
+            { role: "USER", tv: 0 },
             secret,
             {
                 subject: "user-123",
@@ -124,13 +144,47 @@ describe("authenticateToken", () => {
             authorization: `Bearer ${token}`,
         };
 
-        authenticateToken(
+        await authenticateToken(
             req as Request,
             res as unknown as Response,
             next,
         );
 
         expect(res.status).toHaveBeenCalledWith(401);
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it("deve retornar 401 quando o tokenVersion tiver sido invalidado após alteração de senha", async () => {
+        findUserMock.mockResolvedValue({
+            id: "user-123",
+            role: "USER",
+            tokenVersion: 1,
+        });
+
+        const token = sign(
+            { role: "USER", tv: 0 },
+            secret,
+            {
+                subject: "user-123",
+                expiresIn: "1h",
+                algorithm: "HS256",
+            },
+        );
+
+        req.headers = {
+            authorization: `Bearer ${token}`,
+        };
+
+        await authenticateToken(
+            req as Request,
+            res as unknown as Response,
+            next,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(401);
+        expect(res.json).toHaveBeenCalledWith({
+            message: "Token inválido ou expirado.",
+        });
         expect(next).not.toHaveBeenCalled();
     });
 });

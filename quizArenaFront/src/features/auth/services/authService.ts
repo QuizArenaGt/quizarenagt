@@ -1,5 +1,7 @@
 
 import type {
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     LoginRequest,
     LoginResponse,
     RecoverPasswordRequest,
@@ -48,6 +50,15 @@ export async function resetPassword(
     return apiRequest<ResetPasswordResponse>("/auth/reset-password", {
         method: "POST",
         auth: false,
+        body: JSON.stringify(request),
+    });
+}
+
+export async function changePassword(
+    request: ChangePasswordRequest,
+): Promise<ChangePasswordResponse> {
+    return apiRequest<ChangePasswordResponse>("/auth/change-password", {
+        method: "POST",
         body: JSON.stringify(request),
     });
 }

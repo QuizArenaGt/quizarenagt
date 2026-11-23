@@ -62,7 +62,9 @@ import {
     type ApiRoomLobby,
 } from '../services/roomStorageService';
 import {
+    AUTH_TOKEN_UPDATED_EVENT,
     createHostSocket,
+    isSocketAuthRejectionError,
     type GameCreatedPayload,
     type GameFinishedPayload,
     type GameMode,
@@ -86,6 +88,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
 
     const [rooms, setRooms] = useState<Room[]>([]);
     const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+    const [hostAuthTokenRevision, setHostAuthTokenRevision] = useState(0);
     const [isLoadingRoom, setIsLoadingRoom] = useState(false);
     const [isLoadingHostRooms, setIsLoadingHostRooms] = useState(false);
     const [roomActionError, setRoomActionError] = useState<string | null>(null);
@@ -421,6 +424,17 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         void reloadHostRooms();
     }, [reloadHostRooms]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const handleTokenUpdated = () => {
+            setHostAuthTokenRevision((revision) => revision + 1);
+        };
+        window.addEventListener(AUTH_TOKEN_UPDATED_EVENT, handleTokenUpdated);
+        return () => {
+            window.removeEventListener(AUTH_TOKEN_UPDATED_EVENT, handleTokenUpdated);
+        };
+    }, []);
+
     // Conexão Socket.IO do Anfitrião para a sala ativa
     useEffect(() => {
         if (!currentRoomId || !currentRoomCode) return;
@@ -437,6 +451,12 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             }
             // Em reconexões WebSocket, re-sincroniza via API para recuperar eventos perdidos offline.
             void loadRoomByCode(currentRoomCode);
+        });
+
+        socket.on('connect_error', (err) => {
+            if (isSocketAuthRejectionError(err)) {
+                socket.disconnect();
+            }
         });
 
         socket.on('player:joined', (payload: PlayerJoinedPayload) => {
@@ -608,9 +628,10 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         });
 
         return () => {
+            socket.removeAllListeners();
             socket.disconnect();
         };
-    }, [currentRoomId, currentRoomCode, loadRoomByCode, refreshRoomGames]);
+    }, [currentRoomId, currentRoomCode, hostAuthTokenRevision, loadRoomByCode, refreshRoomGames]);
 
     // Encerrar rodada atual manualmente no servidor
     const closeCurrentRound = useCallback(

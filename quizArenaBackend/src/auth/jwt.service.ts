@@ -5,11 +5,13 @@ import type { Role } from "@prisma/client";
 type TokenUser = {
     id: string;
     role: Role;
+    tokenVersion?: number;
 };
 
 type AuthenticatedTokenPayload = JwtPayload & {
     sub: string;
     role: Role;
+    tv?: number;
 };
 
 const VALID_ROLES = ["USER", "ADMIN", "HOST"] as const;
@@ -39,7 +41,7 @@ export class JwtService {
 
     generate(user: TokenUser): string {
         return jwt.sign(
-            { role: user.role },
+            { role: user.role, tv: user.tokenVersion ?? 0 },
             this.secret,
             {
                 subject: user.id,
@@ -57,7 +59,11 @@ export class JwtService {
         if (
             typeof decoded === "string" ||
             typeof decoded.sub !== "string" ||
-            !isValidRole(decoded.role)
+            !isValidRole(decoded.role) ||
+            (decoded.tv !== undefined &&
+                (typeof decoded.tv !== "number" ||
+                    !Number.isInteger(decoded.tv) ||
+                    decoded.tv < 0))
         ) {
             throw new Error("Token inválido.");
         }

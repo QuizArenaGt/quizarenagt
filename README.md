@@ -72,8 +72,12 @@ Após a configuração das variáveis de ambiente e a execução do Docker, inic
 ```bash
 cd quizArenaBackend
 npm install
+npx prisma migrate deploy
+npx prisma generate
 npm run dev
 ```
+
+*(Para testar a recuperação de senha por e-mail em desenvolvimento, preencha também `FRONTEND_URL` e as variáveis `SMTP_*` no `.env` da raiz conforme o `.env.example`.)*
 
 ### Frontend
 

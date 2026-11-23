@@ -1284,6 +1284,13 @@ export default function DashboardForm({
                 savedMessage={profileVm.savedMessage}
                 onFieldChange={profileVm.setField}
                 onSubmit={profileVm.submit}
+                passwordDraft={profileVm.passwordDraft}
+                passwordFieldErrors={profileVm.passwordFieldErrors}
+                passwordError={profileVm.passwordError}
+                passwordSuccess={profileVm.passwordSuccess}
+                isChangingPassword={profileVm.isChangingPassword}
+                onPasswordFieldChange={profileVm.setPasswordField}
+                onPasswordSubmit={profileVm.submitPasswordChange}
                 onClose={profileVm.close}
             />
 
