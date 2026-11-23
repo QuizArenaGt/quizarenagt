@@ -6,6 +6,10 @@ import {
     type RoundWithQuestion,
 } from "./round.repository.js";
 import { filterActiveGamePlayers } from "../rooms/game-player-eligibility.js";
+import {
+    resolvePlayerAvatarId,
+    type PlayerAvatarId,
+} from "../rooms/player-avatar.js";
 
 import {
     RoundRoomNotFoundError,
@@ -55,6 +59,7 @@ export type RoundClosedWirePayload = {
             player: {
                 id: string;
                 nickname: string;
+                avatarId: PlayerAvatarId;
             };
             option: {
                 id: string;
@@ -67,10 +72,12 @@ export type RoundClosedWirePayload = {
         unansweredPlayers: {
             id: string;
             nickname: string;
+            avatarId: PlayerAvatarId;
         }[];
         ranking: {
             id: string;
             nickname: string;
+            avatarId: PlayerAvatarId;
             score: number;
         }[];
     };
@@ -126,6 +133,7 @@ export type RoundClosedSource = {
         gamePlayer: {
             id: string;
             nickname: string;
+            avatarId?: string | null;
         };
         option: {
             id: string;
@@ -139,6 +147,7 @@ export function buildRoundClosedPayload(
     players: {
         id: string;
         nickname: string;
+        avatarId?: string | null;
         status?: GamePlayerStatus;
         score: number;
     }[],
@@ -153,6 +162,7 @@ export function buildRoundClosedPayload(
         .map((player) => ({
             id: player.id,
             nickname: player.nickname,
+            avatarId: resolvePlayerAvatarId(player.avatarId),
             score: player.score,
         }));
 
@@ -180,6 +190,7 @@ export function buildRoundClosedPayload(
                 player: {
                     id: answer.gamePlayer.id,
                     nickname: answer.gamePlayer.nickname,
+                    avatarId: resolvePlayerAvatarId(answer.gamePlayer.avatarId),
                 },
                 option: {
                     id: answer.option.id,
@@ -194,6 +205,7 @@ export function buildRoundClosedPayload(
                 .map((player) => ({
                     id: player.id,
                     nickname: player.nickname,
+                    avatarId: resolvePlayerAvatarId(player.avatarId),
                 })),
             ranking,
         },

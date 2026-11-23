@@ -33,6 +33,7 @@ export type ClosedRoundWithDetails = Prisma.RoundGetPayload<{
                     select: {
                         id: true;
                         nickname: true;
+                        avatarId: true;
                         status: true;
                         score: true;
                     };
@@ -69,6 +70,7 @@ export type ClosedRoundWithDetails = Prisma.RoundGetPayload<{
                     select: {
                         id: true;
                         nickname: true;
+                        avatarId: true;
                     };
                 };
                 option: {
@@ -130,6 +132,7 @@ const closeRoundInclude = {
                 select: {
                     id: true,
                     nickname: true,
+                    avatarId: true,
                     status: true,
                     score: true,
                 },
@@ -166,6 +169,7 @@ const closeRoundInclude = {
                 select: {
                     id: true,
                     nickname: true,
+                    avatarId: true,
                 },
             },
             option: {

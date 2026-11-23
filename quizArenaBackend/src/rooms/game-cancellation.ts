@@ -1,4 +1,8 @@
 import type { Prisma } from "@prisma/client";
+import {
+    resolvePlayerAvatarId,
+    type PlayerAvatarId,
+} from "./player-avatar.js";
 
 export const MIN_ELIGIBLE_PLAYERS_TO_CONTINUE = 2;
 
@@ -12,6 +16,7 @@ export type CancelledGameSummary = {
     ranking: {
         id: string;
         nickname: string;
+        avatarId: PlayerAvatarId;
         score: number;
         position: number;
     }[];
@@ -98,6 +103,7 @@ export async function cancelInProgressGameIfInsufficientPlayersTx(
         select: {
             id: true,
             nickname: true,
+            avatarId: true,
             score: true,
         },
     });
@@ -110,6 +116,7 @@ export async function cancelInProgressGameIfInsufficientPlayersTx(
         ranking: activePlayers.map((player, index) => ({
             id: player.id,
             nickname: player.nickname,
+            avatarId: resolvePlayerAvatarId(player.avatarId),
             score: player.score,
             position: index + 1,
         })),

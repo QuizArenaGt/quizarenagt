@@ -156,6 +156,7 @@ describe("RoomRepository", () => {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    avatarId: true,
                                     status: true,
                                     score: true,
                                     joinedAt: true,

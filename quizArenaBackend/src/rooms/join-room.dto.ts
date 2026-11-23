@@ -1,7 +1,14 @@
 
+import {
+    DEFAULT_PLAYER_AVATAR_ID,
+    isValidPlayerAvatarId,
+    type PlayerAvatarId,
+} from "./player-avatar.js";
+
 export type JoinRoomDto = {
     code: string;
     nickname: string;
+    avatarId: PlayerAvatarId;
 };
 
 export type JoinRoomValidationResult =
@@ -44,10 +51,11 @@ export function validateJoinRoom(
     }
 
     const payload = body as Record<string, unknown>;
-    const { code, nickname } = payload;
+    const { code, nickname, avatarId } = payload;
 
     let normalizedCode = "";
     let normalizedNickname = "";
+    let resolvedAvatarId: PlayerAvatarId = DEFAULT_PLAYER_AVATAR_ID;
 
     if (typeof code !== "string" || normalizeRoomCode(code).length === 0) {
         errors.code = "O código da sala é obrigatório.";
@@ -73,6 +81,14 @@ export function validateJoinRoom(
         }
     }
 
+    if (avatarId !== undefined && avatarId !== null) {
+        if (!isValidPlayerAvatarId(avatarId)) {
+            errors.avatarId = "O avatar selecionado é inválido.";
+        } else {
+            resolvedAvatarId = avatarId.trim() as PlayerAvatarId;
+        }
+    }
+
     if (Object.keys(errors).length > 0) {
         return {
             success: false,
@@ -85,6 +101,7 @@ export function validateJoinRoom(
         data: {
             code: normalizedCode,
             nickname: normalizedNickname,
+            avatarId: resolvedAvatarId,
         },
     };
 }

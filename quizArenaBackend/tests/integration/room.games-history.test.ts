@@ -477,4 +477,71 @@ describe("GET /rooms/:id/games & GET /rooms/:id/games/:gameId/results - Integra�
         expect(gamesBRes.body.stats.totalParticipations).toBe(0);
         expect(gamesBRes.body.stats.averageCorrectRate).toBeNull();
     });
+
+    it("deve preservar avatarId distinto de cada jogador no histórico e no relatório individual", async () => {
+        const { token, room } = await createHostAndRoom(hostEmail);
+
+        const join1 = await request(app)
+            .post("/rooms/join")
+            .send({ code: room.code, nickname: "Lucas", avatarId: "fox" });
+        const join2 = await request(app)
+            .post("/rooms/join")
+            .send({ code: room.code, nickname: "Marina", avatarId: "robot" });
+        expect(join1.status).toBe(201);
+        expect(join2.status).toBe(201);
+
+        const startRes = await request(app)
+            .post(`/rooms/${room.id}/start`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(startRes.status).toBe(200);
+
+        const roundRes = await request(app)
+            .post(`/rooms/${room.id}/rounds`)
+            .set("Authorization", `Bearer ${token}`)
+            .send({});
+        expect(roundRes.status).toBe(201);
+
+        const roundId = roundRes.body.round.id as string;
+        const options = roundRes.body.round.question.options as Array<{ id: string }>;
+
+        await request(app)
+            .post(`/rounds/${roundId}/answer`)
+            .set("Authorization", `Bearer ${join1.body.sessionToken as string}`)
+            .send({ optionId: options[0]!.id });
+        await request(app)
+            .post(`/rounds/${roundId}/answer`)
+            .set("Authorization", `Bearer ${join2.body.sessionToken as string}`)
+            .send({ optionId: options[1]!.id });
+
+        const finishRes = await request(app)
+            .post(`/rooms/${room.id}/finish`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(finishRes.status).toBe(200);
+        const gameId = finishRes.body.room.currentGame.id as string;
+
+        const gamesRes = await request(app)
+            .get(`/rooms/${room.id}/games`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(gamesRes.status).toBe(200);
+        const finishedGame = gamesRes.body.games.find((g: { id: string }) => g.id === gameId);
+        expect(finishedGame.winner).toMatchObject({ nickname: "Lucas", avatarId: "fox" });
+        expect(finishedGame.ranking).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ nickname: "Lucas", avatarId: "fox" }),
+                expect.objectContaining({ nickname: "Marina", avatarId: "robot" }),
+            ]),
+        );
+
+        const reportRes = await request(app)
+            .get(`/rooms/${room.id}/games/${gameId}/results`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(reportRes.status).toBe(200);
+        expect(reportRes.body.game.winner).toMatchObject({ nickname: "Lucas", avatarId: "fox" });
+        expect(reportRes.body.game.ranking).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ nickname: "Lucas", avatarId: "fox" }),
+                expect.objectContaining({ nickname: "Marina", avatarId: "robot" }),
+            ]),
+        );
+    });
 });

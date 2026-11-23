@@ -309,5 +309,53 @@ describe("POST /rooms/join - Integração", () => {
         expect(players).toHaveLength(0);
     });
 
+    it("deve persistir avatarId válido por jogador, expor no lobby e rejeitar avatarId inválido com 400", async () => {
+        const { room } = await createRoom();
 
+        const invalidRes = await request(app)
+            .post("/rooms/join")
+            .send({
+                code: room.code,
+                nickname: "Hacker",
+                avatarId: "<svg>xss</svg>",
+            });
+        expect(invalidRes.status).toBe(400);
+        expect(invalidRes.body.errors).toHaveProperty("avatarId");
+
+        const foxJoin = await request(app)
+            .post("/rooms/join")
+            .send({
+                code: room.code,
+                nickname: "Raposa",
+                avatarId: "fox",
+            });
+        expect(foxJoin.status).toBe(201);
+        expect(foxJoin.body.player.avatarId).toBe("fox");
+
+        const robotJoin = await request(app)
+            .post("/rooms/join")
+            .send({
+                code: room.code,
+                nickname: "Robo",
+                avatarId: "robot",
+            });
+        expect(robotJoin.status).toBe(201);
+        expect(robotJoin.body.player.avatarId).toBe("robot");
+
+        const lobbyRes = await request(app)
+            .get(`/rooms/${room.code}`)
+            .set("Authorization", `Bearer ${foxJoin.body.sessionToken as string}`);
+        expect(lobbyRes.status).toBe(200);
+        expect(lobbyRes.body.room.players).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ nickname: "Raposa", avatarId: "fox" }),
+                expect.objectContaining({ nickname: "Robo", avatarId: "robot" }),
+            ]),
+        );
+
+        const foxDb = await prisma.gamePlayer.findUnique({
+            where: { id: foxJoin.body.player.id },
+        });
+        expect(foxDb?.avatarId).toBe("fox");
+    });
 });

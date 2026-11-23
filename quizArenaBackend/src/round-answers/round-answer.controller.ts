@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { RoundAnswerService } from "./round-answer.service.js";
 import { validateSubmitRoundAnswer } from "./submit-round-answer.dto.js";
 import { emitRoomEvent } from "../realtime/room-events.js";
+import { resolvePlayerAvatarId } from "../rooms/player-avatar.js";
 import { RoundService } from "../rounds/round.service.js";
 
 import {
@@ -63,6 +64,7 @@ export class RoundAnswerController {
                 player: {
                     id: req.roomPlayer.id,
                     nickname: req.roomPlayer.nickname,
+                    avatarId: resolvePlayerAvatarId(req.roomPlayer.avatarId),
                 },
             });
 

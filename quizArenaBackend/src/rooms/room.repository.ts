@@ -123,6 +123,7 @@ export type FinishGameClosedRound = {
         gamePlayer: {
             id: string;
             nickname: string;
+            avatarId: string;
         };
         option: {
             id: string;
@@ -139,6 +140,7 @@ export type FinishGameResult =
                 players: {
                     id: string;
                     nickname: string;
+                    avatarId?: string;
                     score: number;
                     joinedAt: Date;
                 }[];
@@ -149,6 +151,7 @@ export type FinishGameResult =
         players: {
             id: string;
             nickname: string;
+            avatarId?: string;
             score: number;
             joinedAt: Date;
         }[];
@@ -196,6 +199,7 @@ const gameLobbyInclude = {
         select: {
             id: true,
             nickname: true,
+            avatarId: true,
             status: true,
             score: true,
             joinedAt: true,
@@ -234,6 +238,7 @@ const gameLobbyInclude = {
                         select: {
                             id: true,
                             nickname: true,
+                            avatarId: true,
                         },
                     },
                     option: {
@@ -270,6 +275,7 @@ export class RoomRepository {
                             select: {
                                 id: true,
                                 nickname: true,
+                                avatarId: true,
                                 status: true,
                                 score: true,
                                 joinedAt: true,
@@ -381,6 +387,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    avatarId: true,
                                     status: true,
                                     score: true,
                                     joinedAt: true,
@@ -445,6 +452,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    avatarId: true,
                                     status: true,
                                     score: true,
                                     joinedAt: true,
@@ -704,6 +712,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    avatarId: true,
                                     status: true,
                                     score: true,
                                     joinedAt: true,
@@ -757,6 +766,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    avatarId: true,
                                     status: true,
                                     score: true,
                                     joinedAt: true,
@@ -803,6 +813,7 @@ export class RoomRepository {
                                 select: {
                                     id: true,
                                     nickname: true,
+                                    avatarId: true,
                                     score: true,
                                     joinedAt: true,
                                 },
@@ -899,6 +910,7 @@ export class RoomRepository {
                                     select: {
                                         id: true,
                                         nickname: true,
+                                        avatarId: true,
                                     },
                                 },
                                 option: {
@@ -927,6 +939,7 @@ export class RoomRepository {
                 select: {
                     id: true,
                     nickname: true,
+                    avatarId: true,
                     status: true,
                     score: true,
                     joinedAt: true,
@@ -970,6 +983,7 @@ export class RoomRepository {
                     select: {
                         id: true,
                         nickname: true,
+                        avatarId: true,
                         score: true,
                         joinedAt: true,
                     },
@@ -1015,6 +1029,7 @@ export class RoomRepository {
                     select: {
                         id: true,
                         nickname: true,
+                        avatarId: true,
                         score: true,
                         joinedAt: true,
                     },

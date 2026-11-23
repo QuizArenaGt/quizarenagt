@@ -10,6 +10,11 @@ import {
     type CancelledGameSummary,
 } from "./game-cancellation.js";
 
+import {
+    resolvePlayerAvatarId,
+    type PlayerAvatarId,
+} from "./player-avatar.js";
+
 export type LeaveRoomResult =
     | {
         success: true;
@@ -19,6 +24,7 @@ export type LeaveRoomResult =
         player: {
             id: string;
             nickname: string;
+            avatarId: PlayerAvatarId;
             status: GamePlayerStatus;
             score: number;
         };
@@ -40,6 +46,7 @@ type CreateGamePlayerData = {
     gameId: string;
     userId?: string | null;
     nickname: string;
+    avatarId?: string;
     sessionTokenHash: string;
 };
 
@@ -47,6 +54,7 @@ type CreateRoomGamePlayerInput = {
     roomId: string;
     userId?: string | null;
     nickname: string;
+    avatarId?: string;
     sessionTokenHash: string;
 };
 
@@ -212,6 +220,7 @@ export class RoomPlayerRepository {
                     gameId: currentGame.id,
                     userId: data.userId ?? null,
                     nickname: data.nickname,
+                    avatarId: resolvePlayerAvatarId(data.avatarId),
                     sessionTokenHash: data.sessionTokenHash,
                 },
             });
@@ -276,6 +285,7 @@ export class RoomPlayerRepository {
                     id: true,
                     gameId: true,
                     nickname: true,
+                    avatarId: true,
                     status: true,
                     score: true,
                 },
@@ -312,6 +322,7 @@ export class RoomPlayerRepository {
                     player: {
                         id: player.id,
                         nickname: player.nickname,
+                        avatarId: resolvePlayerAvatarId(player.avatarId),
                         status: "LEFT",
                         score: player.score,
                     },
@@ -330,6 +341,7 @@ export class RoomPlayerRepository {
                     select: {
                         id: true,
                         nickname: true,
+                        avatarId: true,
                         status: true,
                         score: true,
                     },
@@ -366,7 +378,10 @@ export class RoomPlayerRepository {
                     roomId: room.id,
                     gameId: currentGame.id,
                     gameStatus: "IN_PROGRESS",
-                    player: updatedPlayer,
+                    player: {
+                        ...updatedPlayer,
+                        avatarId: resolvePlayerAvatarId(updatedPlayer.avatarId),
+                    },
                     eligiblePlayerCount,
                     openRoundId: openRound?.id ?? null,
                     cancelledGame,

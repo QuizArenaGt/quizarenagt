@@ -183,6 +183,7 @@ describe("POST /rooms/leave - Integração", () => {
                 player: {
                     id: bobJoin.body.player.id,
                     nickname: "Bob",
+                    avatarId: "explorer",
                     status: "LEFT",
                     score: 0,
                 },

@@ -119,6 +119,7 @@ model GamePlayer {
   gameId              String
   userId              String?
   nickname            String
+  avatarId            String           @default("explorer")
   status              GamePlayerStatus @default(ACTIVE)
   score               Int              @default(0)
   joinedAt            DateTime         @default(now())

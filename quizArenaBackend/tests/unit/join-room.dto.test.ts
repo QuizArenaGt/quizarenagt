@@ -6,6 +6,7 @@ import {
     normalizeRoomCode,
     validateJoinRoom,
 } from "../../src/rooms/join-room.dto.js";
+import { PLAYER_AVATAR_IDS } from "../../src/rooms/player-avatar.js";
 
 describe("validateJoinRoom", () => {
     it("deve validar dados corretos", () => {
@@ -19,6 +20,7 @@ describe("validateJoinRoom", () => {
             data: {
                 code: "ABC123",
                 nickname: "Gendesson",
+                avatarId: "explorer",
             },
         });
     });
@@ -45,6 +47,7 @@ describe("validateJoinRoom", () => {
                 data: {
                     code: expected,
                     nickname: "Jogador",
+                    avatarId: "explorer",
                 },
             });
         },
@@ -79,6 +82,7 @@ describe("validateJoinRoom", () => {
             data: {
                 code: "ABC123",
                 nickname: "Jogador",
+                avatarId: "explorer",
             },
         });
     });
@@ -166,6 +170,48 @@ describe("validateJoinRoom", () => {
         if (!result.success) {
             expect(result.errors.code).toBeDefined();
             expect(result.errors.nickname).toBeDefined();
+        }
+    });
+
+    it("deve aceitar todos os 17 avatares do catálogo oficial", () => {
+        expect(PLAYER_AVATAR_IDS).toHaveLength(17);
+
+        for (const avatarId of PLAYER_AVATAR_IDS) {
+            const result = validateJoinRoom({
+                code: "ABC123",
+                nickname: "Jogador",
+                avatarId,
+            });
+
+            expect(result).toEqual({
+                success: true,
+                data: {
+                    code: "ABC123",
+                    nickname: "Jogador",
+                    avatarId,
+                },
+            });
+        }
+    });
+
+    it.each([
+        "",
+        "   ",
+        "unknown-avatar",
+        "https://evil.com/avatar.png",
+        "<svg><script>alert(1)</script></svg>",
+        123,
+        {},
+    ])("deve rejeitar avatarId inválido ou arbitrário: %j", (invalidAvatar) => {
+        const result = validateJoinRoom({
+            code: "ABC123",
+            nickname: "Jogador",
+            avatarId: invalidAvatar,
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors.avatarId).toBeDefined();
         }
     });
 });
