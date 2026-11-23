@@ -74,32 +74,30 @@ describe("QuestionService", () => {
     };
 
     let questionRepositoryMock: {
-        create: ReturnType<typeof vi.fn>;
         findManyByRoomId: ReturnType<typeof vi.fn>;
-        findById: ReturnType<typeof vi.fn>;
-        update: ReturnType<typeof vi.fn>;
-        delete: ReturnType<typeof vi.fn>;
+        createInRoom: ReturnType<typeof vi.fn>;
+        updateInRoom: ReturnType<typeof vi.fn>;
+        deleteInRoom: ReturnType<typeof vi.fn>;
+        importManyToRoom: ReturnType<typeof vi.fn>;
     };
 
     let roomRepositoryMock: {
         findById: ReturnType<typeof vi.fn>;
-        findByIdWithCurrentGame: ReturnType<typeof vi.fn>;
     };
 
     let service: QuestionService;
 
     beforeEach(() => {
         questionRepositoryMock = {
-            create: vi.fn(),
             findManyByRoomId: vi.fn(),
-            findById: vi.fn(),
-            update: vi.fn(),
-            delete: vi.fn(),
+            createInRoom: vi.fn(),
+            updateInRoom: vi.fn(),
+            deleteInRoom: vi.fn(),
+            importManyToRoom: vi.fn(),
         };
 
         roomRepositoryMock = {
             findById: vi.fn(),
-            findByIdWithCurrentGame: vi.fn(),
         };
 
         service = new QuestionService(
@@ -147,49 +145,35 @@ describe("QuestionService", () => {
     });
 
     describe("createQuestion", () => {
-        it("deve criar uma pergunta quando a sala estiver ACTIVE e o Game não estiver IN_PROGRESS", async () => {
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValue(
-                roomFixture,
+        it("deve criar uma pergunta sob lock transacional da sala quando editável", async () => {
+            questionRepositoryMock.createInRoom.mockResolvedValue({
+                success: true,
+                question: questionFixture,
+            });
+
+            const result = await service.createQuestion({
+                roomId: roomFixture.id,
+                hostId: roomFixture.hostId,
+                statement: "Qual é a capital do Brasil?",
+                options: validOptions,
+            });
+
+            expect(questionRepositoryMock.createInRoom).toHaveBeenCalledWith(
+                roomFixture.id,
+                roomFixture.hostId,
+                {
+                    statement: "Qual é a capital do Brasil?",
+                    type: QuestionType.MULTIPLE_CHOICE,
+                    options: validOptions,
+                },
             );
-            questionRepositoryMock.create.mockResolvedValue(questionFixture);
-
-            const result = await service.createQuestion({
-                roomId: roomFixture.id,
-                hostId: roomFixture.hostId,
-                statement: "Qual é a capital do Brasil?",
-                options: validOptions,
-            });
-
-            expect(questionRepositoryMock.create).toHaveBeenCalledWith({
-                roomId: roomFixture.id,
-                statement: "Qual é a capital do Brasil?",
-                type: QuestionType.MULTIPLE_CHOICE,
-                options: validOptions,
-            });
-            expect(result).toEqual(questionFixture);
-        });
-
-        it("deve permitir criar pergunta entre partidas (Game FINISHED em sala ACTIVE)", async () => {
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValue({
-                ...roomFixture,
-                games: [{ ...baseGameFixture, status: "FINISHED" }],
-            });
-            questionRepositoryMock.create.mockResolvedValue(questionFixture);
-
-            const result = await service.createQuestion({
-                roomId: roomFixture.id,
-                hostId: roomFixture.hostId,
-                statement: "Nova pergunta para próxima partida?",
-                options: validOptions,
-            });
-
             expect(result).toEqual(questionFixture);
         });
 
         it("deve rejeitar criação quando houver partida IN_PROGRESS ou sala ARCHIVED", async () => {
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce({
-                ...roomFixture,
-                games: [{ ...baseGameFixture, status: "IN_PROGRESS" }],
+            questionRepositoryMock.createInRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ROOM_NOT_EDITABLE",
             });
 
             await expect(
@@ -200,23 +184,9 @@ describe("QuestionService", () => {
                     options: validOptions,
                 }),
             ).rejects.toThrow(QuestionRoomNotEditableError);
-
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce({
-                ...roomFixture,
-                status: "ARCHIVED",
-            });
-
-            await expect(
-                service.createQuestion({
-                    roomId: roomFixture.id,
-                    hostId: roomFixture.hostId,
-                    statement: "Pergunta em sala arquivada?",
-                    options: validOptions,
-                }),
-            ).rejects.toThrow(QuestionRoomNotEditableError);
         });
 
-        it("deve rejeitar criação quando os dados forem inválidos", async () => {
+        it("deve rejeitar criação quando os dados forem inválidos sem chamar o repositório", async () => {
             await expect(
                 service.createQuestion({
                     roomId: roomFixture.id,
@@ -234,12 +204,15 @@ describe("QuestionService", () => {
                     options: [{ text: "Única", isCorrect: true }],
                 }),
             ).rejects.toThrow(InvalidQuestionDataError);
+
+            expect(questionRepositoryMock.createInRoom).not.toHaveBeenCalled();
         });
 
         it("deve rejeitar criação quando a sala não existir ou o usuário não for o host", async () => {
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce(
-                null,
-            );
+            questionRepositoryMock.createInRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ROOM_NOT_FOUND",
+            });
             await expect(
                 service.createQuestion({
                     roomId: roomFixture.id,
@@ -249,9 +222,10 @@ describe("QuestionService", () => {
                 }),
             ).rejects.toThrow(QuestionRoomNotFoundError);
 
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce(
-                roomFixture,
-            );
+            questionRepositoryMock.createInRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ACCESS_DENIED",
+            });
             await expect(
                 service.createQuestion({
                     roomId: roomFixture.id,
@@ -264,12 +238,11 @@ describe("QuestionService", () => {
     });
 
     describe("updateQuestion", () => {
-        it("deve atualizar uma pergunta preservando o roomId original", async () => {
-            questionRepositoryMock.findById.mockResolvedValue(questionFixture);
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValue(
-                roomFixture,
-            );
-            questionRepositoryMock.update.mockResolvedValue(questionFixture);
+        it("deve atualizar uma pergunta sob lock da sala após validar payload", async () => {
+            questionRepositoryMock.updateInRoom.mockResolvedValue({
+                success: true,
+                question: questionFixture,
+            });
 
             const result = await service.updateQuestion(
                 questionFixture.id,
@@ -281,8 +254,9 @@ describe("QuestionService", () => {
                 },
             );
 
-            expect(questionRepositoryMock.update).toHaveBeenCalledWith(
+            expect(questionRepositoryMock.updateInRoom).toHaveBeenCalledWith(
                 questionFixture.id,
+                roomFixture.hostId,
                 {
                     statement: "Pergunta atualizada?",
                     type: QuestionType.MULTIPLE_CHOICE,
@@ -293,7 +267,10 @@ describe("QuestionService", () => {
         });
 
         it("deve rejeitar atualização quando a pergunta não existir", async () => {
-            questionRepositoryMock.findById.mockResolvedValue(null);
+            questionRepositoryMock.updateInRoom.mockResolvedValue({
+                success: false,
+                reason: "QUESTION_NOT_FOUND",
+            });
 
             await expect(
                 service.updateQuestion(
@@ -305,23 +282,9 @@ describe("QuestionService", () => {
         });
 
         it("deve rejeitar atualização quando a partida estiver IN_PROGRESS ou a sala ARCHIVED", async () => {
-            questionRepositoryMock.findById.mockResolvedValue(questionFixture);
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce({
-                ...roomFixture,
-                games: [{ ...baseGameFixture, status: "IN_PROGRESS" }],
-            });
-
-            await expect(
-                service.updateQuestion(
-                    questionFixture.id,
-                    roomFixture.hostId,
-                    { statement: "Atualizada?", options: validOptions },
-                ),
-            ).rejects.toThrow(QuestionRoomNotEditableError);
-
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce({
-                ...roomFixture,
-                status: "ARCHIVED",
+            questionRepositoryMock.updateInRoom.mockResolvedValue({
+                success: false,
+                reason: "ROOM_NOT_EDITABLE",
             });
 
             await expect(
@@ -334,10 +297,10 @@ describe("QuestionService", () => {
         });
 
         it("deve rejeitar atualização com payload inválido ou usuário não autorizado", async () => {
-            questionRepositoryMock.findById.mockResolvedValue(questionFixture);
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValue(
-                roomFixture,
-            );
+            questionRepositoryMock.updateInRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ACCESS_DENIED",
+            });
 
             await expect(
                 service.updateQuestion(questionFixture.id, "outro-host", {
@@ -357,29 +320,28 @@ describe("QuestionService", () => {
     });
 
     describe("deleteQuestion", () => {
-        it("deve excluir uma pergunta quando a sala estiver ACTIVE e não estiver IN_PROGRESS", async () => {
-            questionRepositoryMock.findById.mockResolvedValue(questionFixture);
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValue(
-                roomFixture,
-            );
-            questionRepositoryMock.delete.mockResolvedValue(questionFixture);
+        it("deve excluir uma pergunta sob lock da sala quando editável", async () => {
+            questionRepositoryMock.deleteInRoom.mockResolvedValue({
+                success: true,
+                question: questionFixture,
+            });
 
             const result = await service.deleteQuestion(
                 questionFixture.id,
                 roomFixture.hostId,
             );
 
-            expect(questionRepositoryMock.delete).toHaveBeenCalledWith(
+            expect(questionRepositoryMock.deleteInRoom).toHaveBeenCalledWith(
                 questionFixture.id,
+                roomFixture.hostId,
             );
             expect(result).toEqual(questionFixture);
         });
 
         it("deve rejeitar exclusão durante partida IN_PROGRESS ou sala ARCHIVED", async () => {
-            questionRepositoryMock.findById.mockResolvedValue(questionFixture);
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce({
-                ...roomFixture,
-                games: [{ ...baseGameFixture, status: "IN_PROGRESS" }],
+            questionRepositoryMock.deleteInRoom.mockResolvedValue({
+                success: false,
+                reason: "ROOM_NOT_EDITABLE",
             });
 
             await expect(
@@ -388,16 +350,99 @@ describe("QuestionService", () => {
                     roomFixture.hostId,
                 ),
             ).rejects.toThrow(QuestionRoomNotEditableError);
+        });
+    });
 
-            roomRepositoryMock.findByIdWithCurrentGame.mockResolvedValueOnce({
-                ...roomFixture,
-                status: "ARCHIVED",
+    describe("importQuestions", () => {
+        it("deve validar lote antes de persistir e delegar ao repositório em lote válido", async () => {
+            questionRepositoryMock.importManyToRoom.mockResolvedValue({
+                success: true,
+                questions: [questionFixture],
             });
 
+            const result = await service.importQuestions(
+                roomFixture.id,
+                roomFixture.hostId,
+                {
+                    questions: [
+                        {
+                            statement: "  Qual é a capital do Brasil? ",
+                            type: QuestionType.MULTIPLE_CHOICE,
+                            options: validOptions,
+                        },
+                    ],
+                },
+            );
+
+            expect(questionRepositoryMock.importManyToRoom).toHaveBeenCalledWith(
+                roomFixture.id,
+                roomFixture.hostId,
+                [
+                    {
+                        statement: "Qual é a capital do Brasil?",
+                        type: QuestionType.MULTIPLE_CHOICE,
+                        options: validOptions,
+                    },
+                ],
+            );
+            expect(result).toEqual([questionFixture]);
+        });
+
+        it("deve rejeitar lote inválido sem chamar o repositório", async () => {
             await expect(
-                service.deleteQuestion(
-                    questionFixture.id,
+                service.importQuestions(roomFixture.id, roomFixture.hostId, {
+                    questions: [],
+                }),
+            ).rejects.toThrow(InvalidQuestionDataError);
+
+            expect(
+                questionRepositoryMock.importManyToRoom,
+            ).not.toHaveBeenCalled();
+        });
+
+        it("deve mapear falhas do repositório para erros de domínio", async () => {
+            const validBatch = {
+                questions: [
+                    {
+                        statement: "Qual é a capital do Brasil?",
+                        options: validOptions,
+                    },
+                ],
+            };
+
+            questionRepositoryMock.importManyToRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ROOM_NOT_FOUND",
+            });
+            await expect(
+                service.importQuestions(
+                    roomFixture.id,
                     roomFixture.hostId,
+                    validBatch,
+                ),
+            ).rejects.toThrow(QuestionRoomNotFoundError);
+
+            questionRepositoryMock.importManyToRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ACCESS_DENIED",
+            });
+            await expect(
+                service.importQuestions(
+                    roomFixture.id,
+                    "outro-host",
+                    validBatch,
+                ),
+            ).rejects.toThrow(QuestionRoomAccessDeniedError);
+
+            questionRepositoryMock.importManyToRoom.mockResolvedValueOnce({
+                success: false,
+                reason: "ROOM_NOT_EDITABLE",
+            });
+            await expect(
+                service.importQuestions(
+                    roomFixture.id,
+                    roomFixture.hostId,
+                    validBatch,
                 ),
             ).rejects.toThrow(QuestionRoomNotEditableError);
         });

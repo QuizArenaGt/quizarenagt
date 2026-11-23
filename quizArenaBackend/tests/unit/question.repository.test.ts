@@ -260,4 +260,21 @@ describe("QuestionRepository", () => {
             expect(result).toEqual(inactiveQuestion);
         });
     });
+
+    describe("findManyByRoomId", () => {
+        it("deve ordenar perguntas da sala por createdAt ASC e desempate determinístico por id ASC", async () => {
+            questionModel.findMany.mockResolvedValue([
+                questionWithOptionsFixture,
+            ]);
+
+            const result = await repository.findManyByRoomId("room-test-uuid");
+
+            expect(questionModel.findMany).toHaveBeenCalledWith({
+                where: { roomId: "room-test-uuid" },
+                include: orderedOptionsInclude,
+                orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            });
+            expect(result).toEqual([questionWithOptionsFixture]);
+        });
+    });
 });

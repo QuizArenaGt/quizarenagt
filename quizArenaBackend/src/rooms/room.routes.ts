@@ -1,12 +1,52 @@
 
-import { Router } from "express";
+import express, {
+    Router,
+    type NextFunction,
+    type Request,
+    type Response,
+} from "express";
 
 import { RoomController } from "./room.controller.js";
+import { QuestionController } from "../questions/question.controller.js";
+import { IMPORT_QUESTIONS_MAX_PAYLOAD_BYTES } from "../questions/import-questions.dto.js";
 import { authenticateToken } from "../auth/auth.middleware.js";
 import { authenticateRoomPlayer } from "./room-player-auth.middleware.js";
 
 const roomRoutes = Router();
 const roomController = new RoomController();
+const questionController = new QuestionController();
+
+const importQuestionsJsonParser = express.json({
+    limit: IMPORT_QUESTIONS_MAX_PAYLOAD_BYTES,
+});
+
+function handleImportJsonParseError(
+    error: unknown,
+    _req: Request,
+    res: Response,
+    next: NextFunction,
+): void {
+    if (typeof error === "object" && error !== null && "type" in error) {
+        const parserError = error as { type?: string };
+
+        if (parserError.type === "entity.too.large") {
+            res.status(413).json({
+                message:
+                    "O conteúdo da importação excede o limite máximo de 1 MB.",
+            });
+            return;
+        }
+
+        if (parserError.type === "entity.parse.failed") {
+            res.status(400).json({
+                message: "O arquivo JSON enviado está malformado ou inválido.",
+            });
+            return;
+        }
+    }
+
+    next(error);
+}
 
 roomRoutes.post(
     "/join",
@@ -74,6 +114,16 @@ roomRoutes.patch(
     authenticateToken,
     (req, res) => {
         void roomController.update(req, res);
+    },
+);
+
+roomRoutes.post(
+    "/:id/questions/import",
+    authenticateToken,
+    importQuestionsJsonParser,
+    handleImportJsonParseError,
+    (req: Request, res: Response) => {
+        void questionController.importToRoom(req, res);
     },
 );
 

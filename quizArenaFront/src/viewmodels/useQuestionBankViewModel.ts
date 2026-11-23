@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Question } from '../models/question';
+import {
+    createQuestionImportTracker,
+    executeImportQuestionsBatch,
+    syncQuestionImportRoom,
+    type ImportQuestionInput,
+    type ImportQuestionsExecutionResult,
+    type QuestionImportOperationTracker,
+} from '../models/questionImport';
 import {
     createQuestionApi,
     deleteQuestionApi,
+    importQuestionsApi,
     listQuestionsByRoomApi,
     updateQuestionApi,
 } from '../services/questionStorageService';
@@ -10,9 +19,24 @@ import {
 export function useQuestionBankViewModel(roomId: string | null) {
     const [questions, setQuestions] = useState<Question[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isFormOpen, setIsFormOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+
+    const importTrackerRef = useRef<QuestionImportOperationTracker>(
+        createQuestionImportTracker(roomId),
+    );
+    const questionsRef = useRef<Question[]>(questions);
+
+    useEffect(() => {
+        questionsRef.current = questions;
+    }, [questions]);
+
+    useEffect(() => {
+        syncQuestionImportRoom(importTrackerRef.current, roomId, setIsImporting);
+    }, [roomId]);
 
     const refreshQuestions = useCallback(async (targetRoomId?: string | null) => {
         const effectiveRoomId = targetRoomId !== undefined ? targetRoomId : roomId;
@@ -91,6 +115,14 @@ export function useQuestionBankViewModel(roomId: string | null) {
 
     const closeForm = useCallback(() => setIsFormOpen(false), []);
 
+    const openImport = useCallback(() => {
+        setIsImportOpen(true);
+    }, []);
+
+    const closeImport = useCallback(() => {
+        setIsImportOpen(false);
+    }, []);
+
     const saveQuestion = useCallback(
         async (draftQuestion: Question) => {
             if (!roomId) {
@@ -137,18 +169,44 @@ export function useQuestionBankViewModel(roomId: string | null) {
         }
     }, []);
 
+    const importQuestionsBatch = useCallback(
+        async (
+            batch: readonly ImportQuestionInput[],
+        ): Promise<ImportQuestionsExecutionResult> => {
+            return executeImportQuestionsBatch({
+                roomId,
+                questions: batch,
+                tracker: importTrackerRef.current,
+                getCurrentQuestions: () => questionsRef.current,
+                requestImport: importQuestionsApi,
+                onImportingChange: setIsImporting,
+                onApplyQuestions: (nextQuestions) => {
+                    questionsRef.current = nextQuestions;
+                    setError(null);
+                    setQuestions(nextQuestions);
+                },
+            });
+        },
+        [roomId],
+    );
+
     return {
         questions,
         activeCount,
         isLoading,
+        isImporting,
         error,
         isFormOpen,
+        isImportOpen,
         editingQuestion,
         openCreate,
         openEdit,
         closeForm,
+        openImport,
+        closeImport,
         saveQuestion,
         deleteQuestion,
+        importQuestionsBatch,
         refreshQuestions,
     };
 }
