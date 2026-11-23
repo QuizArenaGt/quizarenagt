@@ -39,10 +39,11 @@ export class RoomController {
         }
 
         try {
-            const room = await this.roomService.createRoom({
-                ...req.body,
-                hostId: req.user.id,
-            });
+            const payload =
+                req.body && typeof req.body === "object" && !Array.isArray(req.body)
+                    ? { ...req.body, hostId: req.user.id }
+                    : req.body;
+            const room = await this.roomService.createRoom(payload);
 
             res.status(201).json(room);
         } catch (error: unknown) {

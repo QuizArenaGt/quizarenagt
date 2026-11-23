@@ -28,7 +28,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
             header={<Logo showWordmark={false} size={52} />}
         >
             <div className="login-modal">
-                <LoginForm onSuccess={onSuccess} />
+                <LoginForm onSuccess={onSuccess} embedded />
             </div>
         </Modal>
     );

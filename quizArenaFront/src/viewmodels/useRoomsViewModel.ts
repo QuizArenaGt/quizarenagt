@@ -812,10 +812,10 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         setIsCreateOpen(false);
     }, []);
 
-    async function submitRoom(event: FormEvent<HTMLFormElement>) {
+    async function submitRoom(event: FormEvent<HTMLFormElement>): Promise<boolean> {
         event.preventDefault();
 
-        await executeSubmitRoom({
+        return executeSubmitRoom({
             input: {
                 name,
                 theme,
@@ -891,13 +891,15 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         });
     }
 
-    async function handleLookupRoom(event: FormEvent<HTMLFormElement>) {
+    async function handleLookupRoom(event: FormEvent<HTMLFormElement>): Promise<boolean> {
         event.preventDefault();
-        if (!lookupCode.trim()) return;
+        if (!lookupCode.trim()) return false;
         const loaded = await loadRoomByCode(lookupCode);
         if (loaded) {
             setLookupCode('');
+            return true;
         }
+        return false;
     }
 
     const requestDelete = useCallback((room: Room) => {

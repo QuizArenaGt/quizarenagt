@@ -5,15 +5,29 @@ import type { ChangeEvent } from 'react';
 import './InputPassword.css';
 
 interface InputPasswordProps {
+    id?: string;
+    name?: string;
+    label?: string;
     textPlaceholder?: string;
     password: string;
     setPassword: (password: string) => void;
+    autoComplete?: string;
+    minLength?: number;
+    maxLength?: number;
+    disabled?: boolean;
 }
 
 export default function InputPassword({
+    id = 'password',
+    name,
+    label = 'Senha',
     textPlaceholder,
     password,
-    setPassword
+    setPassword,
+    autoComplete = 'current-password',
+    minLength,
+    maxLength,
+    disabled = false,
 }: InputPasswordProps) {
 
     const [showPassword, setShowPassword] = useState(false);
@@ -30,8 +44,8 @@ export default function InputPassword({
 
     return (
         <div className="input-group">
-            <label htmlFor="password" className="labelInput">
-                Senha
+            <label htmlFor={id} className="labelInput">
+                {label}
             </label>
 
             <div className="input-wrapper">
@@ -54,12 +68,16 @@ export default function InputPassword({
 
                 <input
                     type={showPassword ? 'text' : 'password'}
-                    id="password"
-                    name="password"
+                    id={id}
+                    name={name ?? id}
+                    className="input--with-toggle"
                     placeholder={textPlaceholder || 'Digite sua senha'}
                     value={password}
                     onChange={handlePasswordChange}
-                    autoComplete="current-password"
+                    autoComplete={autoComplete}
+                    minLength={minLength}
+                    maxLength={maxLength}
+                    disabled={disabled}
                     required
                 />
 
@@ -67,6 +85,7 @@ export default function InputPassword({
                     type="button"
                     className="password-toggle"
                     onClick={handleTogglePassword}
+                    disabled={disabled}
                     aria-label={
                         showPassword
                             ? 'Ocultar senha'

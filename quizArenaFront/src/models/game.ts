@@ -119,6 +119,53 @@ export interface PlayerAnswer {
  */
 export type PlayPhase = 'join' | 'nickname' | 'lobby' | 'question' | 'feedback' | 'finished';
 
+export interface PlayTopbarExitState {
+    label: string;
+    requiresConfirmation: boolean;
+    confirmTitle: string;
+    confirmMessage: string;
+    confirmLabel: string;
+}
+
+/**
+ * Define o rótulo e a política de confirmação do botão de saída na topbar de /jogar
+ * conforme o estágio atual do jogador.
+ */
+export function getPlayExitState(
+    phase: PlayPhase,
+    isRecovering: boolean,
+): PlayTopbarExitState {
+    if (isRecovering || phase === 'join' || phase === 'nickname' || phase === 'finished') {
+        return {
+            label: 'Voltar ao início',
+            requiresConfirmation: false,
+            confirmTitle: '',
+            confirmMessage: '',
+            confirmLabel: '',
+        };
+    }
+
+    if (phase === 'lobby') {
+        return {
+            label: 'Sair da sala',
+            requiresConfirmation: true,
+            confirmTitle: 'Sair da sala?',
+            confirmMessage:
+                'Você sairá do lobby antes do início da partida. Para retornar, será necessário entrar novamente com o código da sala.',
+            confirmLabel: 'Sair da sala',
+        };
+    }
+
+    return {
+        label: 'Sair da sala',
+        requiresConfirmation: true,
+        confirmTitle: 'Abandonar partida?',
+        confirmMessage:
+            'A partida está em andamento. Se você sair agora, sua participação será encerrada e não será possível retornar a esta partida.',
+        confirmLabel: 'Abandonar partida',
+    };
+}
+
 const MIN_POINTS = 500;
 const SPEED_BONUS = 500;
 

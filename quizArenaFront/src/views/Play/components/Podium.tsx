@@ -14,19 +14,20 @@ interface PodiumProps {
  */
 export default function Podium({ ranking }: PodiumProps) {
     const topThree = ranking.slice(0, 3);
+    if (topThree.length === 0) return null;
 
     return (
         <ol className="play-podium" aria-label="Pódio">
             {topThree.map((entry) => (
                 <li
                     key={`${entry.position}-${entry.nickname}`}
-                    className={`play-podium__place play-podium__place--${entry.position}${entry.isCurrentPlayer ? ' is-current' : ''}`}
+                    className={`play-podium__place play-podium__place--${Math.min(entry.position, 3)}${entry.isCurrentPlayer ? ' is-current' : ''}`}
                 >
                     <span className="play-podium__avatar" aria-hidden="true">
                         {entry.nickname.charAt(0).toUpperCase()}
                     </span>
-                    <span className="play-podium__name">
-                        {entry.nickname}
+                    <span className="play-podium__name" title={entry.nickname}>
+                        <span className="play-podium__name-text">{entry.nickname}</span>
                         {entry.isCurrentPlayer && <span className="play-podium__you">você</span>}
                     </span>
                     <span className="play-podium__score">{entry.score} pts</span>

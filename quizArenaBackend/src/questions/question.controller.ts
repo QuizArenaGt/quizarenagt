@@ -81,10 +81,11 @@ export class QuestionController {
         }
 
         try {
-            const question = await this.questionService.createQuestion({
-                ...req.body,
-                hostId: req.user.id,
-            });
+            const payload =
+                req.body && typeof req.body === "object" && !Array.isArray(req.body)
+                    ? { ...req.body, hostId: req.user.id }
+                    : req.body;
+            const question = await this.questionService.createQuestion(payload);
 
             res.status(201).json(question);
         } catch (error: unknown) {

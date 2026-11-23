@@ -44,6 +44,8 @@ import {
 
 const TIMER_TICK_MS = 200;
 
+export type PlayerSocketStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting';
+
 export function usePlayViewModel() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -60,6 +62,7 @@ export function usePlayViewModel() {
     const [isJoining, setIsJoining] = useState(false);
     const [isRecovering, setIsRecovering] = useState(() => loadPlayerSession() !== null);
     const [canConnectSocket, setCanConnectSocket] = useState(false);
+    const [rawSocketStatus, setRawSocketStatus] = useState<PlayerSocketStatus>('connecting');
     const [totalQuestions, setTotalQuestions] = useState(0);
     const [isLeaving, setIsLeaving] = useState(false);
     const [leaveError, setLeaveError] = useState<string | null>(null);
@@ -442,6 +445,7 @@ export function usePlayViewModel() {
         let hasConnectedOnce = false;
 
         socket.on('connect', () => {
+            setRawSocketStatus('connected');
             if (!hasConnectedOnce) {
                 hasConnectedOnce = true;
                 return;
@@ -465,6 +469,14 @@ export function usePlayViewModel() {
                         navigate('/', { replace: true });
                     }
                 });
+        });
+
+        socket.on('disconnect', () => {
+            setRawSocketStatus('reconnecting');
+        });
+
+        socket.on('connect_error', () => {
+            setRawSocketStatus('reconnecting');
         });
 
         socket.on('player:joined', (payload: PlayerJoinedPayload) => {
@@ -600,6 +612,7 @@ export function usePlayViewModel() {
         hasAnsweredRef.current = false;
         currentRoundIdRef.current = null;
         setCanConnectSocket(false);
+        setRawSocketStatus('connecting');
         setIsRecovering(false);
         setSessionToken(clean.sessionToken);
         setPlayerId(clean.playerId);
@@ -640,11 +653,14 @@ export function usePlayViewModel() {
         });
     }, [navigate, phase, resetToJoin, sessionToken]);
 
+    const socketStatus: PlayerSocketStatus = canConnectSocket ? rawSocketStatus : 'idle';
+
     return {
         phase,
         room,
         playerId,
         lobbyPlayers,
+        socketStatus,
         error,
         isJoining,
         isRecovering,

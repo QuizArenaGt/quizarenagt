@@ -38,6 +38,7 @@ export default function ConfirmDialog({
             onClose={() => {
                 if (!isLoading) onCancel();
             }}
+            closeDisabled={isLoading}
             title={title}
         >
             <div className="ui-confirm">
@@ -49,7 +50,7 @@ export default function ConfirmDialog({
                     <Button
                         variant={tone === 'danger' ? 'danger' : 'primary'}
                         onClick={onConfirm}
-                        disabled={isLoading}
+                        isLoading={isLoading}
                     >
                         {isLoading ? (loadingLabel ?? confirmLabel) : confirmLabel}
                     </Button>

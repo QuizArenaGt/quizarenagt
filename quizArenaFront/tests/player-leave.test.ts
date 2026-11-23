@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { executeLeaveRoom } from '../src/models/game.ts';
+import { executeLeaveRoom, getPlayExitState } from '../src/models/game.ts';
 import {
     applyPlayerLeftToRooms,
     countEligiblePlayers,
@@ -197,5 +199,68 @@ describe('Saída voluntária do jogador (Frontend)', () => {
         assert.equal(afterInProgressLeft[0]?.players[1]?.status, 'LEFT');
         assert.equal(afterInProgressLeft[0]?.players[1]?.score, 100);
         assert.equal(countEligiblePlayers(afterInProgressLeft[0]!.players), 1);
+    });
+
+    it('getPlayExitState adapta rótulo e confirmação por estágio sem bloquear recuperação', () => {
+        for (const phase of ['join', 'nickname', 'finished'] as const) {
+            const state = getPlayExitState(phase, false);
+            assert.equal(state.label, 'Voltar ao início');
+            assert.equal(state.requiresConfirmation, false);
+        }
+
+        const recoveringLobby = getPlayExitState('lobby', true);
+        assert.equal(recoveringLobby.label, 'Voltar ao início');
+        assert.equal(recoveringLobby.requiresConfirmation, false);
+
+        const lobbyState = getPlayExitState('lobby', false);
+        assert.equal(lobbyState.label, 'Sair da sala');
+        assert.equal(lobbyState.requiresConfirmation, true);
+        assert.equal(lobbyState.confirmTitle, 'Sair da sala?');
+        assert.match(lobbyState.confirmMessage, /lobby/i);
+
+        for (const phase of ['question', 'feedback'] as const) {
+            const inGameState = getPlayExitState(phase, false);
+            assert.equal(inGameState.label, 'Sair da sala');
+            assert.equal(inGameState.requiresConfirmation, true);
+            assert.equal(inGameState.confirmTitle, 'Abandonar partida?');
+            assert.match(inGameState.confirmMessage, /andamento/i);
+        }
+    });
+
+    it('UI de /jogar implementa confirmação de saída, seleção acessível, status legível e entrada consistente', () => {
+        const playViewSource = readFileSync(
+            path.resolve(import.meta.dirname, '../src/views/Play/PlayView.tsx'),
+            'utf8',
+        );
+        const questionStepSource = readFileSync(
+            path.resolve(import.meta.dirname, '../src/views/Play/steps/QuestionStep.tsx'),
+            'utf8',
+        );
+        const joinStepSource = readFileSync(
+            path.resolve(import.meta.dirname, '../src/views/Play/steps/JoinStep.tsx'),
+            'utf8',
+        );
+        const joinSectionSource = readFileSync(
+            path.resolve(import.meta.dirname, '../src/views/Home/sections/JoinRoomSection.tsx'),
+            'utf8',
+        );
+
+        assert.match(playViewSource, /getPlayExitState\(phase,\s*viewModel\.isRecovering\)/);
+        assert.match(playViewSource, /ConfirmDialog/);
+        assert.match(playViewSource, /isLeaveConfirmOpen && exitState\.requiresConfirmation/);
+
+        assert.match(questionStepSource, /play-option--selected/);
+        assert.match(questionStepSource, /play-option--unselected/);
+        assert.match(questionStepSource, /aria-pressed=\{isSelected\}/);
+        assert.match(questionStepSource, /Selecionada/);
+        assert.match(questionStepSource, /play-question__status--submitted/);
+        assert.match(questionStepSource, /play-question__status--timeout/);
+        assert.doesNotMatch(questionStepSource, /play-lobby__waiting/);
+        assert.doesNotMatch(questionStepSource, /4px solid #ffffff/);
+
+        assert.match(joinStepSource, /Código da sala/);
+        assert.match(joinSectionSource, /Código da sala/);
+        assert.match(joinStepSource, /'Continuar'/);
+        assert.match(joinSectionSource, /'Continuar'/);
     });
 });

@@ -5,6 +5,7 @@
  * resultados registrados e as perguntas e devolvem os números prontos
  * para a tela. Isso facilita testar e trocar a origem dos dados depois.
  */
+import type { GameMode } from '../services/socket';
 import type { OpponentPlayer } from './game';
 import type { Question } from './question';
 import type {
@@ -42,7 +43,18 @@ export interface StudentReportRow {
     isSimulated: boolean;
     score: number;
     correctCount: number;
+    /** Total de não-acertos (erros + não respondidas), preservado para compatibilidade. */
     wrongCount: number;
+    /** Respostas efetivamente enviadas pelo participante. */
+    answeredCount?: number;
+    /** Respostas enviadas incorretamente. */
+    incorrectCount?: number;
+    /** Rodadas/questões sem resposta enviada (tempo esgotado ou saída). */
+    unansweredCount?: number;
+    /** Taxa de acerto sobre o total de questões da partida (0 a 1). */
+    accuracyRate?: number;
+    /** Indica se há outro participante empatado com a mesma pontuação. */
+    isTied?: boolean;
 }
 
 export interface QuestionReportRow {
@@ -50,16 +62,36 @@ export interface QuestionReportRow {
     statement: string;
     correctCount: number;
     answeredCount: number;
-    /** Taxa de acerto de 0 a 1. */
+    /** Taxa de acerto entre respostas enviadas (0 a 1). */
     correctRate: number;
+    /** Número da rodada no jogo, quando disponível. */
+    roundNumber?: number;
+    roundStatus?: 'OPEN' | 'CLOSED';
+    /** Respostas incorretas efetivamente enviadas. */
+    incorrectCount?: number;
+    /** Participantes da partida que não responderam esta questão. */
+    unansweredCount?: number;
+    /** Total de participantes considerados na partida. */
+    participantCount?: number;
+    /** Taxa de acerto sobre todos os participantes (0 a 1). */
+    overallCorrectRate?: number;
 }
 
 export interface RoomReport {
     participantCount: number;
     realStudentCount: number;
     questionCount: number;
-    /** Média de acerto da turma, de 0 a 1. */
+    /** Média de acerto sobre respostas enviadas (totalCorrect / totalAnswered), de 0 a 1. */
     averageCorrectRate: number;
+    /** Aproveitamento geral sobre todas as oportunidades (totalCorrect / expectedAnswers), de 0 a 1. */
+    overallCorrectRate?: number;
+    /** Taxa de participação nas respostas (totalAnswered / expectedAnswers), de 0 a 1. */
+    responseRate?: number;
+    expectedAnswers?: number;
+    totalAnswered?: number;
+    totalCorrect?: number;
+    totalIncorrect?: number;
+    totalUnanswered?: number;
     ranking: StudentReportRow[];
     /** Todas as perguntas da sala, na ordem em que foram jogadas. */
     questionRows: QuestionReportRow[];
@@ -98,64 +130,101 @@ export function buildRoomReport(results: RoomResults | null, questionBank: Quest
     ];
 
     // ----- Alunos -----
-    const ranking: StudentReportRow[] = participants
+    const scoreCounts = new Map<number, number>();
+    const rawRanking: StudentReportRow[] = participants
         .map((participant) => {
+            const answeredCount = participant.answers.length;
             const correctCount = participant.answers.filter((answer) => answer.isCorrect).length;
+            const incorrectCount = Math.max(0, answeredCount - correctCount);
+            const unansweredCount = Math.max(0, results.questionIds.length - answeredCount);
+            const score = participant.answers.reduce((sum, answer) => sum + answer.points, 0);
+            scoreCounts.set(score, (scoreCounts.get(score) ?? 0) + 1);
+
             return {
                 position: 0,
                 nickname: participant.nickname,
                 isSimulated: participant.isSimulated,
-                score: participant.answers.reduce((sum, answer) => sum + answer.points, 0),
+                score,
                 correctCount,
-                // Respostas erradas e tempo esgotado contam como erro.
                 wrongCount: results.questionIds.length - correctCount,
+                answeredCount,
+                incorrectCount,
+                unansweredCount,
+                accuracyRate: results.questionIds.length > 0 ? correctCount / results.questionIds.length : 0,
             };
         })
-        .sort((a, b) => b.score - a.score)
-        .map((row, index) => ({ ...row, position: index + 1 }));
+        .sort((a, b) => b.score - a.score);
+
+    const ranking: StudentReportRow[] = rawRanking.map((row, index) => ({
+        ...row,
+        position: index + 1,
+        isTied: (scoreCounts.get(row.score) ?? 0) > 1,
+    }));
 
     const studentsWithMostCorrect = [...ranking]
+        .filter((row) => row.correctCount > 0)
         .sort((a, b) => b.correctCount - a.correctCount || b.score - a.score)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
     const studentsWithMostWrong = [...ranking]
-        .filter((row) => row.wrongCount > 0)
-        .sort((a, b) => b.wrongCount - a.wrongCount || a.score - b.score)
+        .filter((row) => (row.incorrectCount ?? 0) > 0)
+        .sort((a, b) => (b.incorrectCount ?? 0) - (a.incorrectCount ?? 0) || a.score - b.score)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
     // ----- Perguntas -----
-    const questionRows: QuestionReportRow[] = results.questionIds.map((questionId) => {
+    const participantCount = participants.length;
+    const questionRows: QuestionReportRow[] = results.questionIds.map((questionId, index) => {
         const answers = participants
             .map((participant) => participant.answers.find((answer) => answer.questionId === questionId))
             .filter((answer): answer is QuestionResult => answer !== undefined);
         const correctCount = answers.filter((answer) => answer.isCorrect).length;
+        const answeredCount = answers.length;
+        const incorrectCount = Math.max(0, answeredCount - correctCount);
+        const unansweredCount = Math.max(0, participantCount - answeredCount);
         return {
             questionId,
             statement:
                 questionBank.find((question) => question.id === questionId)?.statement ??
                 'Pergunta removida do banco',
+            roundNumber: index + 1,
             correctCount,
-            answeredCount: answers.length,
-            correctRate: answers.length > 0 ? correctCount / answers.length : 0,
+            answeredCount,
+            incorrectCount,
+            unansweredCount,
+            participantCount,
+            correctRate: answeredCount > 0 ? correctCount / answeredCount : 0,
+            overallCorrectRate: participantCount > 0 ? correctCount / participantCount : 0,
         };
     });
 
     const mostCorrectQuestions = [...questionRows]
-        .sort((a, b) => b.correctRate - a.correctRate)
+        .filter((row) => row.correctCount > 0)
+        .sort((a, b) => b.correctRate - a.correctRate || b.correctCount - a.correctCount)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
     const mostMissedQuestions = [...questionRows]
-        .sort((a, b) => a.correctRate - b.correctRate)
+        .filter((row) => (row.incorrectCount ?? 0) > 0)
+        .sort((a, b) => (b.incorrectCount ?? 0) - (a.incorrectCount ?? 0) || a.correctRate - b.correctRate)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
-    const totalAnswers = questionRows.reduce((sum, row) => sum + row.answeredCount, 0);
+    const totalAnswered = questionRows.reduce((sum, row) => sum + row.answeredCount, 0);
     const totalCorrect = questionRows.reduce((sum, row) => sum + row.correctCount, 0);
+    const totalIncorrect = questionRows.reduce((sum, row) => sum + (row.incorrectCount ?? 0), 0);
+    const expectedAnswers = participantCount * questionRows.length;
+    const totalUnanswered = Math.max(0, expectedAnswers - totalAnswered);
 
     return {
-        participantCount: participants.length,
+        participantCount,
         realStudentCount: results.players.length,
         questionCount: results.questionIds.length,
-        averageCorrectRate: totalAnswers > 0 ? totalCorrect / totalAnswers : 0,
+        averageCorrectRate: totalAnswered > 0 ? totalCorrect / totalAnswered : 0,
+        overallCorrectRate: expectedAnswers > 0 ? totalCorrect / expectedAnswers : 0,
+        responseRate: expectedAnswers > 0 ? totalAnswered / expectedAnswers : 0,
+        expectedAnswers,
+        totalAnswered,
+        totalCorrect,
+        totalIncorrect,
+        totalUnanswered,
         ranking,
         questionRows,
         mostCorrectQuestions,
@@ -285,6 +354,50 @@ export function formatGameDuration(
     return `${seconds}s`;
 }
 
+export type GameHistoryStatusFilter = 'ALL' | ApiGameStatus;
+
+/** Filtra a lista de partidas da sala pelo status selecionado. */
+export function filterRoomGamesByStatus(
+    games: ApiGameHistoryItem[],
+    statusFilter: GameHistoryStatusFilter,
+): ApiGameHistoryItem[] {
+    if (statusFilter === 'ALL') {
+        return games;
+    }
+    return games.filter((game) => game.status === statusFilter);
+}
+
+/** Rótulo curto para o modo de jogo no histórico e relatório. */
+export function formatShortGameMode(mode: GameMode): string {
+    return mode === 'HARDCORE' ? 'Hardcore' : 'Clássico';
+}
+
+export type QuestionDifficultyLevel = 'easy' | 'medium' | 'hard' | 'no-data';
+
+/** Classifica a dificuldade real da questão a partir das respostas registradas. */
+export function classifyQuestionDifficulty(
+    row: Pick<QuestionReportRow, 'answeredCount' | 'overallCorrectRate' | 'correctRate' | 'participantCount'>,
+): { level: QuestionDifficultyLevel; label: string } {
+    if (row.answeredCount === 0) {
+        return { level: 'no-data', label: 'Sem respostas' };
+    }
+
+    const baseRate =
+        (row.participantCount ?? 0) > 0
+            ? (row.overallCorrectRate ?? row.correctRate)
+            : row.correctRate;
+
+    if (baseRate >= 0.7) {
+        return { level: 'easy', label: 'Fácil' };
+    }
+
+    if (baseRate >= 0.4) {
+        return { level: 'medium', label: 'Moderada' };
+    }
+
+    return { level: 'hard', label: 'Difícil' };
+}
+
 /**
  * Converte resultados persistidos de um `Game` específico (`GET /rooms/:id/games/:gameId/results`)
  * para o formato `RoomReport` consumido pelo `RoomReportModal`, mantendo a pontuação oficial de `GamePlayer`.
@@ -296,48 +409,99 @@ export function buildRoomReportFromServerGame(
         return null;
     }
 
-    const ranking: StudentReportRow[] = details.ranking.map((entry) => ({
-        position: entry.position,
-        nickname: entry.nickname,
-        isSimulated: false,
-        score: entry.score,
-        correctCount: entry.correctCount,
-        wrongCount: entry.wrongCount,
-    }));
+    const participantCount = details.ranking.length;
+    const totalQuestionsInMatch = Math.max(details.questionCount, details.questions.length);
+
+    const scoreCounts = new Map<number, number>();
+    for (const entry of details.ranking) {
+        scoreCounts.set(entry.score, (scoreCounts.get(entry.score) ?? 0) + 1);
+    }
+
+    const ranking: StudentReportRow[] = details.ranking.map((entry) => {
+        const answeredCount = Math.max(0, entry.answeredCount);
+        const correctCount = Math.max(0, entry.correctCount);
+        const incorrectCount = Math.max(0, answeredCount - correctCount);
+        const expectedForPlayer = Math.max(
+            totalQuestionsInMatch,
+            correctCount + entry.wrongCount,
+            answeredCount,
+        );
+        const unansweredCount = Math.max(0, expectedForPlayer - answeredCount);
+
+        return {
+            position: entry.position,
+            nickname: entry.nickname,
+            isSimulated: false,
+            score: entry.score,
+            correctCount,
+            wrongCount: entry.wrongCount,
+            answeredCount,
+            incorrectCount,
+            unansweredCount,
+            accuracyRate: expectedForPlayer > 0 ? correctCount / expectedForPlayer : 0,
+            isTied: (scoreCounts.get(entry.score) ?? 0) > 1,
+        };
+    });
 
     const studentsWithMostCorrect = [...ranking]
+        .filter((row) => row.correctCount > 0)
         .sort((a, b) => b.correctCount - a.correctCount || b.score - a.score)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
     const studentsWithMostWrong = [...ranking]
-        .filter((row) => row.wrongCount > 0)
-        .sort((a, b) => b.wrongCount - a.wrongCount || a.score - b.score)
+        .filter((row) => (row.incorrectCount ?? 0) > 0)
+        .sort((a, b) => (b.incorrectCount ?? 0) - (a.incorrectCount ?? 0) || a.score - b.score)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
-    const questionRows: QuestionReportRow[] = details.questions.map((q) => ({
-        questionId: q.questionId,
-        statement: q.statement,
-        correctCount: q.correctCount,
-        answeredCount: q.answeredCount,
-        correctRate: q.correctRate,
-    }));
+    const questionRows: QuestionReportRow[] = details.questions.map((q) => {
+        const answeredCount = Math.max(0, q.answeredCount);
+        const correctCount = Math.max(0, q.correctCount);
+        const incorrectCount = Math.max(0, answeredCount - correctCount);
+        const unansweredCount = Math.max(0, participantCount - answeredCount);
+
+        return {
+            questionId: q.questionId,
+            statement: q.statement,
+            roundNumber: q.roundNumber,
+            roundStatus: q.roundStatus,
+            correctCount,
+            answeredCount,
+            incorrectCount,
+            unansweredCount,
+            participantCount,
+            correctRate: q.correctRate,
+            overallCorrectRate: participantCount > 0 ? correctCount / participantCount : 0,
+        };
+    });
 
     const mostCorrectQuestions = [...questionRows]
-        .sort((a, b) => b.correctRate - a.correctRate)
+        .filter((row) => row.correctCount > 0)
+        .sort((a, b) => b.correctRate - a.correctRate || b.correctCount - a.correctCount)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
     const mostMissedQuestions = [...questionRows]
-        .sort((a, b) => a.correctRate - b.correctRate)
+        .filter((row) => (row.incorrectCount ?? 0) > 0)
+        .sort((a, b) => (b.incorrectCount ?? 0) - (a.incorrectCount ?? 0) || a.correctRate - b.correctRate)
         .slice(0, REPORT_HIGHLIGHT_SIZE);
 
-    const totalAnswers = questionRows.reduce((sum, row) => sum + row.answeredCount, 0);
+    const totalAnswered = questionRows.reduce((sum, row) => sum + row.answeredCount, 0);
     const totalCorrect = questionRows.reduce((sum, row) => sum + row.correctCount, 0);
+    const totalIncorrect = questionRows.reduce((sum, row) => sum + (row.incorrectCount ?? 0), 0);
+    const expectedAnswers = participantCount * questionRows.length;
+    const totalUnanswered = Math.max(0, expectedAnswers - totalAnswered);
 
     return {
-        participantCount: ranking.length,
-        realStudentCount: ranking.length,
+        participantCount,
+        realStudentCount: participantCount,
         questionCount: details.questionCount,
-        averageCorrectRate: totalAnswers > 0 ? totalCorrect / totalAnswers : 0,
+        averageCorrectRate: totalAnswered > 0 ? totalCorrect / totalAnswered : 0,
+        overallCorrectRate: expectedAnswers > 0 ? totalCorrect / expectedAnswers : 0,
+        responseRate: expectedAnswers > 0 ? totalAnswered / expectedAnswers : 0,
+        expectedAnswers,
+        totalAnswered,
+        totalCorrect,
+        totalIncorrect,
+        totalUnanswered,
         ranking,
         questionRows,
         mostCorrectQuestions,

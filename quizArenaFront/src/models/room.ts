@@ -1254,3 +1254,18 @@ export async function executeStartMatch<TApiRoom>(
         deps.onStartingChange?.(false);
     }
 }
+
+/** Filtra salas exclusivamente pelo nome (busca parcial, ignorando maiúsculas/minúsculas). */
+export function filterRoomsByName<TRoom extends Pick<Room, 'name'>>(
+    rooms: readonly TRoom[],
+    query: string,
+): TRoom[] {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) {
+        return [...rooms];
+    }
+
+    return rooms.filter((room) =>
+        room.name.toLocaleLowerCase().includes(normalizedQuery),
+    );
+}

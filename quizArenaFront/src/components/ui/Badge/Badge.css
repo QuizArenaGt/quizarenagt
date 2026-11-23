@@ -11,12 +11,34 @@
 
 /* O amarelo nunca é usado como cor de texto sobre fundo claro, para
    manter o contraste: fundo amarelo-claro com texto marrom. */
-.ui-badge--planned {
-  background: var(--color-highlight-soft);
-  color: var(--color-highlight-strong);
+.ui-badge--planned,
+.ui-badge--warning {
+  background: var(--color-warning-soft);
+  color: var(--color-warning-strong);
 }
 
-.ui-badge--available {
+.ui-badge--available,
+.ui-badge--success {
   background: var(--color-success-soft);
   color: var(--color-success-strong);
+}
+
+.ui-badge--neutral {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+}
+
+.ui-badge--primary {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.ui-badge--info {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+.ui-badge--danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger-strong);
 }

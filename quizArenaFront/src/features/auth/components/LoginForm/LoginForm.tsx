@@ -7,12 +7,15 @@ import type { LoginRequest } from '../../types/auth';
 import InputEmail from '../../../../components/Inputs/InputEmail/InputEmail';
 import InputPassword from '../../../../components/Inputs/InputPassword/InputPassword';
 import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
+import Alert from '../../../../components/ui/Alert/Alert';
+import Button from '../../../../components/ui/Button/Button';
 
 interface LoginFormProps {
     onSuccess: () => void;
+    embedded?: boolean;
 }
 
-export default function LoginForm({ onSuccess }: LoginFormProps) {
+export default function LoginForm({ onSuccess, embedded = false }: LoginFormProps) {
     const [email, setEmail] = useState<string>('');
     const [password, setPassword] = useState<string>('');
     const [error, setError] = useState<string | null>(null);
@@ -46,35 +49,49 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
         }
     };
 
+    const ContainerTag = embedded ? 'div' : 'main';
+
     return (
         <div className="arena-background">
-            <main className="login-container">
-                <AuthBrandPanel
-                    title="Bem-vindo de volta!"
-                    description="Entre com seu e-mail e senha para continuar."
-                />
+            <ContainerTag className="login-container">
+                {!embedded && (
+                    <AuthBrandPanel
+                        title="Bem-vindo de volta!"
+                        description="Entre com seu e-mail e senha para continuar."
+                    />
+                )}
 
                 <form className="login-card" onSubmit={handleSubmit}>
-                    <InputEmail 
-                        email={email} 
-                        setEmail={setEmail} 
+                    <InputEmail
+                        email={email}
+                        setEmail={setEmail}
+                        disabled={isLoading}
                     />
 
-                    <InputPassword                    
+                    <InputPassword
                         password={password}
                         setPassword={setPassword}
+                        disabled={isLoading}
                     />
 
                     <div className="forgot-password-wrapper">
-                        <a href="/recover-password" className="forgot-password-link">Esqueceu sua senha?</a> 
+                        <Link to="/recover-password" className="forgot-password-link">
+                            Esqueceu sua senha?
+                        </Link>
                     </div>
 
-                    <div>
-                        { error && (
-                            <div className="login-error">{error}</div>
-                        )}
-                    </div>
-                    <button type="submit" className="btn-submit" disabled={isLoading}>{isLoading ? 'ENTRANDO...' : 'ENTRAR'}</button>
+                    {error && (
+                        <Alert variant="error">{error}</Alert>
+                    )}
+
+                    <Button
+                        type="submit"
+                        size="lg"
+                        fullWidth
+                        isLoading={isLoading}
+                    >
+                        {isLoading ? 'Entrando…' : 'Entrar'}
+                    </Button>
                 </form>
 
                 <footer className="login-footer">
@@ -82,7 +99,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                         Cadastre-se
                     </Link>
                 </footer>
-            </main>
+            </ContainerTag>
         </div>
     );
 };

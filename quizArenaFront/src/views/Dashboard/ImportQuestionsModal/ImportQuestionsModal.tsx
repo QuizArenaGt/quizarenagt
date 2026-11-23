@@ -1,7 +1,10 @@
-import { useId, useRef, type ChangeEvent, type DragEvent } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import Alert from '../../../components/ui/Alert/Alert';
+import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import Icon from '../../../components/ui/Icon/Icon';
 import Modal from '../../../components/ui/Modal/Modal';
+import { LoadingState } from '../../../components/ui/Skeleton/Skeleton';
 import {
     CHOICE_LETTERS,
     QUESTION_TYPE_LABEL,
@@ -88,8 +91,15 @@ function ImportQuestionsModalBody({
 }: ImportQuestionsModalBodyProps) {
     const viewModel = useImportQuestionsViewModel(vmParams);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [copiedExample, setCopiedExample] = useState(false);
     const inputId = useId();
     const dropzoneHintId = useId();
+
+    useEffect(() => {
+        if (!copiedExample) return;
+        const timer = window.setTimeout(() => setCopiedExample(false), 2000);
+        return () => window.clearTimeout(timer);
+    }, [copiedExample]);
 
     function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
         const picked = event.target.files?.[0] ?? null;
@@ -117,27 +127,38 @@ function ImportQuestionsModalBody({
         void viewModel.selectFile(dropped);
     }
 
+    async function handleCopyExample() {
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(EXAMPLE_JSON);
+            }
+            setCopiedExample(true);
+        } catch {
+            setCopiedExample(false);
+        }
+    }
+
     const isSuccessFinished =
         viewModel.outcome?.status === 'COMPLETED' ||
         viewModel.outcome?.status === 'PARTIAL';
 
+    const outcomeVariant =
+        viewModel.outcome?.tone === 'error'
+            ? 'error'
+            : viewModel.outcome?.tone === 'warning'
+              ? 'warning'
+              : 'success';
+
     return (
         <div className="import-modal">
             {!viewModel.isRoomEditable && !isSuccessFinished && (
-                <div className="import-modal__alert import-modal__alert--warning" role="alert">
-                    <strong>Sala indisponível para edição</strong>
-                    <p>
-                        A importação só está disponível enquanto a sala estiver aguardando início.
-                    </p>
-                </div>
+                <Alert variant="warning" title="Sala indisponível para edição">
+                    A importação só está disponível enquanto a sala estiver aguardando início.
+                </Alert>
             )}
 
             {viewModel.outcome && (
-                <div
-                    className={`import-modal__alert import-modal__alert--${viewModel.outcome.tone}`}
-                    role={viewModel.outcome.tone === 'error' ? 'alert' : 'status'}
-                >
-                    <strong>{viewModel.outcome.title}</strong>
+                <Alert variant={outcomeVariant} title={viewModel.outcome.title}>
                     <p>{viewModel.outcome.message}</p>
                     {viewModel.outcome.fieldErrorMessages.length > 1 && (
                         <ul className="import-modal__error-list">
@@ -146,7 +167,7 @@ function ImportQuestionsModalBody({
                             ))}
                         </ul>
                     )}
-                </div>
+                </Alert>
             )}
 
             {isSuccessFinished ? (
@@ -178,13 +199,13 @@ function ImportQuestionsModalBody({
                         {!viewModel.selectedFile ? (
                             <div className="import-modal__dropzone-empty">
                                 <span className="import-modal__dropzone-icon" aria-hidden="true">
-                                    <Icon name="book" size={24} />
+                                    <Icon name="import" size={22} />
                                 </span>
                                 <p className="import-modal__dropzone-title">
                                     Arraste um arquivo <strong>.json</strong> para cá ou selecione do computador
                                 </p>
                                 <p id={dropzoneHintId} className="import-modal__dropzone-hint">
-                                    Aceita arquivos .json de até 1 MB com no máximo {MAX_IMPORT_QUESTIONS} perguntas.
+                                    Até 1 MB · máximo de {MAX_IMPORT_QUESTIONS} perguntas por arquivo · sem apagar perguntas atuais.
                                 </p>
                                 <Button
                                     type="button"
@@ -218,6 +239,7 @@ function ImportQuestionsModalBody({
                                     <Button
                                         type="button"
                                         variant="secondary"
+                                        size="sm"
                                         disabled={viewModel.isImporting}
                                         onClick={() => fileInputRef.current?.click()}
                                     >
@@ -226,6 +248,7 @@ function ImportQuestionsModalBody({
                                     <Button
                                         type="button"
                                         variant="ghost"
+                                        size="sm"
                                         disabled={viewModel.isImporting}
                                         onClick={viewModel.clearFile}
                                     >
@@ -237,30 +260,47 @@ function ImportQuestionsModalBody({
                     </div>
 
                     {!viewModel.selectedFile && (
-                        <details className="import-modal__example">
-                            <summary>Ver exemplo do formato JSON oficial</summary>
-                            <pre className="import-modal__code">{EXAMPLE_JSON}</pre>
-                        </details>
-                    )}
+                        <div className="import-modal__guidance">
+                            <ul className="import-modal__rules" aria-label="Regras do arquivo JSON">
+                                <li>Objeto raiz com a lista <code>questions</code>.</li>
+                                <li>Tipos aceitos: <code>MULTIPLE_CHOICE</code> (2–4 opções) e <code>TRUE_FALSE</code>.</li>
+                                <li>Exatamente 1 alternativa com <code>isCorrect: true</code> por pergunta.</li>
+                            </ul>
 
-                    {viewModel.isReadingFile && (
-                        <p className="import-modal__status-text" role="status">
-                            Lendo e validando arquivo JSON…
-                        </p>
-                    )}
-
-                    {viewModel.readError && (
-                        <div className="import-modal__alert import-modal__alert--error" role="alert">
-                            <strong>Erro ao ler o arquivo</strong>
-                            <p>{viewModel.readError}</p>
+                            <details className="import-modal__example">
+                                <summary>Ver exemplo do formato JSON oficial</summary>
+                                <div className="import-modal__code-toolbar">
+                                    <span>Estrutura esperada</span>
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => void handleCopyExample()}
+                                    >
+                                        <Icon name="copy" size={14} />
+                                        <span>{copiedExample ? 'Copiado!' : 'Copiar exemplo'}</span>
+                                    </Button>
+                                </div>
+                                <pre className="import-modal__code">{EXAMPLE_JSON}</pre>
+                            </details>
                         </div>
                     )}
 
+                    {viewModel.isReadingFile && (
+                        <LoadingState label="Lendo e validando arquivo JSON…" />
+                    )}
+
+                    {viewModel.readError && (
+                        <Alert variant="error" title="Erro ao ler o arquivo">
+                            {viewModel.readError}
+                        </Alert>
+                    )}
+
                     {viewModel.validation && !viewModel.validation.valid && (
-                        <div className="import-modal__alert import-modal__alert--error" role="alert">
-                            <strong>
-                                Foram encontrados problemas no arquivo ({viewModel.validation.errors.length})
-                            </strong>
+                        <Alert
+                            variant="error"
+                            title={`Foram encontrados problemas no arquivo (${viewModel.validation.errors.length})`}
+                        >
                             <p>Corrija os itens abaixo antes de importar:</p>
                             <ul className="import-modal__error-list">
                                 {viewModel.validation.errors.map((err, idx) => (
@@ -269,7 +309,7 @@ function ImportQuestionsModalBody({
                                     </li>
                                 ))}
                             </ul>
-                        </div>
+                        </Alert>
                     )}
 
                     {viewModel.validation && viewModel.validation.valid && (
@@ -285,25 +325,20 @@ function ImportQuestionsModalBody({
                             </div>
 
                             {viewModel.validation.warnings.length > 0 && (
-                                <div
-                                    className="import-modal__alert import-modal__alert--warning"
-                                    role="status"
-                                >
-                                    <strong>
-                                        Aviso: {viewModel.validation.warnings.length}{' '}
-                                        {viewModel.validation.warnings.length === 1
+                                <Alert
+                                    variant="warning"
+                                    title={`Aviso: ${viewModel.validation.warnings.length} ${
+                                        viewModel.validation.warnings.length === 1
                                             ? 'enunciado já existe'
-                                            : 'enunciados já existem'}{' '}
-                                        na sala
-                                    </strong>
-                                    <p>
-                                        Essas perguntas serão acrescentadas normalmente caso você confirme a importação (itens:{' '}
-                                        {viewModel.validation.warnings
-                                            .map((w) => `#${w.questionNumber}`)
-                                            .join(', ')}
-                                        ).
-                                    </p>
-                                </div>
+                                            : 'enunciados já existem'
+                                    } na sala`}
+                                >
+                                    Essas perguntas serão acrescentadas normalmente caso você confirme a importação (itens:{' '}
+                                    {viewModel.validation.warnings
+                                        .map((w) => `#${w.questionNumber}`)
+                                        .join(', ')}
+                                    ).
+                                </Alert>
                             )}
 
                             <div className="import-modal__preview-header">
@@ -345,16 +380,15 @@ function ImportQuestionsModalBody({
                                 {viewModel.pagination.items.map((item) => (
                                     <li key={item.questionNumber} className="import-modal__preview-item">
                                         <div className="import-modal__preview-meta">
-                                            <span className="import-modal__badge import-modal__badge--number">
-                                                #{item.questionNumber}
-                                            </span>
-                                            <span className="import-modal__badge import-modal__badge--type">
+                                            <Badge variant="primary">#{item.questionNumber}</Badge>
+                                            <Badge variant={item.question.type === 'TRUE_FALSE' ? 'info' : 'neutral'}>
                                                 {QUESTION_TYPE_LABEL[item.question.type]}
-                                            </span>
+                                            </Badge>
                                             {item.duplicateInRoom && (
-                                                <span className="import-modal__badge import-modal__badge--warning">
-                                                    ⚠ Já existe na sala
-                                                </span>
+                                                <Badge variant="warning">
+                                                    <Icon name="warning" size={12} />
+                                                    <span>Já existe na sala</span>
+                                                </Badge>
                                             )}
                                         </div>
                                         <p className="import-modal__statement">
@@ -388,9 +422,7 @@ function ImportQuestionsModalBody({
                     )}
 
                     {viewModel.isImporting && (
-                        <p className="import-modal__status-text" role="status">
-                            Importando perguntas para a sala… Aguarde a conclusão.
-                        </p>
+                        <LoadingState label="Importando perguntas para a sala… Aguarde a conclusão." />
                     )}
 
                     <div className="import-modal__actions">
@@ -406,6 +438,7 @@ function ImportQuestionsModalBody({
                             type="button"
                             variant="primary"
                             disabled={!viewModel.canConfirm}
+                            isLoading={viewModel.isImporting}
                             onClick={() => void viewModel.confirmImport()}
                         >
                             {viewModel.isImporting

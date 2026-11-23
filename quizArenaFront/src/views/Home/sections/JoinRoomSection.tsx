@@ -79,11 +79,11 @@ export default function JoinRoomSection({
                                 </p>
                             )}
                             <Button type="submit" size="lg" fullWidth disabled={isChecking}>
-                                {isChecking ? 'Verificando sala…' : 'Entrar na sala'}
+                                {isChecking ? 'Verificando sala…' : 'Continuar'}
                             </Button>
                         </div>
                         <p id={hintId} className="home-join__hint">
-                            Informe o código de 6 caracteres exibido pelo anfitrião da partida.
+                            Informe o código de 6 caracteres (letras e números) exibido pelo anfitrião.
                         </p>
                     </form>
                 </div>

@@ -17,6 +17,7 @@ import DashboardForm from "./features/Dashboard/components/DashboardForm";
 import RecoverPasswordForm from "./features/auth/components/RecoverPasswordForm/RecoverPasswordForm";
 
 import { apiRequest, ApiError } from "./services/api";
+import SessionStatusCard from "./components/layout/SessionStatusCard/SessionStatusCard";
 
 interface AuthenticatedUser {
     id: string;
@@ -76,7 +77,7 @@ function ProtectedRoute() {
     }, []);
 
     if (status === "checking") {
-        return <div>Validando sessão...</div>;
+        return <SessionStatusCard status="checking" />;
     }
 
     if (status === "unauthorized") {
@@ -85,13 +86,10 @@ function ProtectedRoute() {
 
     if (status === "error") {
         return (
-            <div>
-                <h2>Não foi possível validar sua sessão.</h2>
-                <p>Verifique se o servidor está disponível.</p>
-                <button onClick={() => window.location.reload()}>
-                    Tentar novamente
-                </button>
-            </div>
+            <SessionStatusCard
+                status="error"
+                onRetry={() => window.location.reload()}
+            />
         );
     }
 
@@ -160,6 +158,11 @@ function AppRoutes() {
             <Route
                 path="/"
                 element={<HomeView />}
+            />
+
+            <Route
+                path="*"
+                element={<Navigate to="/" replace />}
             />
         </Routes>
     );

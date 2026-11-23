@@ -1,39 +1,44 @@
 import React, { useState } from 'react';
-import './RecoverPasswordForm.css';
+import { Link } from 'react-router-dom';
+import '../LoginForm/LoginForm.css';
 
 import { recoverPassword } from '../../services/authService';
 import type { RecoverPasswordRequest } from '../../types/auth';
 import InputEmail from '../../../../components/Inputs/InputEmail/InputEmail';
 import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
+import Alert from '../../../../components/ui/Alert/Alert';
+import Button from '../../../../components/ui/Button/Button';
 
 interface RecoverPasswordFormProps {
-  onSuccess: () => void;
+    onSuccess: () => void;
 }
 
 export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormProps) {
-    const [email, setEmail]         = useState<string>('');
-    const [error, setError]         = useState<string | null>('');
+    const [email, setEmail] = useState<string>('');
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
 
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setIsLoading(true);
         setError(null);
+        setSuccess(null);
+
         try {
             const request: RecoverPasswordRequest = {
                 email
             };
 
-            const response = await recoverPassword(request);
-            console.log('Response: ', response);
+            await recoverPassword(request);
+            setSuccess('Instruções enviadas! Verifique sua caixa de entrada.');
             onSuccess();
         } catch (error) {
-            console.error('Erro ao fazer login:', error);
-            if (error instanceof Error) {
-                console.error('Mensagem', error.message);
-                console.error('Stack', error.stack);
-            }
-            setError('Erro ao fazer login. Por favor, tente novamente.');
+            setError(
+                error instanceof Error
+                    ? error.message
+                    : 'Não foi possível enviar as instruções. Tente novamente.'
+            );
         } finally {
             setIsLoading(false);
         }
@@ -42,30 +47,42 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
     return (
         <div className="arena-background">
             <main className="login-container">
-                {/* Sem título aqui: o formulário já tem o seu ("Recuperar Senha") */}
-                <AuthBrandPanel />
+                <AuthBrandPanel
+                    title="Recuperar senha"
+                    description="Informe seu e-mail cadastrado para receber as instruções de redefinição."
+                />
 
                 <form className="login-card" onSubmit={handleSubmit}>
-                    <h2>Recuperar Senha</h2>
-                    <h4>Insira seu e-mail cadastrado para receber as instruções de redefinição</h4>
-                    
-                    <InputEmail 
-                        email={email} 
-                        setEmail={setEmail} 
+                    <InputEmail
+                        email={email}
+                        setEmail={setEmail}
+                        disabled={isLoading}
                     />
 
-                    <div>
-                        { error && (
-                            <div className="login-error">{error}</div>
-                        )}
-                    </div>
-                    <button type="submit" className="btn-submit" disabled={isLoading}>ENVIAR INSTRUÇÕES</button>
+                    {error && (
+                        <Alert variant="error">{error}</Alert>
+                    )}
+
+                    {success && (
+                        <Alert variant="success">{success}</Alert>
+                    )}
+
+                    <Button
+                        type="submit"
+                        size="lg"
+                        fullWidth
+                        isLoading={isLoading}
+                    >
+                        {isLoading ? 'Enviando…' : 'Enviar instruções'}
+                    </Button>
                 </form>
 
                 <footer className="login-footer">
-                    <a href="/login" className="footer-link highlighted">Voltar ao login</a>
+                    <Link to="/login" className="footer-link highlighted">
+                        Voltar ao login
+                    </Link>
                 </footer>
             </main>
         </div>
     );
-};
+}

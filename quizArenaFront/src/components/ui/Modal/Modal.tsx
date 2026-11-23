@@ -25,8 +25,10 @@ interface ModalProps {
     description?: string;
     /** Conteúdo exibido acima do título (ex.: logotipo). */
     header?: ReactNode;
-    /** "md" para diálogos simples; "lg" para formulários maiores. */
-    size?: 'md' | 'lg';
+    /** "sm" para confirmações compactas; "md" padrão; "lg" para formulários maiores. */
+    size?: 'sm' | 'md' | 'lg';
+    /** Impede fechamento por Esc, backdrop ou botão × durante operações críticas. */
+    closeDisabled?: boolean;
     children: ReactNode;
 }
 
@@ -40,7 +42,16 @@ interface ModalProps {
  * O conteúdo só é montado enquanto o modal está aberto, para que
  * formulários internos voltem ao estado inicial a cada abertura.
  */
-export default function Modal({ isOpen, onClose, title, description, header, size = 'md', children }: ModalProps) {
+export default function Modal({
+    isOpen,
+    onClose,
+    title,
+    description,
+    header,
+    size = 'md',
+    closeDisabled = false,
+    children,
+}: ModalProps) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     const backdropPointerStateRef = useRef<BackdropPointerState>(createBackdropPointerState());
     const titleId = useId();
@@ -79,6 +90,7 @@ export default function Modal({ isOpen, onClose, title, description, header, siz
     function handleCancel(event: SyntheticEvent<HTMLDialogElement>) {
         event.preventDefault();
         resetBackdropPointerState(backdropPointerStateRef.current);
+        if (closeDisabled) return;
         onClose();
     }
 
@@ -97,7 +109,7 @@ export default function Modal({ isOpen, onClose, title, description, header, siz
     // Fecha apenas quando pressionamento inicial, liberação e clique aconteceram
     // diretamente no <dialog> (backdrop), impedindo fechamento após arrastes.
     function handleBackdropClick(event: MouseEvent<HTMLDialogElement>) {
-        if (consumeBackdropClick(backdropPointerStateRef.current, event)) {
+        if (consumeBackdropClick(backdropPointerStateRef.current, event) && !closeDisabled) {
             onClose();
         }
     }
@@ -120,6 +132,7 @@ export default function Modal({ isOpen, onClose, title, description, header, siz
                         type="button"
                         className="ui-modal__close"
                         onClick={onClose}
+                        disabled={closeDisabled}
                         aria-label="Fechar"
                     >
                         <Icon name="close" size={20} />

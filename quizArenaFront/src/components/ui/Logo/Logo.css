@@ -49,7 +49,8 @@
 }
 
 .ui-logo--dark .ui-logo__highlight {
-  background: var(--gradient-brand-light);
-  -webkit-background-clip: text;
-  background-clip: text;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--color-highlight);
 }
