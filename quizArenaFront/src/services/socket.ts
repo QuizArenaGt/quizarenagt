@@ -1,7 +1,8 @@
 import { io, type Socket } from 'socket.io-client';
-import { API_URL } from './api';
-import { normalizeRoomCode } from '../models/game';
-import type { QuestionType } from '../models/question';
+import { API_URL } from './api.ts';
+import { recordServerTimeSample } from './serverClock.ts';
+import { normalizeRoomCode } from '../models/game.ts';
+import type { QuestionType } from '../models/question.ts';
 
 export type GameMode = 'CLASSIC' | 'HARDCORE';
 export type BackendRoomStatus = 'WAITING' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
@@ -245,5 +246,55 @@ export function createPlayerSocket(sessionToken: string): Socket {
             token: sessionToken,
         },
         transports: ['websocket', 'polling'],
+    });
+}
+
+export interface TimeSyncSocket {
+    connected: boolean;
+    emit: (event: string, ack: (payload?: { serverTime?: unknown }) => void) => unknown;
+}
+
+export function syncSocketClock(
+    socket: TimeSyncSocket,
+    getPerfNow: () => number = () => globalThis.performance.now(),
+): Promise<boolean> {
+    if (!socket.connected) {
+        return Promise.resolve(false);
+    }
+
+    return new Promise((resolve) => {
+        const requestStartedPerfMs = getPerfNow();
+        let settled = false;
+
+        const timeoutId = globalThis.setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                resolve(false);
+            }
+        }, 4000);
+
+        socket.emit('time:sync', (payload?: { serverTime?: unknown }) => {
+            if (settled) return;
+            settled = true;
+            globalThis.clearTimeout(timeoutId);
+
+            const requestCompletedPerfMs = getPerfNow();
+            if (
+                payload &&
+                typeof payload.serverTime === 'number' &&
+                Number.isFinite(payload.serverTime)
+            ) {
+                resolve(
+                    recordServerTimeSample({
+                        serverTimeMs: payload.serverTime,
+                        requestStartedPerfMs,
+                        requestCompletedPerfMs,
+                    }),
+                );
+                return;
+            }
+
+            resolve(false);
+        });
     });
 }

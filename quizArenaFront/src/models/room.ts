@@ -1,4 +1,5 @@
 import { PIN_LENGTH, normalizeRoomCode, validateRoomCode } from './game.ts';
+import { getServerNowMs } from '../services/serverClock.ts';
 import type {
     BackendRoomStatus,
     GameCreatedPayload,
@@ -1008,13 +1009,33 @@ export function applyGameCreatedToRooms(
 /**
  * Calcula quantos segundos restam usando o prazo autoritativo `expiresAt`
  * enviado pelo backend (com fallback apenas defensivo para `openedAt + timeLimit`).
+ * Quando `nowMs` não é informado, utiliza exclusivamente `getServerNowMs()`
+ * (âncora sincronizada + `performance.now()`) e retorna `null` se não houver
+ * referência confiável do servidor.
  */
+export function computeRemainingSecondsFromDeadline(
+    expiresAt: string | number | null | undefined,
+    openedAt: string | number | null | undefined,
+    timeLimitSeconds: number,
+    nowMs: number,
+): number;
+export function computeRemainingSecondsFromDeadline(
+    expiresAt: string | number | null | undefined,
+    openedAt?: string | number | null,
+    timeLimitSeconds?: number,
+    nowMs?: number | null,
+): number | null;
 export function computeRemainingSecondsFromDeadline(
     expiresAt: string | number | null | undefined,
     openedAt?: string | number | null,
     timeLimitSeconds = 0,
-    nowMs = Date.now(),
-): number {
+    nowMs?: number | null,
+): number | null {
+    const resolvedNowMs = nowMs === undefined ? getServerNowMs() : nowMs;
+    if (resolvedNowMs === null || !Number.isFinite(resolvedNowMs)) {
+        return null;
+    }
+
     let deadlineMs = Number.NaN;
 
     if (typeof expiresAt === 'number') {
@@ -1040,14 +1061,15 @@ export function computeRemainingSecondsFromDeadline(
         return 0;
     }
 
-    return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+    const rawSeconds = Math.max(0, Math.ceil((deadlineMs - resolvedNowMs) / 1000));
+    return timeLimitSeconds > 0 ? Math.min(timeLimitSeconds, rawSeconds) : rawSeconds;
 }
 
 export interface RecoveredHostMatchState {
     activeRound: RoundStartedPayload['round'] | null;
     closedRound: RoundClosedPayload['round'] | null;
     answeredPlayers: { id: string; nickname: string; avatarId?: string }[];
-    remainingSeconds: number;
+    remainingSeconds: number | null;
 }
 
 /**
@@ -1056,7 +1078,7 @@ export interface RecoveredHostMatchState {
  */
 export function extractHostMatchRecoveryState(
     currentGame: ApiGameSummary | null | undefined,
-    nowMs = Date.now(),
+    nowMs?: number | null,
 ): RecoveredHostMatchState {
     if (!currentGame) {
         return {

@@ -53,6 +53,7 @@ import {
     isGamePlayerActive,
 } from "./game-player-eligibility.js";
 import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
+import { getServerNowMs } from "../realtime/server-clock.js";
 import { JwtService } from "../auth/jwt.service.js";
 import {
     resolvePlayerAvatarId,
@@ -1352,7 +1353,7 @@ export class RoomService {
 
         if (
             player.reconnectDeadlineAt &&
-            player.reconnectDeadlineAt.getTime() <= Date.now() &&
+            player.reconnectDeadlineAt.getTime() <= getServerNowMs() &&
             (getPlayerPresenceRegistry()?.getActiveSocketCount(player.id) ?? 0) === 0
         ) {
             throw new RoomAuthenticationError("Prazo de reconexão expirado.");

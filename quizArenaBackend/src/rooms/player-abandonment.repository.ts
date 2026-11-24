@@ -1,6 +1,7 @@
 import type { GamePlayerStatus } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+import { getServerNowDate } from "../realtime/server-clock.js";
 
 import {
     cancelInProgressGameIfInsufficientPlayersTx,
@@ -35,37 +36,35 @@ export type AbandonExpiredPlayerResult =
         | "HAS_ACTIVE_SOCKET";
     };
 
-async function getTransactionNow(tx: {
-    $queryRaw: typeof prisma.$queryRaw;
-}): Promise<Date> {
-    const rows = await tx.$queryRaw<{ now: Date }[]>`
-        SELECT NOW() AS now
-    `;
-
-    if (Array.isArray(rows) && rows[0]?.now instanceof Date) {
-        return rows[0].now;
-    }
-
-    return new Date();
-}
-
 export class PlayerAbandonmentRepository {
     async findExpiredCandidateIds(limit = 50): Promise<string[]> {
-        const rows = await prisma.$queryRaw<{ id: string }[]>`
-            SELECT gp.id
-            FROM game_players gp
-            INNER JOIN games g ON g.id = gp."gameId"
-            INNER JOIN rooms r ON r.id = g."roomId"
-            WHERE gp.status = 'ACTIVE'
-              AND gp."reconnectDeadlineAt" IS NOT NULL
-              AND gp."reconnectDeadlineAt" <= NOW()
-              AND g.status IN ('WAITING', 'IN_PROGRESS')
-              AND r.status = 'ACTIVE'
-            ORDER BY gp."reconnectDeadlineAt" ASC
-            LIMIT ${limit}
-        `;
+        const now = getServerNowDate();
+        const rows = await prisma.gamePlayer.findMany({
+            where: {
+                status: "ACTIVE",
+                reconnectDeadlineAt: {
+                    not: null,
+                    lte: now,
+                },
+                game: {
+                    status: {
+                        in: ["WAITING", "IN_PROGRESS"],
+                    },
+                    room: {
+                        status: "ACTIVE",
+                    },
+                },
+            },
+            orderBy: {
+                reconnectDeadlineAt: "asc",
+            },
+            take: limit,
+            select: {
+                id: true,
+            },
+        });
 
-        return Array.isArray(rows) ? rows.map((row) => row.id) : [];
+        return rows.map((row) => row.id);
     }
 
     async abandonExpiredPlayer(
@@ -145,7 +144,7 @@ export class PlayerAbandonmentRepository {
                 };
             }
 
-            const now = await getTransactionNow(tx);
+            const now = getServerNowDate();
 
             if (player.reconnectDeadlineAt.getTime() > now.getTime()) {
                 return {

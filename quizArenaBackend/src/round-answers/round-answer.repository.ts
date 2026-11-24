@@ -4,6 +4,7 @@ import type { RoundAnswer } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { isGamePlayerActive } from "../rooms/game-player-eligibility.js";
 import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
+import { getServerNowDate } from "../realtime/server-clock.js";
 
 export type SubmitRoundAnswerResult =
     | {
@@ -95,14 +96,7 @@ export class RoundAnswerRepository {
                     gamePlayerId,
                 ) ?? 0) === 0
             ) {
-                const deadlineNowRows = await tx.$queryRaw<{ now: Date }[]>`
-                    SELECT NOW() AS now
-                `;
-                const currentNow =
-                    Array.isArray(deadlineNowRows) &&
-                    deadlineNowRows[0]?.now instanceof Date
-                        ? deadlineNowRows[0].now
-                        : new Date();
+                const currentNow = getServerNowDate();
 
                 if (player.reconnectDeadlineAt.getTime() <= currentNow.getTime()) {
                     return {
@@ -157,13 +151,7 @@ export class RoundAnswerRepository {
                 };
             }
 
-            const nowRows = await tx.$queryRaw<{ now: Date }[]>`
-                SELECT NOW() AS now
-            `;
-            const answeredAt =
-                Array.isArray(nowRows) && nowRows[0]?.now instanceof Date
-                    ? nowRows[0].now
-                    : new Date();
+            const answeredAt = getServerNowDate();
 
             const expiresAt =
                 round.expiresAt ??

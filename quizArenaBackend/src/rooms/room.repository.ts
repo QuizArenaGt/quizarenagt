@@ -10,6 +10,10 @@ import type {
 } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+import {
+    getServerNowDate,
+    isServerClockCalibrated,
+} from "../realtime/server-clock.js";
 
 type CreateRoomQuestionData = {
     statement: string;
@@ -170,6 +174,10 @@ export type FinishGameResult =
 async function getTransactionNow(tx: {
     $queryRaw: Prisma.TransactionClient["$queryRaw"];
 }): Promise<Date> {
+    if (isServerClockCalibrated()) {
+        return getServerNowDate();
+    }
+
     const rows = await tx.$queryRaw<{ now: Date }[]>`
         SELECT NOW() AS now
     `;
@@ -178,7 +186,7 @@ async function getTransactionNow(tx: {
         return rows[0].now;
     }
 
-    return new Date();
+    return getServerNowDate();
 }
 
 export function selectCurrentGame<
@@ -597,7 +605,7 @@ export class RoomRepository {
                 where: { id: currentGame.id },
                 data: {
                     status: "IN_PROGRESS",
-                    startedAt: new Date(),
+                    startedAt: getServerNowDate(),
                 },
             });
 
@@ -753,7 +761,7 @@ export class RoomRepository {
                 where: { id: roomId },
                 data: {
                     status: "ARCHIVED",
-                    archivedAt: new Date(),
+                    archivedAt: getServerNowDate(),
                 },
                 include: {
                     games: {

@@ -8,7 +8,7 @@ interface QuestionStepProps {
     question: Question;
     questionNumber: number;
     totalQuestions: number;
-    remainingSeconds: number;
+    remainingSeconds: number | null;
     timeLimit: number;
     selectedOptionId: string | null;
     hasSubmittedAnswer: boolean;
@@ -33,11 +33,21 @@ export default function QuestionStep({
     onAnswer,
 }: QuestionStepProps) {
     const titleRef = useFocusOnMount<HTMLHeadingElement>();
-    const timeRatio = timeLimit > 0 ? Math.max(0, Math.min(1, remainingSeconds / timeLimit)) : 0;
-    const isExpired = remainingSeconds <= 0;
-    const isLowTime = !isExpired && remainingSeconds <= LOW_TIME_SECONDS;
+    const isTimeSynced = remainingSeconds !== null;
+    const timeRatio =
+        timeLimit > 0
+            ? isTimeSynced
+                ? Math.max(0, Math.min(1, remainingSeconds / timeLimit))
+                : 1
+            : 0;
+    const isExpired = isTimeSynced && remainingSeconds <= 0;
+    const isLowTime = isTimeSynced && !isExpired && remainingSeconds <= LOW_TIME_SECONDS;
     const isWarnTime =
-        !isExpired && !isLowTime && timeLimit > WARN_TIME_SECONDS && remainingSeconds <= WARN_TIME_SECONDS;
+        isTimeSynced &&
+        !isExpired &&
+        !isLowTime &&
+        timeLimit > WARN_TIME_SECONDS &&
+        remainingSeconds <= WARN_TIME_SECONDS;
     const isLocked = hasSubmittedAnswer || isSubmittingAnswer || isExpired;
 
     const timerStateClass = isExpired
@@ -66,14 +76,22 @@ export default function QuestionStep({
                     className={`play-question__timer${timerStateClass ? ` ${timerStateClass}` : ''}`}
                     role="timer"
                     aria-label={
-                        isExpired
-                            ? 'Tempo encerrado'
-                            : `${remainingSeconds} segundos restantes`
+                        !isTimeSynced
+                            ? 'Sincronizando cronômetro com o servidor'
+                            : isExpired
+                              ? 'Tempo encerrado'
+                              : `${remainingSeconds} segundos restantes`
                     }
                 >
-                    <span className="play-question__timer-value">{remainingSeconds}s</span>
+                    <span className="play-question__timer-value">
+                        {isTimeSynced ? `${remainingSeconds}s` : '--s'}
+                    </span>
                     <span className="play-question__timer-label">
-                        {isExpired ? 'Encerrado' : 'restantes'}
+                        {!isTimeSynced
+                            ? 'Sincronizando'
+                            : isExpired
+                              ? 'Encerrado'
+                              : 'restantes'}
                     </span>
                 </div>
             </div>

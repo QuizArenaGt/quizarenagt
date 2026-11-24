@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import {
+    getServerNowDate,
+    isServerClockCalibrated,
+} from "../realtime/server-clock.js";
+import {
     resolvePlayerAvatarId,
     type PlayerAvatarId,
 } from "./player-avatar.js";
@@ -51,9 +55,15 @@ export async function cancelInProgressGameIfInsufficientPlayersTx(
         return null;
     }
 
-    const [{ now }] = await tx.$queryRaw<[{ now: Date }]>`
-        SELECT NOW() AS now
-    `;
+    let now: Date;
+    if (isServerClockCalibrated()) {
+        now = getServerNowDate();
+    } else {
+        const [{ now: dbNow }] = await tx.$queryRaw<[{ now: Date }]>`
+            SELECT NOW() AS now
+        `;
+        now = dbNow;
+    }
 
     // Mantém a ordem global de locks rooms -> rounds antes de fechar rodadas abertas.
     await tx.$queryRaw<{ id: string }[]>`
