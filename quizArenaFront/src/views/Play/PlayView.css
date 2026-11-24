@@ -981,6 +981,45 @@
   animation: play-enter var(--transition-base);
 }
 
+.play-question__status--submitted {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.play-question__status-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.play-question__status-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.play-question__hidden-card {
+  margin: var(--space-2) auto 0;
+  gap: var(--space-2);
+}
+
+.play-question__hidden-icon {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin-bottom: var(--space-2);
+  border-radius: 50%;
+  background: var(--color-success-soft);
+  color: var(--color-success-strong);
+}
+
+.play-question__hidden-actions {
+  margin-top: var(--space-5);
+}
+
 .play-question__status-badge {
   display: grid;
   place-items: center;
@@ -1665,6 +1704,13 @@
     width: 100%;
   }
 
+  .play-question__status-actions,
+  .play-question__status-actions .ui-button,
+  .play-question__hidden-actions,
+  .play-question__hidden-actions .ui-button {
+    width: 100%;
+  }
+
   .play-avatar-picker__grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
@@ -1680,6 +1726,7 @@
   .play-card,
   .play-question,
   .play-question__status,
+  .play-question__hidden-card,
   .play-lobby__players-list li,
   .play-podium__place,
   .play-lobby__pulse,
