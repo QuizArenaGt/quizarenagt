@@ -61,10 +61,12 @@ import {
     type ApiRoomAggregatedStats,
     type ApiRoomLobby,
 } from '../services/roomStorageService';
+import { subscribeServerClock } from '../services/serverClock';
 import {
     AUTH_TOKEN_UPDATED_EVENT,
     createHostSocket,
     isSocketAuthRejectionError,
+    syncSocketClock,
     type GameCreatedPayload,
     type GameFinishedPayload,
     type GameMode,
@@ -108,7 +110,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
     const [answeredPlayers, setAnsweredPlayers] = useState<
         { id: string; nickname: string; avatarId?: string }[]
     >([]);
-    const [roundRemainingSeconds, setRoundRemainingSeconds] = useState(0);
+    const [roundRemainingSeconds, setRoundRemainingSeconds] = useState<number | null>(0);
 
     // Formulário de criação/edição de sala
     const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -153,6 +155,7 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
 
     const closingRoundIdRef = useRef<string | null>(null);
     const activeRoundIdRef = useRef<string | null>(null);
+    const hostSocketRef = useRef<ReturnType<typeof createHostSocket> | null>(null);
     const isSubmittingRoomRef = useRef(false);
     const isStartingMatchRef = useRef(false);
     const isPlayingAgainRef = useRef(false);
@@ -442,9 +445,11 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         if (!token) return;
 
         const socket = createHostSocket(token, currentRoomCode);
+        hostSocketRef.current = socket;
         let hasConnectedOnce = false;
 
         socket.on('connect', () => {
+            void syncSocketClock(socket);
             if (!hasConnectedOnce) {
                 hasConnectedOnce = true;
                 return;
@@ -628,6 +633,9 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         });
 
         return () => {
+            if (hostSocketRef.current === socket) {
+                hostSocketRef.current = null;
+            }
             socket.removeAllListeners();
             socket.disconnect();
         };
@@ -667,7 +675,8 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
         [activeRound?.id, currentRoomId],
     );
 
-    // Cronômetro estritamente visual baseado no prazo autoritativo `expiresAt` do servidor.
+    // Cronômetro estritamente visual baseado no prazo autoritativo `expiresAt` do servidor
+    // com referência temporal sincronizada e contagem monotônica via `performance.now()`.
     // O encerramento real da rodada é executado exclusivamente pelo backend.
     useEffect(() => {
         if (!activeRound) return;
@@ -682,9 +691,36 @@ export function useRoomsViewModel(authenticatedUserId?: string | null) {
             );
         };
 
+        updateVisualCountdown();
+
+        const unsubscribeClock = subscribeServerClock(() => {
+            updateVisualCountdown();
+        });
+
+        const handleVisibilityChange = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                updateVisualCountdown();
+                if (hostSocketRef.current?.connected) {
+                    void syncSocketClock(hostSocketRef.current).then(() => {
+                        updateVisualCountdown();
+                    });
+                }
+            }
+        };
+
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
+
         const intervalId = window.setInterval(updateVisualCountdown, 250);
 
-        return () => window.clearInterval(intervalId);
+        return () => {
+            window.clearInterval(intervalId);
+            unsubscribeClock();
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+            }
+        };
     }, [activeRound]);
 
     // Ações de condução da partida pelo anfitrião

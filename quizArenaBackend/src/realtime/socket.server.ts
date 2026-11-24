@@ -10,6 +10,7 @@ import { selectCurrentGame } from "../rooms/room.repository.js";
 import { prisma } from "../database/prisma.js";
 import { PlayerPresenceRegistry } from "./player-presence.js";
 import { setSocketServer } from "./room-events.js";
+import { getServerNowMs } from "./server-clock.js";
 
 type SocketIdentity =
     | {
@@ -187,7 +188,7 @@ export function createSocketServer(
 
             if (
                 player.reconnectDeadlineAt &&
-                player.reconnectDeadlineAt.getTime() <= Date.now() &&
+                player.reconnectDeadlineAt.getTime() <= getServerNowMs() &&
                 presenceRegistry.getActiveSocketCount(player.id) === 0
             ) {
                 return next(new Error("Prazo de reconexão expirado."));
@@ -258,6 +259,14 @@ export function createSocketServer(
                 : {
                     userId: identity.userId,
                 }),
+        });
+
+        socket.on("time:sync", (ack?: unknown) => {
+            if (typeof ack === "function") {
+                (ack as (payload: { serverTime: number }) => void)({
+                    serverTime: getServerNowMs(),
+                });
+            }
         });
 
         console.log(

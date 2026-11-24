@@ -887,24 +887,41 @@
   transform: translateY(2px);
 }
 
+.play-option--true.play-option--unselected,
+.play-option--false.play-option--unselected {
+  opacity: 0.56;
+  filter: saturate(0.84);
+}
+
 /* Cores da paleta QuizArena com contraste AA */
 .play-option--0 {
-  background: var(--color-primary);
-  color: var(--color-white);
+  background: var(--color-coral);
+  color: var(--color-text);
 }
 
 .play-option--1 {
-  background: var(--color-surface);
+  background: var(--color-pink);
   color: var(--color-text);
 }
 
 .play-option--2 {
-  background: var(--color-accent);
+  background: var(--color-mint);
   color: var(--color-text);
 }
 
 .play-option--3 {
   background: var(--color-highlight);
+  color: var(--color-text);
+}
+
+/* Cores semânticas exclusivas de Verdadeiro ou Falso */
+.play-option--true {
+  background: var(--color-option-true);
+  color: var(--color-text);
+}
+
+.play-option--false {
+  background: var(--color-option-false);
   color: var(--color-text);
 }
 
@@ -919,13 +936,12 @@
   font-weight: var(--weight-black);
 }
 
-.play-option--1 .play-option__letter {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-
+.play-option--0 .play-option__letter,
+.play-option--1 .play-option__letter,
 .play-option--2 .play-option__letter,
-.play-option--3 .play-option__letter {
+.play-option--3 .play-option__letter,
+.play-option--true .play-option__letter,
+.play-option--false .play-option__letter {
   background: rgba(255, 255, 255, 0.55);
 }
 
@@ -963,6 +979,45 @@
   box-shadow: var(--shadow-md);
   text-align: left;
   animation: play-enter var(--transition-base);
+}
+
+.play-question__status--submitted {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.play-question__status-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.play-question__status-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.play-question__hidden-card {
+  margin: var(--space-2) auto 0;
+  gap: var(--space-2);
+}
+
+.play-question__hidden-icon {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin-bottom: var(--space-2);
+  border-radius: 50%;
+  background: var(--color-success-soft);
+  color: var(--color-success-strong);
+}
+
+.play-question__hidden-actions {
+  margin-top: var(--space-5);
 }
 
 .play-question__status-badge {
@@ -1649,6 +1704,13 @@
     width: 100%;
   }
 
+  .play-question__status-actions,
+  .play-question__status-actions .ui-button,
+  .play-question__hidden-actions,
+  .play-question__hidden-actions .ui-button {
+    width: 100%;
+  }
+
   .play-avatar-picker__grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
@@ -1664,6 +1726,7 @@
   .play-card,
   .play-question,
   .play-question__status,
+  .play-question__hidden-card,
   .play-lobby__players-list li,
   .play-podium__place,
   .play-lobby__pulse,

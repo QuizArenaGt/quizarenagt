@@ -483,13 +483,18 @@ export default function DashboardForm({
                                                             </div>
                                                             <Badge
                                                                 variant={
+                                                                    roomsVm.roundRemainingSeconds !== null &&
                                                                     roomsVm.roundRemainingSeconds <= 5
                                                                         ? 'warning'
                                                                         : 'success'
                                                                 }
                                                             >
                                                                 <Icon name="timer" size={14} />
-                                                                <span>{roomsVm.roundRemainingSeconds}s</span>
+                                                                <span>
+                                                                    {roomsVm.roundRemainingSeconds !== null
+                                                                        ? `${roomsVm.roundRemainingSeconds}s`
+                                                                        : '--s'}
+                                                                </span>
                                                             </Badge>
                                                         </div>
 

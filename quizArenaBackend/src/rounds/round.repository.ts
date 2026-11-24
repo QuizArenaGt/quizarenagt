@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
+import { getServerNowDate } from "../realtime/server-clock.js";
 import { selectCurrentGame } from "../rooms/room.repository.js";
 import { filterActiveGamePlayers } from "../rooms/game-player-eligibility.js";
 
@@ -183,32 +184,26 @@ const closeRoundInclude = {
     },
 };
 
-async function getTransactionNow(tx: {
-    $queryRaw: Prisma.TransactionClient["$queryRaw"];
-}): Promise<Date> {
-    const rows = await tx.$queryRaw<{ now: Date }[]>`
-        SELECT NOW() AS now
-    `;
-
-    if (Array.isArray(rows) && rows[0]?.now instanceof Date) {
-        return rows[0].now;
-    }
-
-    return new Date();
-}
-
 export class RoundRepository {
     async findExpiredOpenRoundIds(limit = 50): Promise<string[]> {
-        const rows = await prisma.$queryRaw<{ id: string }[]>`
-            SELECT id
-            FROM rounds
-            WHERE status = 'OPEN'
-              AND "expiresAt" <= NOW()
-            ORDER BY "expiresAt" ASC
-            LIMIT ${limit}
-        `;
+        const now = getServerNowDate();
+        const rows = await prisma.round.findMany({
+            where: {
+                status: "OPEN",
+                expiresAt: {
+                    lte: now,
+                },
+            },
+            orderBy: {
+                expiresAt: "asc",
+            },
+            take: limit,
+            select: {
+                id: true,
+            },
+        });
 
-        return Array.isArray(rows) ? rows.map((row) => row.id) : [];
+        return rows.map((row) => row.id);
     }
 
     async closeRound(
@@ -259,7 +254,7 @@ export class RoundRepository {
                 return { success: false, reason: "GAME_NOT_IN_PROGRESS" };
             }
 
-            const now = await getTransactionNow(tx);
+            const now = getServerNowDate();
             const expiresAt =
                 round.expiresAt ??
                 new Date(round.openedAt.getTime() + round.timeLimit * 1000);
@@ -426,7 +421,7 @@ export class RoundRepository {
                 (question) => question.position === nextPosition,
             );
 
-            const now = await getTransactionNow(tx);
+            const now = getServerNowDate();
 
             if (!nextQuestion) {
                 await tx.game.update({

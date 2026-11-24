@@ -14,11 +14,13 @@ async function start(): Promise<void> {
         { prisma },
         { createSocketServer },
         { RoundExpirationWorker },
+        { calibrateDbClockOffset, isServerClockCalibrated },
     ] = await Promise.all([
         import("./app.js"),
         import("./database/prisma.js"),
         import("./realtime/socket.server.js"),
         import("./rounds/round-expiration.worker.js"),
+        import("./realtime/server-clock.js"),
     ]);
 
     const port = Number(process.env.PORT ?? 3000);
@@ -26,6 +28,12 @@ async function start(): Promise<void> {
     try {
         await prisma.$connect();
         await prisma.$queryRaw`SELECT 1`;
+        await calibrateDbClockOffset();
+        if (!isServerClockCalibrated()) {
+            throw new Error(
+                "Falha ao calibrar o relógio monotônico do servidor com o PostgreSQL.",
+            );
+        }
 
         console.log("Conexão com o PostgreSQL estabelecida com sucesso!");
 

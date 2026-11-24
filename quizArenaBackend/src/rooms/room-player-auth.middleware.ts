@@ -5,6 +5,7 @@ import { RoomPlayerRepository } from "./room-player.repository.js";
 import { hashRoomPlayerSessionToken } from "./room-player-session-token.js";
 import { isGamePlayerActive } from "./game-player-eligibility.js";
 import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
+import { getServerNowMs } from "../realtime/server-clock.js";
 
 const roomPlayerRepository = new RoomPlayerRepository();
 
@@ -55,7 +56,7 @@ export async function authenticateRoomPlayer(
 
         if (
             gamePlayer.reconnectDeadlineAt &&
-            gamePlayer.reconnectDeadlineAt.getTime() <= Date.now() &&
+            gamePlayer.reconnectDeadlineAt.getTime() <= getServerNowMs() &&
             (getPlayerPresenceRegistry()?.getActiveSocketCount(
                 gamePlayer.id,
             ) ?? 0) === 0

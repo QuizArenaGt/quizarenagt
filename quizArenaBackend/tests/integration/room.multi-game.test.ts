@@ -318,8 +318,8 @@ describe("Room 1:N Game & Play Again - Integração", () => {
 
         expect(roundAnswersCount).toBe(2);
         expect(p1Db.score).toBeGreaterThanOrEqual(100);
-        expect(p1Db.score).toBeLessThanOrEqual(150);
+        expect(p1Db.score).toBeLessThanOrEqual(200);
         expect(p2Db.score).toBeGreaterThanOrEqual(100);
-        expect(p2Db.score).toBeLessThanOrEqual(150);
+        expect(p2Db.score).toBeLessThanOrEqual(200);
     });
 });

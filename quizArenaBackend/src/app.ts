@@ -7,6 +7,7 @@ import { questionRoutes } from "./questions/question.routes.js";
 import { roomRoutes } from "./rooms/room.routes.js";
 import { roundRoutes } from "./rounds/round.routes.js";
 import { roundAnswerRoutes } from "./round-answers/round-answer.routes.js";
+import { getServerNowMs } from "./realtime/server-clock.js";
 
 const app = express();
 const defaultJsonParser = express.json();
@@ -20,8 +21,13 @@ const allowedOrigins = process.env.FRONTEND_URL?.split(",")
 app.use(
     cors({
         origin: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : "*",
+        exposedHeaders: ["X-Server-Time"],
     }),
 );
+app.use((_req, res, next) => {
+    res.setHeader("X-Server-Time", String(getServerNowMs()));
+    next();
+});
 app.use((req, res, next) => {
     // A rota de importação possui parser dedicado (limite de 1 MB) após autenticação.
     if (

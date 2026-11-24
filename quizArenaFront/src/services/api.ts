@@ -1,4 +1,6 @@
 
+import { recordServerTimeSample } from "./serverClock.ts";
+
 const API_URL = (
     import.meta.env?.VITE_API_URL ?? "http://localhost:3000"
 ).replace(/\/$/, "");
@@ -58,6 +60,7 @@ export async function apiRequest<T>(
     }
 
     let response: Response;
+    const requestStartedPerfMs = globalThis.performance.now();
 
     try {
         response = await fetch(`${API_URL}${path}`, {
@@ -68,6 +71,19 @@ export async function apiRequest<T>(
         throw new Error(
             "Não foi possível conectar ao servidor. Verifique sua conexão.",
         );
+    }
+
+    const requestCompletedPerfMs = globalThis.performance.now();
+    const serverTimeHeader = response.headers.get("X-Server-Time");
+    if (serverTimeHeader !== null) {
+        const parsedServerTimeMs = Number(serverTimeHeader);
+        if (Number.isFinite(parsedServerTimeMs) && parsedServerTimeMs > 0) {
+            recordServerTimeSample({
+                serverTimeMs: parsedServerTimeMs,
+                requestStartedPerfMs,
+                requestCompletedPerfMs,
+            });
+        }
     }
 
     const responseText = await response.text();

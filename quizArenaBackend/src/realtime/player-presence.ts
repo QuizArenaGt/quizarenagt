@@ -1,5 +1,6 @@
 import { prisma } from "../database/prisma.js";
 import { emitRoomEvent } from "./room-events.js";
+import { getServerNowDate } from "./server-clock.js";
 
 export const RECONNECT_GRACE_PERIOD_MS = 60_000;
 
@@ -54,16 +55,23 @@ export class PrismaPlayerPresencePersistence
     async clearDisconnect(playerId: string): Promise<boolean> {
         // Atualização atômica: impede reconexão caso o jogador já tenha virado ABANDONED/LEFT
         // ou o prazo de reconexão tenha expirado antes da conclusão do handshake.
-        const updatedCount = await prisma.$executeRaw`
-            UPDATE game_players
-            SET "disconnectedAt" = NULL,
-                "reconnectDeadlineAt" = NULL
-            WHERE id = ${playerId}
-              AND status = 'ACTIVE'
-              AND ("reconnectDeadlineAt" IS NULL OR "reconnectDeadlineAt" > NOW())
-        `;
+        const now = getServerNowDate();
+        const result = await prisma.gamePlayer.updateMany({
+            where: {
+                id: playerId,
+                status: "ACTIVE",
+                OR: [
+                    { reconnectDeadlineAt: null },
+                    { reconnectDeadlineAt: { gt: now } },
+                ],
+            },
+            data: {
+                disconnectedAt: null,
+                reconnectDeadlineAt: null,
+            },
+        });
 
-        return Number(updatedCount) > 0;
+        return result.count > 0;
     }
 }
 
@@ -100,7 +108,7 @@ export class PlayerPresenceRegistry {
         this.emitEvent = options.emitEvent ?? emitRoomEvent;
         this.gracePeriodMs =
             options.gracePeriodMs ?? RECONNECT_GRACE_PERIOD_MS;
-        this.now = options.now ?? (() => new Date());
+        this.now = options.now ?? (() => getServerNowDate());
     }
 
     markReconnecting(playerId: string, socketId: string): void {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Badge, { type BadgeVariant } from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import Icon, { type IconName } from '../../../components/ui/Icon/Icon';
+import { buildProjectionRoute } from '../../../models/projection';
 import {
     GAME_MODE_LABEL,
     formatRoomCode,
@@ -69,6 +70,13 @@ export default function RoomWorkspaceShell({
             setCopiedRoomId(room.id);
         } catch {
             setCopiedRoomId(null);
+        }
+    }
+
+    function handleOpenProjection() {
+        const projectionPath = buildProjectionRoute(room.code);
+        if (typeof window !== 'undefined') {
+            window.open(projectionPath, '_blank', 'noopener,noreferrer');
         }
     }
 
@@ -151,30 +159,44 @@ export default function RoomWorkspaceShell({
                 </div>
 
                 <div className="room-access-card">
-                    <div className="room-access-card__code-group">
-                        <span className="room-access-card__label">Código de acesso</span>
-                        <strong className="room-access-card__value">
-                            {formatRoomCode(room.code)}
-                        </strong>
-                    </div>
-                    <div className="room-access-card__actions">
+                    <div className="room-access-card__top">
+                        <div className="room-access-card__code-group">
+                            <span className="room-access-card__label">Código de acesso</span>
+                            <strong className="room-access-card__value">
+                                {formatRoomCode(room.code)}
+                            </strong>
+                        </div>
                         <Button
                             type="button"
                             variant="secondary"
                             size="sm"
+                            className="room-access-card__copy-btn"
                             onClick={() => void handleCopyCode()}
                         >
                             <Icon name="copy" size={15} />
                             <span>{copiedCode ? 'Copiado!' : 'Copiar'}</span>
                         </Button>
+                    </div>
+                    <div className="room-access-card__projection-group" role="group" aria-label="Ações de exibição da sala">
                         <Button
                             type="button"
-                            variant="primary"
+                            variant="secondary"
                             size="sm"
+                            className="room-access-card__proj-btn room-access-card__proj-btn--share"
                             onClick={() => onShowCode(room)}
                         >
-                            <Icon name="play" size={15} />
-                            <span>Projetar</span>
+                            <Icon name="key" size={15} />
+                            <span>Compartilhar código</span>
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="room-access-card__proj-btn room-access-card__proj-btn--present"
+                            onClick={handleOpenProjection}
+                        >
+                            <Icon name="rooms" size={15} />
+                            <span>Abrir projeção</span>
                         </Button>
                     </div>
                 </div>

@@ -35,9 +35,11 @@ import {
     savePlayerSession,
 } from '../services/playerSessionStorage';
 import { computeRemainingSecondsFromDeadline } from '../models/room';
+import { subscribeServerClock } from '../services/serverClock';
 import type { ApiRoomLobby } from '../services/roomStorageService';
 import {
     createPlayerSocket,
+    syncSocketClock,
     type GameFinishedPayload,
     type LobbyPlayerDto,
     type PlayerJoinedPayload,
@@ -81,7 +83,7 @@ export function usePlayViewModel() {
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
     const [questionNumber, setQuestionNumber] = useState(1);
     const [currentTimeLimit, setCurrentTimeLimit] = useState(30);
-    const [remainingSeconds, setRemainingSeconds] = useState(0);
+    const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
     // Submissão de resposta na rodada aberta
     const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
@@ -96,7 +98,12 @@ export function usePlayViewModel() {
     const [serverTotalScore, setServerTotalScore] = useState(0);
     const [isGameCancelled, setIsGameCancelled] = useState(false);
 
-    const deadlineRef = useRef(0);
+    const roundTimingRef = useRef<{
+        expiresAt?: string;
+        openedAt: string;
+        timeLimit: number;
+    } | null>(null);
+    const playerSocketRef = useRef<ReturnType<typeof createPlayerSocket> | null>(null);
     const hasAnsweredRef = useRef(false);
     const currentRoundIdRef = useRef<string | null>(null);
     const currentQuestionTypeRef = useRef<Question['type']>('MULTIPLE_CHOICE');
@@ -249,6 +256,7 @@ export function usePlayViewModel() {
             if (myRankingEntry) {
                 setServerTotalScore(myRankingEntry.score);
             }
+            roundTimingRef.current = null;
             setRemainingSeconds(0);
             setPhase('feedback');
         },
@@ -256,21 +264,24 @@ export function usePlayViewModel() {
     );
 
     const applyRoundStarted = useCallback((round: RoundStartedPayload['round']) => {
-        const parsedExpires = round.expiresAt ? Date.parse(round.expiresAt) : Number.NaN;
-        const openedAtMs = new Date(round.openedAt).getTime();
-        const deadlineMs = !Number.isNaN(parsedExpires)
-            ? parsedExpires
-            : openedAtMs + round.timeLimit * 1000;
-        deadlineRef.current = deadlineMs;
+        roundTimingRef.current = {
+            expiresAt: round.expiresAt,
+            openedAt: round.openedAt,
+            timeLimit: round.timeLimit,
+        };
+
+        if (typeof round.timeLimit === 'number' && round.timeLimit > 0) {
+            setCurrentTimeLimit(round.timeLimit);
+        }
+
+        const nextRemainingSeconds = computeRemainingSecondsFromDeadline(
+            round.expiresAt,
+            round.openedAt,
+            round.timeLimit,
+        );
 
         if (currentRoundIdRef.current === round.id) {
-            setRemainingSeconds(
-                computeRemainingSecondsFromDeadline(
-                    round.expiresAt,
-                    round.openedAt,
-                    round.timeLimit,
-                ),
-            );
+            setRemainingSeconds(nextRemainingSeconds);
             return;
         }
 
@@ -280,14 +291,7 @@ export function usePlayViewModel() {
 
         setCurrentRoundId(round.id);
         setQuestionNumber(round.roundNumber);
-        setCurrentTimeLimit(round.timeLimit);
-        setRemainingSeconds(
-            computeRemainingSecondsFromDeadline(
-                round.expiresAt,
-                round.openedAt,
-                round.timeLimit,
-            ),
-        );
+        setRemainingSeconds(nextRemainingSeconds);
         setSelectedOptionId(null);
         setHasSubmittedAnswer(false);
         setIsSubmittingAnswer(false);
@@ -395,6 +399,7 @@ export function usePlayViewModel() {
                 }
 
                 currentRoundIdRef.current = null;
+                roundTimingRef.current = null;
                 setCurrentRoundId(null);
                 setIsSubmittingAnswer(false);
                 setRemainingSeconds(0);
@@ -470,10 +475,12 @@ export function usePlayViewModel() {
 
         const roomCode = room?.pin ?? pin;
         const socket = createPlayerSocket(sessionToken);
+        playerSocketRef.current = socket;
         let hasConnectedOnce = false;
 
         socket.on('connect', () => {
             setRawSocketStatus('connected');
+            void syncSocketClock(socket);
             if (!hasConnectedOnce) {
                 hasConnectedOnce = true;
                 return;
@@ -557,6 +564,7 @@ export function usePlayViewModel() {
                 }
             }
             currentRoundIdRef.current = null;
+            roundTimingRef.current = null;
             setCurrentRoundId(null);
             setIsSubmittingAnswer(false);
             setRemainingSeconds(0);
@@ -566,6 +574,9 @@ export function usePlayViewModel() {
         });
 
         return () => {
+            if (playerSocketRef.current === socket) {
+                playerSocketRef.current = null;
+            }
             socket.removeAllListeners();
             socket.disconnect();
         };
@@ -617,29 +628,65 @@ export function usePlayViewModel() {
         [currentRoundId, sessionToken, isSubmittingAnswer],
     );
 
-    // Cronômetro visual durante a pergunta aberta
+    // Cronômetro visual monotônico durante a pergunta aberta
     useEffect(() => {
         if (phase !== 'question') return;
 
-        const intervalId = window.setInterval(() => {
-            const timeLeftMs = deadlineRef.current - Date.now();
-            if (timeLeftMs <= 0) {
-                setRemainingSeconds(0);
-                window.clearInterval(intervalId);
-            } else {
-                setRemainingSeconds(Math.ceil(timeLeftMs / 1000));
+        const updateVisualCountdown = (): number | null => {
+            const timing = roundTimingRef.current;
+            const nextRemaining = timing
+                ? computeRemainingSecondsFromDeadline(
+                      timing.expiresAt,
+                      timing.openedAt,
+                      timing.timeLimit,
+                  )
+                : null;
+            setRemainingSeconds(nextRemaining);
+            return nextRemaining;
+        };
+
+        updateVisualCountdown();
+
+        const unsubscribeClock = subscribeServerClock(() => {
+            updateVisualCountdown();
+        });
+
+        const handleVisibilityChange = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                updateVisualCountdown();
+                if (playerSocketRef.current?.connected) {
+                    void syncSocketClock(playerSocketRef.current).then(() => {
+                        updateVisualCountdown();
+                    });
+                }
             }
+        };
+
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
+
+        const intervalId = window.setInterval(() => {
+            updateVisualCountdown();
         }, TIMER_TICK_MS);
 
-        return () => window.clearInterval(intervalId);
+        return () => {
+            window.clearInterval(intervalId);
+            unsubscribeClock();
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+            }
+        };
     }, [phase, currentRoundId]);
 
     const resetToJoin = useCallback(() => {
         clearPlayerSession();
         const clean = createCleanPlayerMatchState();
-        deadlineRef.current = 0;
+        roundTimingRef.current = null;
         hasAnsweredRef.current = false;
         currentRoundIdRef.current = null;
+        setCurrentTimeLimit(30);
+        setRemainingSeconds(null);
         setCanConnectSocket(false);
         setRawSocketStatus('connecting');
         setIsRecovering(false);

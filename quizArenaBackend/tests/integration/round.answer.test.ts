@@ -407,7 +407,7 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedAnswer?.answeredAt).toBeInstanceOf(Date);
 
         expect(persistedAnswer?.points).toBeGreaterThanOrEqual(100);
-        expect(persistedAnswer?.points).toBeLessThanOrEqual(150);
+        expect(persistedAnswer?.points).toBeLessThanOrEqual(200);
 
         const persistedPlayer = await prisma.gamePlayer.findUnique({
             where: { id: player.id },
@@ -468,8 +468,8 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedPlayer?.score).toBe(0);
     });
 
-    it("deve descontar 30 pontos por resposta incorreta no modo HARDCORE, permitindo pontuação negativa", async () => {
-        const { room, roundId, player, sessionToken } =
+    it("deve descontar 30 pontos por resposta incorreta no modo HARDCORE, permitindo pontuação negativa sem limite inferior", async () => {
+        const { room, token, roundId, player, sessionToken } =
             await createStartedRoom("HARDCORE");
 
         const persistedRoom = await prisma.room.findUnique({
@@ -510,12 +510,40 @@ describe("POST /rounds/:id/answer - Integração", () => {
         expect(persistedAnswer?.isCorrect).toBe(false);
         expect(persistedAnswer?.points).toBe(-30);
 
-        const persistedPlayer = await prisma.gamePlayer.findUnique({
+        const persistedPlayerAfterR1 = await prisma.gamePlayer.findUnique({
             where: { id: player.id },
         });
 
-        expect(persistedPlayer?.score).toBe(-30);
-        expect(persistedPlayer?.score).toBeLessThan(0);
+        expect(persistedPlayerAfterR1?.score).toBe(-30);
+        expect(persistedPlayerAfterR1?.score).toBeLessThan(0);
+
+        // Fecha rodada 1, abre rodada 2 e erra novamente: saldo deve cair para -60 (sem piso)
+        const closeRes = await request(app)
+            .post(`/rounds/${roundId}/close`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(closeRes.status).toBe(200);
+
+        const round2Res = await request(app)
+            .post(`/rooms/${room.id}/rounds`)
+            .set("Authorization", `Bearer ${token}`);
+        expect(round2Res.status).toBe(201);
+
+        const round2Id = round2Res.body.round.id as string;
+        const round2Options = await getRoundOptions(round2Id);
+        const round2Wrong = round2Options.find((option) => !option.isCorrect);
+        expect(round2Wrong).toBeDefined();
+
+        const answer2Res = await request(app)
+            .post(`/rounds/${round2Id}/answer`)
+            .set("Authorization", `Bearer ${sessionToken}`)
+            .send({ optionId: round2Wrong!.id });
+        expect(answer2Res.status).toBe(201);
+
+        const persistedPlayerAfterR2 = await prisma.gamePlayer.findUnique({
+            where: { id: player.id },
+        });
+
+        expect(persistedPlayerAfterR2?.score).toBe(-60);
     });
 
     it("deve retornar 409 quando o participante tentar responder novamente", async () => {

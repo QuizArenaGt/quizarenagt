@@ -1,4 +1,5 @@
 import { PlayerAbandonmentService } from "../rooms/player-abandonment.service.js";
+import { getServerNowMs } from "../realtime/server-clock.js";
 import { RoundService } from "./round.service.js";
 
 type RoundExpirationProcessor = Pick<RoundService, "processExpiredRounds">;
@@ -11,7 +12,7 @@ export class RoundExpirationWorker {
     private timer: ReturnType<typeof setInterval> | null = null;
     private inFlightCycle: Promise<number> | null = null;
     private isStopped = true;
-    private lastAbandonmentCheckAt = 0;
+    private lastAbandonmentCheckAt: number | null = null;
     private readonly roundService: RoundExpirationProcessor;
     private readonly abandonmentService: PlayerAbandonmentProcessor | null;
 
@@ -36,7 +37,7 @@ export class RoundExpirationWorker {
         }
 
         this.isStopped = false;
-        this.lastAbandonmentCheckAt = 0;
+        this.lastAbandonmentCheckAt = null;
 
         // Varredura imediata no boot para encerrar rodadas e abandonos expirados durante reinicialização.
         void this.runCycle();
@@ -70,9 +71,9 @@ export class RoundExpirationWorker {
                     await this.roundService.processExpiredRounds();
 
                 if (this.abandonmentService) {
-                    const nowMs = Date.now();
+                    const nowMs = getServerNowMs();
                     if (
-                        this.lastAbandonmentCheckAt === 0 ||
+                        this.lastAbandonmentCheckAt === null ||
                         nowMs - this.lastAbandonmentCheckAt >=
                             this.abandonmentIntervalMs
                     ) {
@@ -102,7 +103,7 @@ export class RoundExpirationWorker {
             return 0;
         }
 
-        this.lastAbandonmentCheckAt = Date.now();
+        this.lastAbandonmentCheckAt = getServerNowMs();
         return this.abandonmentService.processExpiredAbandonments();
     }
 }

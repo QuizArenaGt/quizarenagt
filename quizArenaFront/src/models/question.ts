@@ -46,6 +46,49 @@ export const QUESTION_TYPE_LABEL: Record<QuestionType, string> = {
 /** Letras exibidas antes de cada alternativa. */
 export const CHOICE_LETTERS = ['A', 'B', 'C', 'D'] as const;
 
+export type QuestionOptionTone = '0' | '1' | '2' | '3' | 'true' | 'false';
+
+function isTrueFalseOptionSet(options?: readonly { text: string }[]): boolean {
+    if (!options || options.length !== 2) {
+        return false;
+    }
+
+    const normalized = new Set(options.map((option) => option.text.trim().toLowerCase()));
+    return (
+        normalized.has(TRUE_LABEL.toLowerCase()) &&
+        normalized.has(FALSE_LABEL.toLowerCase())
+    );
+}
+
+/**
+ * Resolve a variante visual de uma alternativa de forma compartilhada entre jogador e projeção:
+ * - Em Verdadeiro ou Falso, segue exclusivamente o significado ("Verdadeiro" -> true, "Falso" -> false),
+ *   independente da posição no array.
+ * - Em múltipla escolha convencional, preserva a paleta por índice (0..3).
+ */
+export function getQuestionOptionTone(
+    questionType: QuestionType | undefined,
+    optionText: string,
+    index: number,
+    allOptions?: readonly { text: string }[],
+): QuestionOptionTone {
+    const isTrueFalse =
+        questionType === 'TRUE_FALSE' ||
+        (questionType === undefined && isTrueFalseOptionSet(allOptions));
+
+    if (isTrueFalse) {
+        const normalized = optionText.trim().toLowerCase();
+        if (normalized === TRUE_LABEL.toLowerCase()) {
+            return 'true';
+        }
+        if (normalized === FALSE_LABEL.toLowerCase()) {
+            return 'false';
+        }
+    }
+
+    return String(index % 4) as '0' | '1' | '2' | '3';
+}
+
 /** Gera ids locais enquanto não há backend (randomUUID quando disponível). */
 export function createId(): string {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
