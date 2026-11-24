@@ -32,7 +32,10 @@ vi.mock("../../src/database/prisma.js", () => ({
     prisma: prismaMock,
 }));
 
-import { RoundAnswerRepository } from "../../src/round-answers/round-answer.repository.js";
+import {
+    calculateRoundAnswerPoints,
+    RoundAnswerRepository,
+} from "../../src/round-answers/round-answer.repository.js";
 
 describe("RoundAnswerRepository", () => {
     let repository: RoundAnswerRepository;
@@ -99,7 +102,7 @@ describe("RoundAnswerRepository", () => {
             optionId: "option-correct",
             isCorrect: true,
             answeredAt: new Date("2026-11-18T12:00:15.000Z"),
-            points: 125,
+            points: 150,
         };
         transactionClient.roundAnswer.create.mockResolvedValue(createdAnswer);
 
@@ -116,16 +119,124 @@ describe("RoundAnswerRepository", () => {
                 optionId: "option-correct",
                 isCorrect: true,
                 answeredAt: new Date("2026-11-18T12:00:15.000Z"),
-                points: 125,
+                points: 150,
             },
         });
         expect(transactionClient.gamePlayer.update).toHaveBeenCalledWith({
             where: { id: "gp-1" },
             data: {
-                score: { increment: 125 },
+                score: { increment: 150 },
             },
         });
         expect(result).toEqual({ success: true, answer: createdAnswer });
+    });
+
+    it("deve conceder até 200 pontos em acerto imediato e ~100 pontos perto do fim em rodada de 30s", async () => {
+        transactionClient.round.findUnique.mockResolvedValue(roundFixture);
+        transactionClient.gamePlayer.findUnique.mockResolvedValue({
+            gameId: roundFixture.gameId,
+            status: "ACTIVE",
+        });
+        transactionClient.roundAnswer.findUnique.mockResolvedValue(null);
+
+        // Acerto imediato (t = 0s, 30s restantes): 100 base + 100 bônus = 200 pontos
+        vi.setSystemTime(new Date("2026-11-18T12:00:00.000Z"));
+        transactionClient.roundAnswer.create.mockResolvedValueOnce({
+            id: "ans-immediate",
+            points: 200,
+        });
+
+        await repository.submitAnswer(
+            roundFixture.id,
+            "gp-1",
+            "option-correct",
+        );
+        expect(transactionClient.roundAnswer.create).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ points: 200 }),
+            }),
+        );
+        expect(transactionClient.gamePlayer.update).toHaveBeenLastCalledWith({
+            where: { id: "gp-1" },
+            data: { score: { increment: 200 } },
+        });
+
+        // Acerto perto do fim (t = 29,9s, 100ms restantes): ~100 pontos
+        vi.setSystemTime(new Date("2026-11-18T12:00:29.900Z"));
+        transactionClient.roundAnswer.create.mockResolvedValueOnce({
+            id: "ans-late",
+            points: 100,
+        });
+
+        await repository.submitAnswer(
+            roundFixture.id,
+            "gp-2",
+            "option-correct",
+        );
+        expect(transactionClient.roundAnswer.create).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ points: 100 }),
+            }),
+        );
+        expect(transactionClient.gamePlayer.update).toHaveBeenLastCalledWith({
+            where: { id: "gp-2" },
+            data: { score: { increment: 100 } },
+        });
+    });
+
+    it("calculateRoundAnswerPoints segue exatamente 100 base + até 100 de velocidade, 0 normal e -30 hardcore", () => {
+        const openedAt = new Date("2026-11-18T12:00:00.000Z");
+        const expiresAt = new Date("2026-11-18T12:00:30.000Z");
+
+        expect(
+            calculateRoundAnswerPoints({
+                isCorrect: true,
+                gameMode: "CLASSIC",
+                openedAt,
+                expiresAt,
+                answeredAt: openedAt,
+            }),
+        ).toBe(200);
+
+        expect(
+            calculateRoundAnswerPoints({
+                isCorrect: true,
+                gameMode: "HARDCORE",
+                openedAt,
+                expiresAt,
+                answeredAt: new Date("2026-11-18T12:00:15.000Z"),
+            }),
+        ).toBe(150);
+
+        expect(
+            calculateRoundAnswerPoints({
+                isCorrect: true,
+                gameMode: "CLASSIC",
+                openedAt,
+                expiresAt,
+                answeredAt: new Date("2026-11-18T12:00:29.950Z"),
+            }),
+        ).toBe(100);
+
+        expect(
+            calculateRoundAnswerPoints({
+                isCorrect: false,
+                gameMode: "CLASSIC",
+                openedAt,
+                expiresAt,
+                answeredAt: openedAt,
+            }),
+        ).toBe(0);
+
+        expect(
+            calculateRoundAnswerPoints({
+                isCorrect: false,
+                gameMode: "HARDCORE",
+                openedAt,
+                expiresAt,
+                answeredAt: openedAt,
+            }),
+        ).toBe(-30);
     });
 
     it("deve registrar resposta incorreta no modo CLASSIC sem pontuação e descontar 30 no HARDCORE", async () => {

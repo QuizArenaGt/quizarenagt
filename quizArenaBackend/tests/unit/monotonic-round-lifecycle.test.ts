@@ -189,7 +189,7 @@ describe("Ciclo de vida monotônico da rodada e abandono após alteração de Da
         // Aos 15s monotônicos, ainda não expirou
         expect(await worker.runCycle()).toBe(0);
 
-        // Resposta dentro do prazo (aos 15s) deve ser aceita com 100 + round(50 * 0.5) = 125 pontos
+        // Resposta dentro do prazo (aos 15s) deve ser aceita com 100 + round(100 * 0.5) = 150 pontos
         txMock.round.findUnique.mockImplementation(async () => ({
             ...persistedRound!,
             game: {
@@ -235,7 +235,7 @@ describe("Ciclo de vida monotônico da rodada e abandono após alteração de Da
         );
         expect(validAnswer.success).toBe(true);
         if (validAnswer.success) {
-            expect(validAnswer.answer.points).toBe(125);
+            expect(validAnswer.answer.points).toBe(150);
             expect(validAnswer.answer.answeredAt.getTime()).toBe(baseDbMs + 15_000);
         }
 

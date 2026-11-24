@@ -1,10 +1,52 @@
 
-import type { RoundAnswer } from "@prisma/client";
+import type { GameMode, RoundAnswer } from "@prisma/client";
 
 import { prisma } from "../database/prisma.js";
 import { isGamePlayerActive } from "../rooms/game-player-eligibility.js";
 import { getPlayerPresenceRegistry } from "../realtime/room-events.js";
 import { getServerNowDate } from "../realtime/server-clock.js";
+
+export const BASE_CORRECT_POINTS = 100;
+export const MAX_SPEED_BONUS_POINTS = 100;
+export const CLASSIC_WRONG_POINTS = 0;
+export const HARDCORE_WRONG_POINTS = -30;
+
+export interface CalculateRoundAnswerPointsParams {
+    isCorrect: boolean;
+    gameMode: GameMode;
+    openedAt: Date;
+    expiresAt: Date;
+    answeredAt: Date;
+}
+
+/**
+ * Calcula os pontos de uma resposta exclusivamente no servidor:
+ * acerto = 100 base + bônus proporcional ao tempo restante (até +100);
+ * erro = 0 no modo CLASSIC e -30 no modo HARDCORE, sem limite inferior no placar.
+ */
+export function calculateRoundAnswerPoints({
+    isCorrect,
+    gameMode,
+    openedAt,
+    expiresAt,
+    answeredAt,
+}: CalculateRoundAnswerPointsParams): number {
+    if (!isCorrect) {
+        return gameMode === "HARDCORE"
+            ? HARDCORE_WRONG_POINTS
+            : CLASSIC_WRONG_POINTS;
+    }
+
+    const totalTimeMs = Math.max(1, expiresAt.getTime() - openedAt.getTime());
+    const remainingTimeMs = Math.max(
+        0,
+        expiresAt.getTime() - answeredAt.getTime(),
+    );
+    const speedRatio = Math.min(1, Math.max(0, remainingTimeMs / totalTimeMs));
+    const speedBonus = Math.round(MAX_SPEED_BONUS_POINTS * speedRatio);
+
+    return BASE_CORRECT_POINTS + speedBonus;
+}
 
 export type SubmitRoundAnswerResult =
     | {
@@ -164,24 +206,13 @@ export class RoundAnswerRepository {
                 };
             }
 
-            const totalTimeMs = Math.max(
-                1,
-                expiresAt.getTime() - round.openedAt.getTime(),
-            );
-            const remainingTimeMs = Math.max(
-                0,
-                expiresAt.getTime() - answeredAt.getTime(),
-            );
-
-            const speedBonus = Math.round(
-                50 * (remainingTimeMs / totalTimeMs),
-            );
-
-            const points = option.isCorrect
-                ? 100 + speedBonus
-                : round.game.gameMode === "HARDCORE"
-                    ? -30
-                    : 0;
+            const points = calculateRoundAnswerPoints({
+                isCorrect: option.isCorrect,
+                gameMode: round.game.gameMode,
+                openedAt: round.openedAt,
+                expiresAt,
+                answeredAt,
+            });
 
             const answer = await tx.roundAnswer.create({
                 data: {
