@@ -103,4 +103,24 @@ describe('Perguntas da Sala (Question Management UX)', () => {
 
         assert.match(importCss, /\.import-modal__actions\s*\{[\s\S]*position:\s*sticky;\s*\r?\n\s*bottom:\s*0;/);
     });
+
+    it('UI diferencia Tema (geral da sala) de Categoria (específica da pergunta) sem alterar modelos', () => {
+        const modalSource = readFrontFile('src/views/Dashboard/QuestionFormModal/QuestionFormModal.tsx');
+        const listSource = readFrontFile('src/features/Dashboard/components/RoomQuestionsList.tsx');
+        const workspaceSource = readFrontFile('src/features/Dashboard/components/RoomWorkspaceShell.tsx');
+        const settingsSource = readFrontFile('src/features/Dashboard/components/RoomSettingsSection.tsx');
+        const dashboardSource = readFrontFile('src/features/Dashboard/components/DashboardForm.tsx');
+
+        // Pergunta usa o rótulo "Categoria" preservando propriedade/id do campo
+        assert.match(modalSource, /htmlFor="question-theme"[\s\S]*Categoria/);
+        assert.doesNotMatch(modalSource, /htmlFor="question-theme"[\s\S]*>\s*Tema\b/);
+        assert.match(modalSource, /draft\.theme/);
+        assert.match(listSource, /Pesquisar por enunciado, categoria ou alternativa/);
+        assert.match(listSource, /Categoria:\s*\{question\.theme\}/);
+
+        // Sala mantém o rótulo "Tema"
+        assert.match(workspaceSource, />Tema:<\/span>/);
+        assert.match(settingsSource, /<dt>Tema<\/dt>/);
+        assert.match(dashboardSource, /htmlFor="room-theme">Tema<\/label>/);
+    });
 });

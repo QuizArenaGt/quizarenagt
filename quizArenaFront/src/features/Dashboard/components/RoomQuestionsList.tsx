@@ -5,6 +5,7 @@ import EmptyState from '../../../components/ui/EmptyState/EmptyState';
 import Icon from '../../../components/ui/Icon/Icon';
 import {
     CHOICE_LETTERS,
+    DEFAULT_THEME,
     QUESTION_TYPE_LABEL,
     filterQuestions,
     type Question,
@@ -52,8 +53,8 @@ export default function RoomQuestionsList({
                     <input
                         type="search"
                         className="rooms-search-input question-bank__search-input"
-                        aria-label="Pesquisar pergunta por enunciado ou alternativa"
-                        placeholder="Pesquisar por enunciado ou alternativa…"
+                        aria-label="Pesquisar pergunta por enunciado, categoria ou alternativa"
+                        placeholder="Pesquisar por enunciado, categoria ou alternativa…"
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                     />
@@ -114,6 +115,11 @@ export default function RoomQuestionsList({
                                     <Badge variant={question.type === 'TRUE_FALSE' ? 'info' : 'primary'}>
                                         {QUESTION_TYPE_LABEL[question.type]}
                                     </Badge>
+                                    {question.theme.trim().length > 0 && question.theme !== DEFAULT_THEME && (
+                                        <Badge variant="neutral">
+                                            Categoria: {question.theme}
+                                        </Badge>
+                                    )}
                                     {question.type === 'MULTIPLE_CHOICE' && (
                                         <span className="question-item__meta-text">
                                             {question.options.length} alternativas

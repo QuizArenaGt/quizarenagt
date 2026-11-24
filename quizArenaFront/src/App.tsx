@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
     BrowserRouter,
@@ -11,6 +11,7 @@ import {
 
 import HomeView from "./views/Home/HomeView";
 import PlayView from "./views/Play/PlayView";
+import ProjectionView from "./views/Projection/ProjectionView";
 import LoginForm from "./features/auth/components/LoginForm/LoginForm";
 import RegisterForm from "./features/auth/components/RegisterForm/RegisterForm";
 import DashboardForm from "./features/Dashboard/components/DashboardForm";
@@ -25,7 +26,11 @@ interface AuthenticatedUser {
     role: "USER" | "ADMIN" | "HOST";
 }
 
-function ProtectedRoute() {
+interface ProtectedRouteProps {
+    render?: (authenticatedUserId: string | null) => ReactNode;
+}
+
+function ProtectedRoute({ render }: ProtectedRouteProps = {}) {
     const [status, setStatus] = useState<
         "checking" | "authenticated" | "unauthorized" | "error"
     >("checking");
@@ -94,6 +99,10 @@ function ProtectedRoute() {
         );
     }
 
+    if (render) {
+        return <>{render(authenticatedUserId)}</>;
+    }
+
     return (
         <DashboardForm
             key={authenticatedUserId ?? "session"}
@@ -118,6 +127,11 @@ function AppRoutes() {
             <Route
                 path="/dashboard"
                 element={<ProtectedRoute />}
+            />
+
+            <Route
+                path="/projetar/:code"
+                element={<ProtectedRoute render={() => <ProjectionView />} />}
             />
 
             <Route

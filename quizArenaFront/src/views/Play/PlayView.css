@@ -887,24 +887,41 @@
   transform: translateY(2px);
 }
 
+.play-option--true.play-option--unselected,
+.play-option--false.play-option--unselected {
+  opacity: 0.56;
+  filter: saturate(0.84);
+}
+
 /* Cores da paleta QuizArena com contraste AA */
 .play-option--0 {
-  background: var(--color-primary);
-  color: var(--color-white);
+  background: var(--color-coral);
+  color: var(--color-text);
 }
 
 .play-option--1 {
-  background: var(--color-surface);
+  background: var(--color-pink);
   color: var(--color-text);
 }
 
 .play-option--2 {
-  background: var(--color-accent);
+  background: var(--color-mint);
   color: var(--color-text);
 }
 
 .play-option--3 {
   background: var(--color-highlight);
+  color: var(--color-text);
+}
+
+/* Cores semânticas exclusivas de Verdadeiro ou Falso */
+.play-option--true {
+  background: var(--color-option-true);
+  color: var(--color-text);
+}
+
+.play-option--false {
+  background: var(--color-option-false);
   color: var(--color-text);
 }
 
@@ -919,13 +936,12 @@
   font-weight: var(--weight-black);
 }
 
-.play-option--1 .play-option__letter {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-
+.play-option--0 .play-option__letter,
+.play-option--1 .play-option__letter,
 .play-option--2 .play-option__letter,
-.play-option--3 .play-option__letter {
+.play-option--3 .play-option__letter,
+.play-option--true .play-option__letter,
+.play-option--false .play-option__letter {
   background: rgba(255, 255, 255, 0.55);
 }
 

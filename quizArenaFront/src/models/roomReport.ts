@@ -117,7 +117,7 @@ function simulatedToResult(player: OpponentPlayer, questionIds: string[]): Playe
         isSimulated: true,
         answers: questionIds.map((questionId, index) => {
             const points = player.pointsPerQuestion[index] ?? 0;
-            // Pela regra de pontuação, só acertos pontuam (mínimo de 500).
+            // Pela regra de pontuação do servidor, só acertos pontuam positivamente (mínimo de 100).
             return { questionId, isCorrect: points > 0, points };
         }),
     };

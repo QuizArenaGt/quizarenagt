@@ -2,7 +2,12 @@ import Alert from '../../../components/ui/Alert/Alert';
 import Badge from '../../../components/ui/Badge/Badge';
 import Icon from '../../../components/ui/Icon/Icon';
 import { useFocusOnMount } from '../../../hooks/useFocusOnMount';
-import { CHOICE_LETTERS, QUESTION_TYPE_LABEL, type Question } from '../../../models/question';
+import {
+    CHOICE_LETTERS,
+    QUESTION_TYPE_LABEL,
+    getQuestionOptionTone,
+    type Question,
+} from '../../../models/question';
 
 interface QuestionStepProps {
     question: Question;
@@ -116,9 +121,15 @@ export default function QuestionStep({
             >
                 {question.options.map((option, index) => {
                     const isSelected = selectedOptionId === option.id;
+                    const optionTone = getQuestionOptionTone(
+                        question.type,
+                        option.text,
+                        index,
+                        question.options,
+                    );
                     const optionClasses = [
                         'play-option',
-                        `play-option--${index % 4}`,
+                        `play-option--${optionTone}`,
                         isSelected ? 'play-option--selected' : '',
                         isLocked && !isSelected ? 'play-option--unselected' : '',
                     ]

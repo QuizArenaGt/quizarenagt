@@ -168,17 +168,27 @@ export function getPlayExitState(
     };
 }
 
-const MIN_POINTS = 500;
-const SPEED_BONUS = 500;
+const BASE_POINTS = 100;
+const SPEED_BONUS = 100;
+const HARDCORE_WRONG_PENALTY = -30;
 
 /**
- * Regra de pontuação: acerto vale de 500 a 1000 pontos, conforme a
- * rapidez da resposta. Erro ou tempo esgotado vale 0.
+ * Referência local da regra oficial de pontuação (calculada exclusivamente pelo servidor):
+ * acerto vale 100 pontos-base + bônus proporcional ao tempo restante (até +100, máximo 200).
+ * Erro vale 0 no modo normal (CLASSIC) e -30 no modo HARDCORE, sem limite inferior.
  */
-export function calculatePoints(isCorrect: boolean, timeLeftMs: number, timeLimitMs: number): number {
-    if (!isCorrect || timeLimitMs <= 0) return 0;
+export function calculatePoints(
+    isCorrect: boolean,
+    timeLeftMs: number,
+    timeLimitMs: number,
+    gameMode: 'CLASSIC' | 'HARDCORE' = 'CLASSIC',
+): number {
+    if (!isCorrect) {
+        return gameMode === 'HARDCORE' ? HARDCORE_WRONG_PENALTY : 0;
+    }
+    if (timeLimitMs <= 0) return 0;
     const speedRatio = Math.min(Math.max(timeLeftMs / timeLimitMs, 0), 1);
-    return Math.round(MIN_POINTS + SPEED_BONUS * speedRatio);
+    return Math.round(BASE_POINTS + SPEED_BONUS * speedRatio);
 }
 
 export const ROOM_CODE_REGEX = /^[A-Z0-9]{6}$/;

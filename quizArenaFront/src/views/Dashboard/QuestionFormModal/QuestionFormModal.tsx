@@ -102,7 +102,7 @@ function QuestionForm({ initial, onSave, onCancel }: QuestionFormProps) {
 
                 <div className="question-form__field question-form__field--theme">
                     <label htmlFor="question-theme" className="question-form__label">
-                        Tema <span className="question-form__optional">(opcional)</span>
+                        Categoria <span className="question-form__optional">(opcional)</span>
                     </label>
                     <input
                         id="question-theme"
