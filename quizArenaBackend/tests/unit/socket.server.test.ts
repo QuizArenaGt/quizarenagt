@@ -54,7 +54,7 @@ vi.mock("../../src/database/prisma.js", () => ({
     prisma: prismaMock,
 }));
 
-import { createSocketServer } from "../../src/realtime/socket.server.js";
+import { createSocketServer, parseAllowedOrigins } from "../../src/realtime/socket.server.js";
 
 describe("createSocketServer - elegibilidade do GamePlayer no handshake", () => {
     beforeEach(() => {
@@ -295,5 +295,36 @@ describe("createSocketServer - configuração de CORS", () => {
         expect(() => createSocketServer({} as HttpServer)).toThrow(
             /wildcard|FRONTEND_URL/i,
         );
+    });
+});
+
+describe("parseAllowedOrigins (reexportado por socket.server)", () => {
+    it("permite localhost em desenvolvimento quando FRONTEND_URL está ausente ou vazia e falha em produção", () => {
+        for (const raw of [undefined, "", "   "]) {
+            const devOrigins = parseAllowedOrigins(raw, "development");
+            expect(devOrigins).not.toBe("*");
+            expect(Array.isArray(devOrigins)).toBe(true);
+            expect(
+                (devOrigins as RegExp[]).some((pattern) =>
+                    pattern.test("http://localhost:5173"),
+                ),
+            ).toBe(true);
+
+            expect(() => parseAllowedOrigins(raw, "production")).toThrow(
+                /FRONTEND_URL/i,
+            );
+        }
+    });
+
+    it("remove espaços e barras finais das origens informadas", () => {
+        expect(
+            parseAllowedOrigins(
+                " https://quizarenagt.vercel.app/ , https://preview.vercel.app/// ",
+                "production",
+            ),
+        ).toEqual([
+            "https://quizarenagt.vercel.app",
+            "https://preview.vercel.app",
+        ]);
     });
 });
