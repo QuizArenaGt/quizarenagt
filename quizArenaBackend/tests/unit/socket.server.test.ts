@@ -1,40 +1,49 @@
 import type { Server as HttpServer } from "node:http";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { prismaMock, middlewareRef, closeMock, ioInstanceMock } = vi.hoisted(
-    () => {
-        const middlewareRef: {
-            fn:
-                | ((
-                      socket: Record<string, unknown>,
-                      next: (err?: Error) => void,
-                  ) => Promise<void> | void)
-                | null;
-        } = { fn: null };
-        const closeMock = vi.fn();
-        const ioInstanceMock = {
-            use: vi.fn((fn) => {
-                middlewareRef.fn = fn;
-            }),
-            on: vi.fn(),
-            close: closeMock,
-        };
+const {
+    prismaMock,
+    middlewareRef,
+    closeMock,
+    ioInstanceMock,
+    serverOptionsSpy,
+} = vi.hoisted(() => {
+    const middlewareRef: {
+        fn:
+            | ((
+                  socket: Record<string, unknown>,
+                  next: (err?: Error) => void,
+              ) => Promise<void> | void)
+            | null;
+    } = { fn: null };
+    const closeMock = vi.fn();
+    const serverOptionsSpy = vi.fn();
+    const ioInstanceMock = {
+        use: vi.fn((fn) => {
+            middlewareRef.fn = fn;
+        }),
+        on: vi.fn(),
+        close: closeMock,
+    };
 
-        return {
-            middlewareRef,
-            closeMock,
-            ioInstanceMock,
-            prismaMock: {
-                user: { findUnique: vi.fn() },
-                room: { findUnique: vi.fn() },
-                gamePlayer: { findUnique: vi.fn() },
-            },
-        };
-    },
-);
+    return {
+        middlewareRef,
+        closeMock,
+        ioInstanceMock,
+        serverOptionsSpy,
+        prismaMock: {
+            user: { findUnique: vi.fn() },
+            room: { findUnique: vi.fn() },
+            gamePlayer: { findUnique: vi.fn() },
+        },
+    };
+});
 
 vi.mock("socket.io", () => ({
     Server: class {
+        constructor(_httpServer: unknown, options?: unknown) {
+            serverOptionsSpy(options);
+        }
         use = ioInstanceMock.use;
         on = ioInstanceMock.on;
         close = ioInstanceMock.close;
@@ -239,5 +248,52 @@ describe("createSocketServer - elegibilidade do GamePlayer no handshake", () => 
         expect(prismaMock.room.findUnique).not.toHaveBeenCalled();
         expect(next).toHaveBeenCalledTimes(1);
         expect(next.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    });
+});
+
+describe("createSocketServer - configuração de CORS", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalFrontendUrl = process.env.FRONTEND_URL;
+
+    afterEach(() => {
+        process.env.NODE_ENV = originalNodeEnv;
+        if (originalFrontendUrl === undefined) {
+            delete process.env.FRONTEND_URL;
+        } else {
+            process.env.FRONTEND_URL = originalFrontendUrl;
+        }
+    });
+
+    it("usa as mesmas origens normalizadas da configuração HTTP sem wildcard em produção", () => {
+        process.env.NODE_ENV = "production";
+        process.env.FRONTEND_URL =
+            " https://quizarena.vercel.app/ , https://staging.quizarena.vercel.app/// ";
+
+        createSocketServer({} as HttpServer);
+
+        const lastCall = serverOptionsSpy.mock.calls.at(-1)?.[0] as {
+            cors: { origin: unknown; methods: string[] };
+        };
+        expect(lastCall.cors).toEqual({
+            origin: [
+                "https://quizarena.vercel.app",
+                "https://staging.quizarena.vercel.app",
+            ],
+            methods: ["GET", "POST"],
+        });
+    });
+
+    it("falha explicitamente ao iniciar Socket.IO em produção sem FRONTEND_URL válida", () => {
+        process.env.NODE_ENV = "production";
+        delete process.env.FRONTEND_URL;
+
+        expect(() => createSocketServer({} as HttpServer)).toThrow(
+            /FRONTEND_URL/i,
+        );
+
+        process.env.FRONTEND_URL = "*";
+        expect(() => createSocketServer({} as HttpServer)).toThrow(
+            /wildcard|FRONTEND_URL/i,
+        );
     });
 });
