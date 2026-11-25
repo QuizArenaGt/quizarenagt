@@ -9,31 +9,45 @@ dotenv.config({ path: rootEnvPath });
 dotenv.config();
 
 async function start(): Promise<void> {
-    const [
-        { app },
-        { prisma },
-        { createSocketServer },
-        { RoundExpirationWorker },
-        { calibrateDbClockOffset, isServerClockCalibrated },
-    ] = await Promise.all([
-        import("./app.js"),
-        import("./database/prisma.js"),
-        import("./realtime/socket.server.js"),
-        import("./rounds/round-expiration.worker.js"),
-        import("./realtime/server-clock.js"),
-    ]);
-
-    const port = Number(process.env.PORT ?? 3000);
+    let prismaClient: { $disconnect: () => Promise<void> } | undefined;
 
     try {
-        await prisma.$connect();
-        await prisma.$queryRaw`SELECT 1`;
-        await calibrateDbClockOffset();
-        if (!isServerClockCalibrated()) {
-            throw new Error(
-                "Falha ao calibrar o relógio monotônico do servidor com o PostgreSQL.",
-            );
-        }
+        const [
+            { app },
+            { prisma },
+            { connectDatabaseWithRetry },
+            { createSocketServer },
+            { RoundExpirationWorker },
+            { calibrateDbClockOffset, isServerClockCalibrated },
+        ] = await Promise.all([
+            import("./app.js"),
+            import("./database/prisma.js"),
+            import("./database/connect-with-retry.js"),
+            import("./realtime/socket.server.js"),
+            import("./rounds/round-expiration.worker.js"),
+            import("./realtime/server-clock.js"),
+        ]);
+        prismaClient = prisma;
+
+        const port = Number(process.env.PORT ?? 3000);
+
+        await connectDatabaseWithRetry({
+            connect: () => prisma.$connect(),
+            ping: async () => {
+                await prisma.$queryRaw`SELECT 1`;
+            },
+            calibrateClock: () => calibrateDbClockOffset(),
+            isClockCalibrated: () => isServerClockCalibrated(),
+            onRetry: (attempt, maxAttempts, delayMs, error) => {
+                const reason =
+                    error instanceof Error
+                        ? error.message.split("\n")[0]
+                        : String(error);
+                console.warn(
+                    `Banco indisponível na inicialização (tentativa ${attempt}/${maxAttempts}). Nova tentativa em ${delayMs}ms... Motivo: ${reason}`,
+                );
+            },
+        });
 
         console.log("Conexão com o PostgreSQL estabelecida com sucesso!");
 
@@ -60,7 +74,9 @@ async function start(): Promise<void> {
         process.on("SIGTERM", shutdown);
     } catch (error: unknown) {
         console.error("Falha ao iniciar o servidor:", error);
-        await prisma.$disconnect();
+        if (prismaClient) {
+            await prismaClient.$disconnect();
+        }
         process.exit(1);
     }
 }

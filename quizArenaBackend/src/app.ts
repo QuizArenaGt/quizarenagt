@@ -7,23 +7,20 @@ import { questionRoutes } from "./questions/question.routes.js";
 import { roomRoutes } from "./rooms/room.routes.js";
 import { roundRoutes } from "./rounds/round.routes.js";
 import { roundAnswerRoutes } from "./round-answers/round-answer.routes.js";
-import { getServerNowMs } from "./realtime/server-clock.js";
+import { createHttpCorsOptions } from "./config/cors.js";
+import { prisma } from "./database/prisma.js";
+import {
+    getServerNowMs,
+    isServerClockCalibrated,
+} from "./realtime/server-clock.js";
 
 const app = express();
+app.set("trust proxy", 1);
 const defaultJsonParser = express.json();
 const IMPORT_QUESTIONS_ROUTE_PATTERN =
     /^\/rooms\/[^/]+\/questions\/import\/?$/;
 
-const allowedOrigins = process.env.FRONTEND_URL?.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-app.use(
-    cors({
-        origin: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : "*",
-        exposedHeaders: ["X-Server-Time"],
-    }),
-);
+app.use(cors(createHttpCorsOptions()));
 app.use((_req, res, next) => {
     res.setHeader("X-Server-Time", String(getServerNowMs()));
     next();
@@ -46,6 +43,38 @@ app.get("/", (_req, res) => {
         status: "ok",
         message: "Backend rodando com sucesso!",
     });
+});
+
+app.get("/health", async (req, res) => {
+    const checkDatabase = req.query.check === "db";
+    const basePayload = {
+        service: "quizarena-backend",
+        clockCalibrated: isServerClockCalibrated(),
+        uptimeSeconds: Math.floor(process.uptime()),
+    };
+
+    if (!checkDatabase) {
+        res.status(200).json({
+            status: "ok",
+            ...basePayload,
+        });
+        return;
+    }
+
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        res.status(200).json({
+            status: "ok",
+            database: "up",
+            ...basePayload,
+        });
+    } catch {
+        res.status(503).json({
+            status: "degraded",
+            database: "down",
+            ...basePayload,
+        });
+    }
 });
 
 app.use("/auth", authRoutes);
