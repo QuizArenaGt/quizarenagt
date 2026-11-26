@@ -26,6 +26,7 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+      DIRECT_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
     command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
     depends_on:
       postgres:
