@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
-import { GameStatus, QuestionType, Role, RoomStatus } from "@prisma/client";
+import { GameStatus, QuestionType, Role, RoomStatus, type Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import { app } from "../../src/app.js";
@@ -638,6 +638,235 @@ describe("POST /rooms/:id/questions/import - Integração", () => {
                     liveQuestions.some((q) => q.id === secondQuestionId),
                 ).toBe(true);
             }
+        }
+    });
+
+    it("deve importar uma única questão preservando tipo, alternativas e posições", async () => {
+        const singleBatch = {
+            questions: [
+                {
+                    statement: "Questão única importada",
+                    type: QuestionType.TRUE_FALSE,
+                    options: [
+                        { text: "Verdadeiro", isCorrect: false },
+                        { text: "Falso", isCorrect: true },
+                    ],
+                },
+            ],
+        };
+
+        const res = await request(app)
+            .post(`/rooms/${roomId}/questions/import`)
+            .set("Authorization", `Bearer ${hostToken}`)
+            .send(singleBatch);
+
+        expect(res.status).toBe(201);
+        expect(res.body.importedCount).toBe(1);
+        expect(res.body.questions).toHaveLength(1);
+        expect(res.body.questions[0].statement).toBe("Questão única importada");
+        expect(res.body.questions[0].type).toBe(QuestionType.TRUE_FALSE);
+        expect(
+            (
+                res.body.questions[0].options as {
+                    position: number;
+                    text: string;
+                    isCorrect: boolean;
+                }[]
+            ).map((o) => [o.position, o.text, o.isCorrect]),
+        ).toEqual([
+            [0, "Verdadeiro", false],
+            [1, "Falso", true],
+        ]);
+    });
+
+    it("deve importar o lote máximo de 100 questões com diferentes quantidades de alternativas e tipos preservando ordem e posições", async () => {
+        const maxBatch = {
+            questions: Array.from(
+                { length: MAX_QUESTIONS_PER_IMPORT },
+                (_, idx) => {
+                    if (idx % 3 === 0) {
+                        return {
+                            statement: `Max-VF-${String(idx + 1).padStart(3, "0")}`,
+                            type: QuestionType.TRUE_FALSE,
+                            options: [
+                                { text: "Verdadeiro", isCorrect: true },
+                                { text: "Falso", isCorrect: false },
+                            ],
+                        };
+                    }
+
+                    if (idx % 3 === 1) {
+                        return {
+                            statement: `Max-3Opt-${String(idx + 1).padStart(3, "0")}`,
+                            type: QuestionType.MULTIPLE_CHOICE,
+                            options: [
+                                { text: "Opt A", isCorrect: false },
+                                { text: "Opt B", isCorrect: true },
+                                { text: "Opt C", isCorrect: false },
+                            ],
+                        };
+                    }
+
+                    return {
+                        statement: `Max-4Opt-${String(idx + 1).padStart(3, "0")}`,
+                        type: QuestionType.MULTIPLE_CHOICE,
+                        options: [
+                            { text: "Opt 1", isCorrect: false },
+                            { text: "Opt 2", isCorrect: false },
+                            { text: "Opt 3", isCorrect: false },
+                            { text: "Opt 4", isCorrect: true },
+                        ],
+                    };
+                },
+            ),
+        };
+
+        const res = await request(app)
+            .post(`/rooms/${roomId}/questions/import`)
+            .set("Authorization", `Bearer ${hostToken}`)
+            .send(maxBatch);
+
+        expect(res.status).toBe(201);
+        expect(res.body.importedCount).toBe(MAX_QUESTIONS_PER_IMPORT);
+        expect(res.body.questions).toHaveLength(MAX_QUESTIONS_PER_IMPORT);
+
+        const stored = await prisma.question.findMany({
+            where: { roomId },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            include: {
+                options: { orderBy: { position: "asc" } },
+            },
+        });
+
+        expect(stored).toHaveLength(MAX_QUESTIONS_PER_IMPORT);
+        expect(stored.map((q) => q.statement)).toEqual(
+            maxBatch.questions.map((q) => q.statement),
+        );
+        expect(stored.map((q) => q.type)).toEqual(
+            maxBatch.questions.map((q) => q.type),
+        );
+        stored.forEach((question, index) => {
+            expect(question.options.map((o) => o.position)).toEqual(
+                maxBatch.questions[index]!.options.map((_, pos) => pos),
+            );
+            expect(question.options.map((o) => o.text)).toEqual(
+                maxBatch.questions[index]!.options.map((o) => o.text),
+            );
+        });
+    });
+
+    it("deve executar rollback completo no PostgreSQL quando ocorrer falha na inserção das alternativas após inserir as questões", async () => {
+        const consoleSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => {});
+        const originalTransaction = prisma.$transaction.bind(prisma);
+        let insertedQuestionsInsideTx = 0;
+
+        const txSpy = vi.spyOn(prisma, "$transaction").mockImplementation(((
+            fn: (tx: Prisma.TransactionClient) => Promise<unknown>,
+            options?: unknown,
+        ) => {
+            return originalTransaction(async (tx) => {
+                vi.spyOn(
+                    tx.questionOption,
+                    "createManyAndReturn",
+                ).mockImplementationOnce(async () => {
+                    insertedQuestionsInsideTx = await tx.question.count({
+                        where: { roomId },
+                    });
+                    throw new Error(
+                        "Falha simulada após inserção das questões",
+                    );
+                });
+                return fn(tx);
+            }, options as never);
+        }) as never);
+
+        try {
+            const res = await request(app)
+                .post(`/rooms/${roomId}/questions/import`)
+                .set("Authorization", `Bearer ${hostToken}`)
+                .send(validMixedBatch);
+
+            expect(res.status).toBe(500);
+            expect(insertedQuestionsInsideTx).toBe(
+                validMixedBatch.questions.length,
+            );
+        } finally {
+            txSpy.mockRestore();
+            consoleSpy.mockRestore();
+        }
+
+        const remainingQuestions = await prisma.question.count({
+            where: { roomId },
+        });
+        const remainingOptions = await prisma.questionOption.count({
+            where: { question: { roomId } },
+        });
+
+        expect(remainingQuestions).toBe(0);
+        expect(remainingOptions).toBe(0);
+    });
+
+    it("deve serializar duas importações concorrentes na mesma sala preservando ordem, integridade e timestamps monotônicos", async () => {
+        const batchA = {
+            questions: Array.from({ length: 10 }, (_, idx) => ({
+                statement: `Concorrente-A-${idx + 1}`,
+                type: QuestionType.MULTIPLE_CHOICE,
+                options: [
+                    { text: "Correta", isCorrect: true },
+                    { text: "Errada", isCorrect: false },
+                ],
+            })),
+        };
+        const batchB = {
+            questions: Array.from({ length: 10 }, (_, idx) => ({
+                statement: `Concorrente-B-${idx + 1}`,
+                type: QuestionType.TRUE_FALSE,
+                options: [
+                    { text: "Verdadeiro", isCorrect: true },
+                    { text: "Falso", isCorrect: false },
+                ],
+            })),
+        };
+
+        const [resA, resB] = await Promise.all([
+            request(app)
+                .post(`/rooms/${roomId}/questions/import`)
+                .set("Authorization", `Bearer ${hostToken}`)
+                .send(batchA),
+            request(app)
+                .post(`/rooms/${roomId}/questions/import`)
+                .set("Authorization", `Bearer ${hostToken}`)
+                .send(batchB),
+        ]);
+
+        expect(resA.status).toBe(201);
+        expect(resB.status).toBe(201);
+
+        const stored = await prisma.question.findMany({
+            where: { roomId },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            include: { options: { orderBy: { position: "asc" } } },
+        });
+
+        expect(stored).toHaveLength(20);
+
+        const statementsA = batchA.questions.map((q) => q.statement);
+        const statementsB = batchB.questions.map((q) => q.statement);
+        const storedStatements = stored.map((q) => q.statement);
+
+        const isAFirst = storedStatements[0] === statementsA[0];
+        expect(storedStatements).toEqual(
+            isAFirst
+                ? [...statementsA, ...statementsB]
+                : [...statementsB, ...statementsA],
+        );
+
+        for (let i = 1; i < stored.length; i += 1) {
+            expect(stored[i]!.createdAt.getTime()).toBeGreaterThan(
+                stored[i - 1]!.createdAt.getTime(),
+            );
         }
     });
 });
