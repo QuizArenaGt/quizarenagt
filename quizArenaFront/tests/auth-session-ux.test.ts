@@ -17,6 +17,7 @@ describe('Auth & Session UX', () => {
         assert.match(source, /<Button[\s\S]*type="submit"[\s\S]*isLoading=\{isLoading\}/);
         assert.match(source, /<Link to="\/recover-password"/);
         assert.match(source, /<Link to="\/register"/);
+        assert.match(source, /normalizeEmail\(email\)/);
         assert.doesNotMatch(source, /<a href="\/recover-password"/);
         assert.doesNotMatch(source, /btn-submit/);
         assert.doesNotMatch(source, /login-error/);
@@ -34,6 +35,8 @@ describe('Auth & Session UX', () => {
         assert.match(source, /<Alert variant="error">\{error\}<\/Alert>/);
         assert.match(source, /<Alert variant="success">\{success\}<\/Alert>/);
         assert.match(source, /<Button[\s\S]*type="submit"[\s\S]*isLoading=\{isLoading\}/);
+        assert.match(source, /<PasswordRequirements password=\{password\}/);
+        assert.match(source, /normalizeEmail\(email\)/);
         assert.doesNotMatch(source, /btn-submit/);
         assert.doesNotMatch(source, /register-success/);
     });
@@ -94,6 +97,7 @@ describe('Auth & Session UX', () => {
         assert.match(resetSource, /id="newPassword"[\s\S]*autoComplete="new-password"/);
         assert.match(resetSource, /id="confirmPassword"[\s\S]*autoComplete="new-password"/);
         assert.match(resetSource, /<Link to="\/login"/);
+        assert.match(resetSource, /<PasswordRequirements password=\{newPassword\}/);
         assert.doesNotMatch(resetSource, /btn-submit/);
     });
 });

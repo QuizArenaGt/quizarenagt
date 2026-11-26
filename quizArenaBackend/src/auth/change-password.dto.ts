@@ -1,3 +1,9 @@
+import {
+    PASSWORD_MAX_BYTES,
+    PASSWORD_MIN_LENGTH,
+    validateNewPassword,
+} from "./auth-validation.js";
+
 export interface ChangePasswordDto {
     currentPassword: string;
     newPassword: string;
@@ -13,8 +19,8 @@ export type ChangePasswordValidation =
           errors: Record<string, string>;
       };
 
-export const CHANGE_PASSWORD_MIN_LENGTH = 8;
-export const CHANGE_PASSWORD_MAX_BYTES = 72;
+export const CHANGE_PASSWORD_MIN_LENGTH = PASSWORD_MIN_LENGTH;
+export const CHANGE_PASSWORD_MAX_BYTES = PASSWORD_MAX_BYTES;
 
 export function validateChangePassword(
     body: unknown,
@@ -36,14 +42,11 @@ export function validateChangePassword(
         errors.currentPassword = "A senha atual é obrigatória.";
     }
 
-    if (typeof newPassword !== "string" || !newPassword) {
-        errors.newPassword = "A nova senha é obrigatória.";
-    } else if (newPassword.length < CHANGE_PASSWORD_MIN_LENGTH) {
-        errors.newPassword = `A nova senha deve possuir pelo menos ${CHANGE_PASSWORD_MIN_LENGTH} caracteres.`;
-    } else if (
-        Buffer.byteLength(newPassword, "utf8") > CHANGE_PASSWORD_MAX_BYTES
-    ) {
-        errors.newPassword = `A nova senha deve possuir no máximo ${CHANGE_PASSWORD_MAX_BYTES} caracteres.`;
+    const newPasswordError = validateNewPassword(newPassword, {
+        subject: "A nova senha",
+    });
+    if (newPasswordError) {
+        errors.newPassword = newPasswordError;
     } else if (
         typeof currentPassword === "string" &&
         currentPassword.length > 0 &&

@@ -23,7 +23,7 @@ const userFixture = {
 const validData: RegisterUserDto = {
     name: "João Silva",
     email: "joao@email.com",
-    password: "12345678",
+    password: "Password1",
 };
 
 describe("UserService", () => {
@@ -62,6 +62,27 @@ describe("UserService", () => {
         expect(await compare(validData.password, persistedData.password)).toBe(true);
 
         expect(result.email).toBe(validData.email);
+    });
+
+    it("deve normalizar o e-mail no serviço antes de consultar duplicidade e persistir", async () => {
+        repository.findByEmail.mockResolvedValue(null);
+        repository.create.mockImplementation(async (data) => ({
+            ...userFixture,
+            ...data,
+        }));
+
+        await service.register({
+            name: "Gendesson",
+            email: "  Gendesson@gmail.com  ",
+            password: " senha 1 ",
+        });
+
+        expect(repository.findByEmail).toHaveBeenCalledWith(
+            "gendesson@gmail.com",
+        );
+        const persistedData = repository.create.mock.calls[0][0];
+        expect(persistedData.email).toBe("gendesson@gmail.com");
+        expect(await compare(" senha 1 ", persistedData.password)).toBe(true);
     });
 
     it("não deve cadastrar e-mail já existente", async () => {

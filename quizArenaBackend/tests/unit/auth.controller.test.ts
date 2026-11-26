@@ -31,7 +31,7 @@ describe("AuthController", () => {
             body: {
                 name: "João Silva",
                 email: "joao@email.com",
-                password: "12345678",
+                password: "Password1",
             },
         };
 
@@ -89,7 +89,7 @@ describe("AuthController", () => {
         expect(userService.register).toHaveBeenCalledWith({
             name: "João Silva",
             email: "joao@email.com",
-            password: "12345678",
+            password: "Password1",
         });
 
         expect(res.status).toHaveBeenCalledWith(201);

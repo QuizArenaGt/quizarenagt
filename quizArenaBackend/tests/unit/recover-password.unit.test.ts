@@ -35,13 +35,21 @@ describe("Recover & Reset Password DTOs", () => {
             success: false,
             errors: { email: "Informe um e-mail válido." },
         });
-        expect(validateRecoverPassword({ email: "  User@Example.COM " })).toEqual({
+        expect(
+            validateRecoverPassword({ email: "gen desson@gmail.com" }),
+        ).toEqual({
+            success: false,
+            errors: { email: "Informe um e-mail válido." },
+        });
+        expect(
+            validateRecoverPassword({ email: "  Gendesson@gmail.com  " }),
+        ).toEqual({
             success: true,
-            data: { email: "user@example.com" },
+            data: { email: "gendesson@gmail.com" },
         });
     });
 
-    it("validateResetPassword exige token, mínimo de 8 caracteres e máximo de 72 bytes UTF-8", () => {
+    it("validateResetPassword exige token, mínimo de 8 caracteres, letra, número e máximo de 72 bytes UTF-8", () => {
         expect(validateResetPassword(null)).toEqual({
             success: false,
             errors: { body: "O corpo da requisição deve ser um objeto." },
@@ -56,8 +64,36 @@ describe("Recover & Reset Password DTOs", () => {
             },
         });
 
+        expect(
+            validateResetPassword({ token: "tok-123", newPassword: "12345678" }),
+        ).toEqual({
+            success: false,
+            errors: {
+                newPassword: "A senha deve conter pelo menos uma letra.",
+            },
+        });
+
+        expect(
+            validateResetPassword({ token: "tok-123", newPassword: "abcdefgh" }),
+        ).toEqual({
+            success: false,
+            errors: {
+                newPassword: "A senha deve conter pelo menos um número.",
+            },
+        });
+
+        expect(
+            validateResetPassword({
+                token: "tok-123",
+                newPassword: " senha 1 ",
+            }),
+        ).toEqual({
+            success: true,
+            data: { token: "tok-123", newPassword: " senha 1 " },
+        });
+
         // 72 bytes exatos devem ser aceitos
-        const exact72 = "a".repeat(72);
+        const exact72 = `${"a".repeat(71)}1`;
         expect(
             validateResetPassword({ token: "tok-123", newPassword: exact72 }),
         ).toEqual({

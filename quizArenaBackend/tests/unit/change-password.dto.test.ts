@@ -53,6 +53,45 @@ describe("validateChangePassword", () => {
         });
     });
 
+    it("rejeita nova senha sem letras ou sem números e aceita senhas válidas com espaços preservados", () => {
+        expect(
+            validateChangePassword({
+                currentPassword: "SenhaAtual123",
+                newPassword: "12345678",
+            }),
+        ).toEqual({
+            success: false,
+            errors: {
+                newPassword: "A nova senha deve conter pelo menos uma letra.",
+            },
+        });
+
+        expect(
+            validateChangePassword({
+                currentPassword: "SenhaAtual123",
+                newPassword: "abcdefgh",
+            }),
+        ).toEqual({
+            success: false,
+            errors: {
+                newPassword: "A nova senha deve conter pelo menos um número.",
+            },
+        });
+
+        expect(
+            validateChangePassword({
+                currentPassword: "SenhaAtual123",
+                newPassword: "abc123!@",
+            }),
+        ).toEqual({
+            success: true,
+            data: {
+                currentPassword: "SenhaAtual123",
+                newPassword: "abc123!@",
+            },
+        });
+    });
+
     it("aceita payload válido sem alterar caracteres da senha", () => {
         expect(
             validateChangePassword({

@@ -42,6 +42,31 @@ describe("AuthService", () => {
         expect(findByEmail).toHaveBeenCalledWith("joao@email.com");
     });
 
+    it("deve normalizar o e-mail antes de buscar o usuário no authenticate", async () => {
+        const result = await authService.authenticate({
+            email: "  JOAO@EMAIL.COM ",
+            password: "Senha123",
+        });
+
+        expect(result).toEqual(user);
+        expect(findByEmail).toHaveBeenCalledWith("joao@email.com");
+    });
+
+    it("deve autenticar usuário legado cuja senha não atende às novas regras de força", async () => {
+        const legacyUser = {
+            ...user,
+            password: await hash("123", 4),
+        } as User;
+        findByEmail.mockResolvedValueOnce(legacyUser);
+
+        const result = await authService.authenticate({
+            email: "joao@email.com",
+            password: "123",
+        });
+
+        expect(result).toEqual(legacyUser);
+    });
+
     it("deve rejeitar autenticação quando o usuário não existe", async () => {
         findByEmail.mockResolvedValue(null);
 

@@ -6,6 +6,7 @@ import { login } from '../../services/authService';
 import type { LoginRequest } from '../../types/auth';
 import {
     formatAuthApiError,
+    normalizeEmail,
     validateLoginFields,
     type AuthFieldErrors,
     type LoginField,
@@ -63,7 +64,7 @@ export default function LoginForm({ onSuccess, embedded = false }: LoginFormProp
 
         try {
             const request: LoginRequest = {
-                email: email.trim(),
+                email: normalizeEmail(email),
                 password,
             };
 

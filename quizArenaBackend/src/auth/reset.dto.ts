@@ -1,3 +1,9 @@
+import {
+    PASSWORD_MAX_BYTES,
+    PASSWORD_MIN_LENGTH,
+    validateNewPassword,
+} from "./auth-validation.js";
+
 export interface ResetPasswordDTO {
     token: string;
     newPassword: string;
@@ -13,8 +19,8 @@ export type ResetPasswordValidation =
           errors: Record<string, string>;
       };
 
-export const RESET_PASSWORD_MIN_LENGTH = 8;
-export const RESET_PASSWORD_MAX_BYTES = 72;
+export const RESET_PASSWORD_MIN_LENGTH = PASSWORD_MIN_LENGTH;
+export const RESET_PASSWORD_MAX_BYTES = PASSWORD_MAX_BYTES;
 
 export function validateResetPassword(
     body: unknown,
@@ -37,12 +43,12 @@ export function validateResetPassword(
         errors.token = "Token de recuperação inválido.";
     }
 
-    if (typeof newPassword !== "string" || !newPassword) {
-        errors.newPassword = "A nova senha é obrigatória.";
-    } else if (newPassword.length < RESET_PASSWORD_MIN_LENGTH) {
-        errors.newPassword = `A senha deve possuir pelo menos ${RESET_PASSWORD_MIN_LENGTH} caracteres.`;
-    } else if (Buffer.byteLength(newPassword, "utf8") > RESET_PASSWORD_MAX_BYTES) {
-        errors.newPassword = `A senha deve possuir no máximo ${RESET_PASSWORD_MAX_BYTES} caracteres.`;
+    const passwordError = validateNewPassword(newPassword, {
+        subject: "A senha",
+        requiredMessage: "A nova senha é obrigatória.",
+    });
+    if (passwordError) {
+        errors.newPassword = passwordError;
     }
 
     if (Object.keys(errors).length > 0) {

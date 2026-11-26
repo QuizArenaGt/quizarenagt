@@ -14,6 +14,7 @@ import InputPassword from '../../../../components/Inputs/InputPassword/InputPass
 import AuthBrandPanel from '../../../../components/layout/AuthBrandPanel/AuthBrandPanel';
 import Alert from '../../../../components/ui/Alert/Alert';
 import Button from '../../../../components/ui/Button/Button';
+import PasswordRequirements from '../PasswordRequirements/PasswordRequirements';
 
 const REDIRECT_DELAY_MS = 1800;
 
@@ -130,7 +131,7 @@ export default function ResetPasswordForm() {
                             id="newPassword"
                             name="newPassword"
                             label="Nova senha"
-                            textPlaceholder="Digite sua nova senha"
+                            textPlaceholder="Mínimo de 8 caracteres (letras e números)"
                             password={newPassword}
                             setPassword={(value) => {
                                 setNewPassword(value);
@@ -140,6 +141,8 @@ export default function ResetPasswordForm() {
                             disabled={isFormLocked}
                             error={fieldErrors.newPassword}
                         />
+
+                        <PasswordRequirements password={newPassword} />
 
                         <InputPassword
                             id="confirmPassword"

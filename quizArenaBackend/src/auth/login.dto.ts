@@ -1,4 +1,6 @@
 
+import { validateNormalizedEmail } from "./auth-validation.js";
+
 export type LoginDto = {
     email: string;
     password: string;
@@ -33,22 +35,17 @@ export function validateLogin(body: unknown): LoginValidationResult {
     const payload = body as Record<string, unknown>;
     const { email, password } = payload;
 
-    const normalizedEmail =
-        typeof email === "string" ? email.trim().toLowerCase() : "";
-
-    if (!normalizedEmail) {
-        errors.email = "O e-mail é obrigatório.";
-    } else if (
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
-    ) {
-        errors.email = "Informe um e-mail válido.";
+    const emailValidation = validateNormalizedEmail(email);
+    if (!emailValidation.success) {
+        errors.email = emailValidation.error;
     }
 
+    // Login não aplica regras de força de senha para não bloquear contas antigas.
     if (typeof password !== "string" || !password) {
         errors.password = "A senha é obrigatória.";
     }
 
-    if (Object.keys(errors).length > 0) {
+    if (Object.keys(errors).length > 0 || !emailValidation.success) {
         return {
             success: false,
             errors,
@@ -58,7 +55,7 @@ export function validateLogin(body: unknown): LoginValidationResult {
     return {
         success: true,
         data: {
-            email: normalizedEmail,
+            email: emailValidation.email,
             password: password as string,
         },
     };

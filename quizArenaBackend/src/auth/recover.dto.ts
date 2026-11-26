@@ -1,3 +1,5 @@
+import { validateNormalizedEmail } from "./auth-validation.js";
+
 export interface RecoverPasswordDTO {
     email: string;
 }
@@ -25,25 +27,13 @@ export function validateRecoverPassword(
     }
 
     const payload = body as Record<string, unknown>;
-    const normalizedEmail =
-        typeof payload.email === "string"
-            ? payload.email.trim().toLowerCase()
-            : "";
+    const emailValidation = validateNormalizedEmail(payload.email);
 
-    if (!normalizedEmail) {
+    if (!emailValidation.success) {
         return {
             success: false,
             errors: {
-                email: "O e-mail é obrigatório.",
-            },
-        };
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-        return {
-            success: false,
-            errors: {
-                email: "Informe um e-mail válido.",
+                email: emailValidation.error,
             },
         };
     }
@@ -51,7 +41,7 @@ export function validateRecoverPassword(
     return {
         success: true,
         data: {
-            email: normalizedEmail,
+            email: emailValidation.email,
         },
     };
 }

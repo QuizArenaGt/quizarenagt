@@ -12,6 +12,7 @@ import {
     InvalidCurrentPasswordError,
     SamePasswordError,
 } from "../users/user.errors.js";
+import { normalizeEmail } from "./auth-validation.js";
 import type { ChangePasswordDto } from "./change-password.dto.js";
 import type { LoginDto } from "./login.dto.js";
 
@@ -29,7 +30,8 @@ export class AuthService {
     ) {}
 
     async authenticate(data: LoginDto): Promise<User> {
-        const user = await this.userRepository.findByEmail(data.email);
+        const normalizedEmail = normalizeEmail(data.email);
+        const user = await this.userRepository.findByEmail(normalizedEmail);
 
         if (!user) {
             throw new InvalidCredentialsError();

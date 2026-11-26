@@ -4,6 +4,7 @@ import Alert from '../../../components/ui/Alert/Alert';
 import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import Modal from '../../../components/ui/Modal/Modal';
+import PasswordRequirements from '../../../features/auth/components/PasswordRequirements/PasswordRequirements';
 import type {
     AuthFieldErrors,
     ChangePasswordField,
@@ -154,13 +155,15 @@ export default function ProfileModal({
                                 id="profile-new-password"
                                 name="newPassword"
                                 label="Nova senha"
-                                textPlaceholder="Mín. 8 caracteres"
+                                textPlaceholder="Mín. 8 caracteres (letras e números)"
                                 password={passwordDraft.newPassword}
                                 setPassword={(value) => onPasswordFieldChange('newPassword', value)}
                                 autoComplete="new-password"
                                 disabled={isChangingPassword}
                                 error={passwordFieldErrors.newPassword}
                             />
+
+                            <PasswordRequirements password={passwordDraft.newPassword} />
 
                             <InputPassword
                                 id="profile-confirm-password"

@@ -4,6 +4,7 @@ import type { User } from "@prisma/client";
 
 import { UserRepository } from "./user.repository.js";
 import { EmailAlreadyExistsError } from "./user.errors.js";
+import { normalizeEmail } from "../auth/auth-validation.js";
 import type { RegisterUserDto } from "../auth/register.dto.js";
 
 type UserRepositoryContract = Pick<
@@ -17,11 +18,14 @@ export class UserService {
     ) {}
 
     async findByEmail(email: string): Promise<User | null> {
-        return this.userRepository.findByEmail(email);
+        return this.userRepository.findByEmail(normalizeEmail(email));
     }
 
     async register(data: RegisterUserDto): Promise<User> {
-        const existingUser = await this.userRepository.findByEmail(data.email);
+        const normalizedEmail = normalizeEmail(data.email);
+        const existingUser = await this.userRepository.findByEmail(
+            normalizedEmail,
+        );
 
         if (existingUser) {
             throw new EmailAlreadyExistsError();
@@ -32,7 +36,7 @@ export class UserService {
         try {
             return await this.userRepository.create({
                 name: data.name,
-                email: data.email,
+                email: normalizedEmail,
                 password: passwordHash,
             });
         } catch (error: unknown) {

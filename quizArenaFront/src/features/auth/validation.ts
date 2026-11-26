@@ -18,6 +18,8 @@ export const AUTH_NAME_MIN_LENGTH = 2;
 export const AUTH_NAME_MAX_LENGTH = 100;
 export const AUTH_PASSWORD_MIN_LENGTH = 8;
 export const AUTH_PASSWORD_MAX_BYTES = 72;
+export const AUTH_PASSWORD_LETTER_PATTERN = /\p{L}/u;
+export const AUTH_PASSWORD_NUMBER_PATTERN = /[0-9]/;
 
 export type LoginField = 'email' | 'password';
 export type RegisterField = 'name' | 'email' | 'password' | 'confirmPassword';
@@ -27,13 +29,70 @@ export type ChangePasswordField = 'currentPassword' | 'newPassword' | 'confirmPa
 
 export type AuthFieldErrors<TField extends string> = Partial<Record<TField, string>>;
 
+export interface PasswordRequirementCheck {
+    key: 'minLength' | 'hasLetter' | 'hasNumber';
+    label: string;
+    met: boolean;
+}
+
+const textEncoder = new TextEncoder();
+
+export function normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+}
+
+export function getPasswordRequirements(password: string): PasswordRequirementCheck[] {
+    return [
+        {
+            key: 'minLength',
+            label: `Mínimo de ${AUTH_PASSWORD_MIN_LENGTH} caracteres`,
+            met: password.length >= AUTH_PASSWORD_MIN_LENGTH,
+        },
+        {
+            key: 'hasLetter',
+            label: 'Pelo menos uma letra',
+            met: AUTH_PASSWORD_LETTER_PATTERN.test(password),
+        },
+        {
+            key: 'hasNumber',
+            label: 'Pelo menos um número',
+            met: AUTH_PASSWORD_NUMBER_PATTERN.test(password),
+        },
+    ];
+}
+
 function validateEmailValue(email: string): string | undefined {
-    const trimmed = email.trim();
-    if (!trimmed) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) {
         return 'Informe seu e-mail.';
     }
-    if (!AUTH_EMAIL_PATTERN.test(trimmed)) {
+    if (!AUTH_EMAIL_PATTERN.test(normalized)) {
         return 'Informe um e-mail válido (ex.: nome@dominio.com).';
+    }
+    return undefined;
+}
+
+function validateNewPasswordValue(
+    password: string,
+    options: {
+        subject: string;
+        requiredMessage: string;
+    },
+): string | undefined {
+    if (!password) {
+        return options.requiredMessage;
+    }
+    if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
+        return `${options.subject} deve possuir pelo menos ${AUTH_PASSWORD_MIN_LENGTH} caracteres.`;
+    }
+    if (textEncoder.encode(password).length > AUTH_PASSWORD_MAX_BYTES) {
+        return `${options.subject} deve possuir no máximo ${AUTH_PASSWORD_MAX_BYTES} caracteres.`;
+    }
+    if (!AUTH_PASSWORD_LETTER_PATTERN.test(password)) {
+        return `${options.subject} deve conter pelo menos uma letra.`;
+    }
+    if (!AUTH_PASSWORD_NUMBER_PATTERN.test(password)) {
+        return `${options.subject} deve conter pelo menos um número.`;
     }
     return undefined;
 }
@@ -49,6 +108,7 @@ export function validateLoginFields(input: {
         errors.email = emailError;
     }
 
+    // Login não aplica regras de força de senha para manter compatibilidade com contas antigas.
     if (!input.password) {
         errors.password = 'Informe sua senha.';
     }
@@ -78,10 +138,12 @@ export function validateRegisterFields(input: {
         errors.email = emailError;
     }
 
-    if (!input.password) {
-        errors.password = 'Informe uma senha.';
-    } else if (input.password.length < AUTH_PASSWORD_MIN_LENGTH) {
-        errors.password = `A senha deve possuir pelo menos ${AUTH_PASSWORD_MIN_LENGTH} caracteres.`;
+    const passwordError = validateNewPasswordValue(input.password, {
+        subject: 'A senha',
+        requiredMessage: 'Informe uma senha.',
+    });
+    if (passwordError) {
+        errors.password = passwordError;
     }
 
     if (!input.confirmPassword) {
@@ -104,20 +166,18 @@ export function validateRecoverPasswordFields(input: {
     return errors;
 }
 
-const textEncoder = new TextEncoder();
-
 export function validateResetPasswordFields(input: {
     newPassword: string;
     confirmPassword: string;
 }): AuthFieldErrors<ResetPasswordField> {
     const errors: AuthFieldErrors<ResetPasswordField> = {};
 
-    if (!input.newPassword) {
-        errors.newPassword = 'Informe uma nova senha.';
-    } else if (input.newPassword.length < AUTH_PASSWORD_MIN_LENGTH) {
-        errors.newPassword = `A senha deve possuir pelo menos ${AUTH_PASSWORD_MIN_LENGTH} caracteres.`;
-    } else if (textEncoder.encode(input.newPassword).length > AUTH_PASSWORD_MAX_BYTES) {
-        errors.newPassword = `A senha deve possuir no máximo ${AUTH_PASSWORD_MAX_BYTES} caracteres.`;
+    const newPasswordError = validateNewPasswordValue(input.newPassword, {
+        subject: 'A senha',
+        requiredMessage: 'Informe uma nova senha.',
+    });
+    if (newPasswordError) {
+        errors.newPassword = newPasswordError;
     }
 
     if (!input.confirmPassword) {
@@ -140,12 +200,12 @@ export function validateChangePasswordFields(input: {
         errors.currentPassword = 'Informe sua senha atual.';
     }
 
-    if (!input.newPassword) {
-        errors.newPassword = 'Informe uma nova senha.';
-    } else if (input.newPassword.length < AUTH_PASSWORD_MIN_LENGTH) {
-        errors.newPassword = `A nova senha deve possuir pelo menos ${AUTH_PASSWORD_MIN_LENGTH} caracteres.`;
-    } else if (textEncoder.encode(input.newPassword).length > AUTH_PASSWORD_MAX_BYTES) {
-        errors.newPassword = `A nova senha deve possuir no máximo ${AUTH_PASSWORD_MAX_BYTES} caracteres.`;
+    const newPasswordError = validateNewPasswordValue(input.newPassword, {
+        subject: 'A nova senha',
+        requiredMessage: 'Informe uma nova senha.',
+    });
+    if (newPasswordError) {
+        errors.newPassword = newPasswordError;
     } else if (input.currentPassword && input.newPassword === input.currentPassword) {
         errors.newPassword = 'A nova senha deve ser diferente da senha atual.';
     }

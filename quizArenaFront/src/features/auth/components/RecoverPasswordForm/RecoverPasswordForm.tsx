@@ -7,6 +7,7 @@ import { recoverPassword } from '../../services/authService';
 import type { RecoverPasswordRequest } from '../../types/auth';
 import {
     formatAuthApiError,
+    normalizeEmail,
     validateRecoverPasswordFields,
     type AuthFieldErrors,
     type RecoverPasswordField,
@@ -55,7 +56,7 @@ export default function RecoverPasswordForm({ onSuccess }: RecoverPasswordFormPr
 
         try {
             const request: RecoverPasswordRequest = {
-                email: email.trim(),
+                email: normalizeEmail(email),
             };
 
             const response = await recoverPassword(request);

@@ -7,7 +7,7 @@ describe("validateRegisterUser", () => {
         const result = validateRegisterUser({
             name: "  João Silva  ",
             email: "  JOAO@EMAIL.COM  ",
-            password: "12345678",
+            password: "Password1",
         });
 
         expect(result.success).toBe(true);
@@ -16,8 +16,43 @@ describe("validateRegisterUser", () => {
             expect(result.data).toEqual({
                 name: "João Silva",
                 email: "joao@email.com",
-                password: "12345678",
+                password: "Password1",
             });
+        }
+    });
+
+    it.each([
+        "gendesson@gmail.com",
+        " gendesson@gmail.com",
+        "gendesson@gmail.com ",
+        "  Gendesson@gmail.com  ",
+    ])("deve normalizar variações de espaços e maiúsculas no e-mail: %j", (rawEmail) => {
+        const result = validateRegisterUser({
+            name: "Gendesson",
+            email: rawEmail,
+            password: "abc12345",
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.email).toBe("gendesson@gmail.com");
+        }
+    });
+
+    it.each([
+        "gen desson@gmail.com",
+        "gendesson@gm ail.com",
+        "email-invalido",
+    ])("deve rejeitar e-mail inválido ou com espaços internos: %j", (invalidEmail) => {
+        const result = validateRegisterUser({
+            name: "Gendesson",
+            email: invalidEmail,
+            password: "abc12345",
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors.email).toBe("Informe um e-mail válido.");
         }
     });
 
@@ -94,12 +129,61 @@ describe("validateRegisterUser", () => {
         const result = validateRegisterUser({
             name: "João",
             email: "joao@email.com",
-            password: "1234567",
+            password: "abc1234",
         });
 
         expect(result.success).toBe(false);
         if (!result.success) {
-            expect(result.errors.password).toBeDefined();
+            expect(result.errors.password).toBe(
+                "A senha deve possuir pelo menos 8 caracteres.",
+            );
+        }
+    });
+
+    it("não deve aceitar senha sem letras", () => {
+        const result = validateRegisterUser({
+            name: "João",
+            email: "joao@email.com",
+            password: "12345678",
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors.password).toBe(
+                "A senha deve conter pelo menos uma letra.",
+            );
+        }
+    });
+
+    it("não deve aceitar senha sem números", () => {
+        const result = validateRegisterUser({
+            name: "João",
+            email: "joao@email.com",
+            password: "abcdefgh",
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors.password).toBe(
+                "A senha deve conter pelo menos um número.",
+            );
+        }
+    });
+
+    it.each([
+        "abc12345",
+        "abc123!@",
+        " senha 1 ",
+    ])("deve aceitar senha válida com letras e números sem exigir maiúscula/especial nem aplicar trim: %j", (validPassword) => {
+        const result = validateRegisterUser({
+            name: "João",
+            email: "joao@email.com",
+            password: validPassword,
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.password).toBe(validPassword);
         }
     });
 

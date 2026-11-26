@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import { changePassword } from '../features/auth/services/authService';
 import {
     formatAuthApiError,
+    normalizeEmail,
     validateChangePasswordFields,
     type AuthFieldErrors,
     type ChangePasswordField,
@@ -98,7 +99,7 @@ export function useProfileViewModel() {
 
         const cleaned: ProfileDraft = {
             name: draft.name.trim(),
-            email: draft.email.trim(),
+            email: normalizeEmail(draft.email),
             phone: draft.phone,
         };
         const validationErrors = validateProfile(cleaned);

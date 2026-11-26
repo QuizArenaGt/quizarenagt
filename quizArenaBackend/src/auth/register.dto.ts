@@ -1,4 +1,9 @@
 
+import {
+    validateNewPassword,
+    validateNormalizedEmail,
+} from "./auth-validation.js";
+
 export type RegisterUserDto = {
     name: string;
     email: string;
@@ -37,23 +42,19 @@ export function validateRegisterUser (body: unknown): RegisterValidationResult {
         errors.name = "O nome é obrigatório.";
     }
 
-    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
-
-    if (!normalizedEmail) {
-        errors.email = "O e-mail é obrigatório.";
-    } else if (
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
-    ) {
-        errors.email = "Informe um e-mail válido.";
+    const emailValidation = validateNormalizedEmail(email);
+    if (!emailValidation.success) {
+        errors.email = emailValidation.error;
     }
 
-    if (typeof password !== "string" || !password) {
-        errors.password = "A senha é obrigatória.";
-    } else if (password.length < 8) {
-        errors.password = "A senha deve possuir pelo menos 8 caracteres.";
+    const passwordError = validateNewPassword(password, {
+        subject: "A senha",
+    });
+    if (passwordError) {
+        errors.password = passwordError;
     }
 
-    if (Object.keys(errors).length > 0) {
+    if (Object.keys(errors).length > 0 || !emailValidation.success) {
         return {
             success: false,
             errors,
@@ -64,7 +65,7 @@ export function validateRegisterUser (body: unknown): RegisterValidationResult {
         success: true,
         data: {
             name: (name as string).trim(),
-            email: normalizedEmail,
+            email: emailValidation.email,
             password: password as string,
         },
     };

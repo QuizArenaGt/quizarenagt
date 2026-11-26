@@ -7,6 +7,7 @@ import type { RegisterRequest } from "../../types/auth";
 import {
     AUTH_NAME_MAX_LENGTH,
     formatAuthApiError,
+    normalizeEmail,
     validateRegisterFields,
     type AuthFieldErrors,
     type RegisterField,
@@ -17,6 +18,7 @@ import InputPassword from "../../../../components/Inputs/InputPassword/InputPass
 import AuthBrandPanel from "../../../../components/layout/AuthBrandPanel/AuthBrandPanel";
 import Alert from "../../../../components/ui/Alert/Alert";
 import Button from "../../../../components/ui/Button/Button";
+import PasswordRequirements from "../PasswordRequirements/PasswordRequirements";
 
 interface RegisterFormProps {
     onSuccess: () => void;
@@ -76,7 +78,7 @@ export default function RegisterForm({ onSuccess }: RegisterFormProps) {
         try {
             const request: RegisterRequest = {
                 name: name.trim(),
-                email: email.trim(),
+                email: normalizeEmail(email),
                 password,
             };
 
@@ -174,7 +176,7 @@ export default function RegisterForm({ onSuccess }: RegisterFormProps) {
                     <InputPassword
                         id="password"
                         label="Senha"
-                        textPlaceholder="Mínimo de 8 caracteres"
+                        textPlaceholder="Mínimo de 8 caracteres (letras e números)"
                         password={password}
                         setPassword={(value) => {
                             setPassword(value);
@@ -184,6 +186,8 @@ export default function RegisterForm({ onSuccess }: RegisterFormProps) {
                         disabled={isFormLocked}
                         error={fieldErrors.password}
                     />
+
+                    <PasswordRequirements password={password} />
 
                     <InputPassword
                         id="confirmPassword"

@@ -9,6 +9,7 @@ import {
     disconnectUserSocketsSafely,
 } from "../realtime/room-events.js";
 import { PasswordResetTokenRepository } from "./passwordResetToken.repository.js";
+import { normalizeEmail } from "./auth-validation.js";
 
 export class RecoverPasswordService {
     constructor(
@@ -22,7 +23,7 @@ export class RecoverPasswordService {
     ) {}
 
     async requestPasswordReset(email: string): Promise<void> {
-        const user = await this.userService.findByEmail(email);
+        const user = await this.userService.findByEmail(normalizeEmail(email));
 
         // Não revela se o usuário existe.
         if (!user) {

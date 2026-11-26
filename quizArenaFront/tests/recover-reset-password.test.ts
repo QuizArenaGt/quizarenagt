@@ -7,8 +7,12 @@ import {
     AUTH_PASSWORD_MAX_BYTES,
     AUTH_PASSWORD_MIN_LENGTH,
     formatAuthApiError,
+    getPasswordRequirements,
+    normalizeEmail,
     validateChangePasswordFields,
+    validateLoginFields,
     validateRecoverPasswordFields,
+    validateRegisterFields,
     validateResetPasswordFields,
 } from '../src/features/auth/validation.ts';
 import {
@@ -308,5 +312,91 @@ describe('Recuperação e redefinição de senha (Frontend)', () => {
         assert.match(roomsVmSource, /AUTH_TOKEN_UPDATED_EVENT/);
         assert.match(roomsVmSource, /isSocketAuthRejectionError/);
         assert.match(roomsVmSource, /socket\.removeAllListeners\(\);\s*\r?\n\s*socket\.disconnect\(\);/);
+    });
+
+    it('7. Normalização de e-mail e regras de força de senha no frontend cobrem espaços, letras, números e compatibilidade do login legado', () => {
+        for (const rawEmail of [
+            'gendesson@gmail.com',
+            ' gendesson@gmail.com',
+            'gendesson@gmail.com ',
+            '  Gendesson@gmail.com  ',
+        ]) {
+            assert.equal(normalizeEmail(rawEmail), 'gendesson@gmail.com');
+            assert.deepEqual(validateRecoverPasswordFields({ email: rawEmail }), {});
+            assert.deepEqual(
+                validateLoginFields({ email: rawEmail, password: '123' }),
+                {},
+            );
+            assert.deepEqual(
+                validateRegisterFields({
+                    name: 'Gendesson',
+                    email: rawEmail,
+                    password: 'abc12345',
+                    confirmPassword: 'abc12345',
+                }),
+                {},
+            );
+        }
+
+        for (const invalidEmail of ['gen desson@gmail.com', 'gendesson@gm ail.com', 'invalido']) {
+            assert.ok(validateRecoverPasswordFields({ email: invalidEmail }).email);
+            assert.ok(validateLoginFields({ email: invalidEmail, password: '123' }).email);
+        }
+
+        // Senha sem letras e sem números é bloqueada na criação/redefinição/alteração, mas aceita no login legado
+        assert.equal(
+            validateRegisterFields({
+                name: 'Gendesson',
+                email: 'gendesson@gmail.com',
+                password: '12345678',
+                confirmPassword: '12345678',
+            }).password,
+            'A senha deve conter pelo menos uma letra.',
+        );
+        assert.equal(
+            validateResetPasswordFields({
+                newPassword: 'abcdefgh',
+                confirmPassword: 'abcdefgh',
+            }).newPassword,
+            'A senha deve conter pelo menos um número.',
+        );
+        assert.equal(
+            validateChangePasswordFields({
+                currentPassword: '123',
+                newPassword: '12345678',
+                confirmPassword: '12345678',
+            }).newPassword,
+            'A nova senha deve conter pelo menos uma letra.',
+        );
+
+        // Senhas válidas com caractere especial e com espaços preservados (sem trim)
+        assert.deepEqual(
+            validateRegisterFields({
+                name: 'Gendesson',
+                email: 'gendesson@gmail.com',
+                password: 'abc123!@',
+                confirmPassword: 'abc123!@',
+            }),
+            {},
+        );
+        assert.deepEqual(
+            validateRegisterFields({
+                name: 'Gendesson',
+                email: 'gendesson@gmail.com',
+                password: ' senha 1 ',
+                confirmPassword: ' senha 1 ',
+            }),
+            {},
+        );
+
+        const reqs = getPasswordRequirements('abc12345');
+        assert.deepEqual(
+            reqs.map((r) => [r.key, r.met]),
+            [
+                ['minLength', true],
+                ['hasLetter', true],
+                ['hasNumber', true],
+            ],
+        );
     });
 });
