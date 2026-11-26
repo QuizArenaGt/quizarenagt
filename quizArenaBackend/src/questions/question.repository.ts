@@ -1,4 +1,5 @@
 
+import { randomUUID } from "node:crypto";
 import type {
     Prisma,
     Question,
@@ -8,6 +9,11 @@ import type {
 
 import { prisma } from "../database/prisma.js";
 import { selectCurrentGame } from "../rooms/room.repository.js";
+
+const IMPORT_QUESTIONS_TRANSACTION_OPTIONS = {
+    maxWait: 5000,
+    timeout: 15000,
+} as const;
 
 type CreateQuestionOptionData = {
     text: string;
@@ -222,8 +228,14 @@ export class QuestionRepository {
 
         const room = await tx.room.findUnique({
             where: { id: roomId },
-            include: {
+            select: {
+                id: true,
+                hostId: true,
+                status: true,
                 games: {
+                    select: {
+                        status: true,
+                    },
                     orderBy: [
                         { createdAt: "desc" },
                         { id: "desc" },
@@ -265,26 +277,28 @@ export class QuestionRepository {
         tx: Prisma.TransactionClient,
         roomId: string,
     ): Promise<number> {
-        const latestQuestion = await tx.question.findFirst({
-            where: { roomId },
-            orderBy: [
-                { createdAt: "desc" },
-                { id: "desc" },
-            ],
-            select: { createdAt: true },
-        });
-
-        const rows = await tx.$queryRaw<{ now: Date }[]>`
-            SELECT NOW() AS now
+        const rows = await tx.$queryRaw<
+            { now: Date; latestCreatedAt: Date | null }[]
+        >`
+            SELECT
+                NOW() AS now,
+                (
+                    SELECT "createdAt"
+                    FROM questions
+                    WHERE "roomId" = ${roomId}
+                    ORDER BY "createdAt" DESC, id DESC
+                    LIMIT 1
+                ) AS "latestCreatedAt"
         `;
-        const dbNow =
-            Array.isArray(rows) && rows[0]?.now instanceof Date
-                ? rows[0].now
-                : new Date();
+
+        const row = Array.isArray(rows) ? rows[0] : undefined;
+        const dbNow = row?.now instanceof Date ? row.now : new Date();
+        const latestCreatedAt =
+            row?.latestCreatedAt instanceof Date ? row.latestCreatedAt : null;
 
         return Math.max(
             dbNow.getTime(),
-            (latestQuestion?.createdAt.getTime() ?? 0) + 1,
+            (latestCreatedAt?.getTime() ?? 0) + 1,
         );
     }
 
@@ -486,58 +500,111 @@ export class QuestionRepository {
         hostId: string,
         questions: ImportQuestionItemData[],
     ): Promise<ImportQuestionsToRoomResult> {
-        return prisma.$transaction(async (tx) => {
-            const roomCheck = await this.lockAndValidateEditableRoomTx(
-                tx,
-                roomId,
-                hostId,
-            );
+        return prisma.$transaction(
+            async (tx) => {
+                const roomCheck = await this.lockAndValidateEditableRoomTx(
+                    tx,
+                    roomId,
+                    hostId,
+                );
 
-            if (!roomCheck.editable) {
-                return {
-                    success: false,
-                    reason: roomCheck.reason,
-                };
-            }
+                if (!roomCheck.editable) {
+                    return {
+                        success: false,
+                        reason: roomCheck.reason,
+                    };
+                }
 
-            const baseTimestampMs =
-                await this.resolveNextQuestionBaseTimestampMsTx(tx, roomId);
+                if (questions.length === 0) {
+                    return {
+                        success: true,
+                        questions: [],
+                    };
+                }
 
-            const createdQuestions: QuestionWithOptions[] = [];
+                const baseTimestampMs =
+                    await this.resolveNextQuestionBaseTimestampMsTx(tx, roomId);
 
-            for (const [index, question] of questions.entries()) {
-                const createdAt = new Date(baseTimestampMs + index);
+                const questionRows: (Prisma.QuestionCreateManyInput & {
+                    id: string;
+                })[] = [];
+                const optionRows: Prisma.QuestionOptionCreateManyInput[] = [];
 
-                const created = await tx.question.create({
-                    data: {
+                for (const [index, question] of questions.entries()) {
+                    const questionId = randomUUID();
+
+                    questionRows.push({
+                        id: questionId,
                         statement: question.statement,
                         type: question.type,
                         roomId,
-                        createdAt,
-                        options: {
-                            create: question.options.map(
-                                (option, position) => ({
-                                    ...option,
-                                    position,
-                                }),
-                            ),
-                        },
-                    },
-                    include: {
-                        options: {
-                            orderBy: { position: "asc" },
-                        },
-                    },
-                });
+                        createdAt: new Date(baseTimestampMs + index),
+                    });
 
-                createdQuestions.push(created);
-            }
+                    for (const [position, option] of question.options.entries()) {
+                        optionRows.push({
+                            questionId,
+                            text: option.text,
+                            isCorrect: option.isCorrect,
+                            position,
+                        });
+                    }
+                }
 
-            return {
-                success: true,
-                questions: createdQuestions,
-            };
-        });
+                const createdQuestions =
+                    await tx.question.createManyAndReturn({
+                        data: questionRows,
+                    });
+
+                const createdOptions =
+                    optionRows.length > 0
+                        ? await tx.questionOption.createManyAndReturn({
+                              data: optionRows,
+                          })
+                        : [];
+
+                const optionsByQuestionId = new Map<string, QuestionOption[]>();
+
+                for (const option of createdOptions) {
+                    const existing = optionsByQuestionId.get(option.questionId);
+                    if (existing) {
+                        existing.push(option);
+                    } else {
+                        optionsByQuestionId.set(option.questionId, [option]);
+                    }
+                }
+
+                const createdQuestionsById = new Map(
+                    createdQuestions.map((question) => [question.id, question]),
+                );
+
+                const assembledQuestions: QuestionWithOptions[] =
+                    questionRows.map((row) => {
+                        const createdQuestion = createdQuestionsById.get(row.id);
+
+                        if (!createdQuestion) {
+                            throw new Error(
+                                `Pergunta inserida não encontrada no retorno em lote: ${row.id}`,
+                            );
+                        }
+
+                        const options = (
+                            optionsByQuestionId.get(createdQuestion.id) ?? []
+                        ).sort((a, b) => a.position - b.position);
+
+                        return {
+                            ...createdQuestion,
+                            options,
+                        };
+                    });
+
+                return {
+                    success: true,
+                    questions: assembledQuestions,
+                };
+            },
+            IMPORT_QUESTIONS_TRANSACTION_OPTIONS,
+        );
     }
 
 }
