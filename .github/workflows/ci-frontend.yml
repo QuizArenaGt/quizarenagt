@@ -1,63 +1,56 @@
 name: CI Frontend
-# lembrete: este workflow so dispara se a pasta do frontend se chamar exatamente quizArenaFront
 
 on:
   push:
     branches:
+      - development
       - main
-      - front
-    paths:
-      - 'quizArenaFront/**'
   pull_request:
     branches:
+      - development
       - main
-      - front
-    paths:
-      - 'quizArenaFront/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-frontend-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-analyze:
-    name: Build, Test and SonarQube Analysis
+  frontend-ci:
+    name: Frontend CI
     runs-on: ubuntu-latest
-    
-    # roda tudo dentro da pasta quizArenaFront
+    timeout-minutes: 10
+
     defaults:
       run:
         working-directory: quizArenaFront
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          # obrigatorio pro sonar ler o historico
-          fetch-depth: 0
-      
-      - name: Setup Node.js
+
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: quizArenaFront/package-lock.json
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm ci
 
-      - name: Run Linter
-        run: npm run lint || echo "sem lint"
-        continue-on-error: true
+      - name: Run typecheck
+        run: npm run typecheck
 
-      - name: Build Project
-        run: npm run build || echo "sem build"
+      - name: Run lint
+        run: npm run lint
 
-      # reservado para testes de cobertura no futuro
-      # - name: Run tests
-      #   run: npm run test:coverage
+      - name: Run tests
+        run: npm test
 
-      - name: SonarQube Cloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+      - name: Build project
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          projectBaseDir: quizArenaFront
-          args: >
-            -Dsonar.projectKey=quizarenagt_front
-            -Dsonar.organization=quizarenagt
+          VITE_API_URL: http://localhost:3000
+        run: npm run build

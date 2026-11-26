@@ -1,63 +1,89 @@
 name: CI Backend
-# lembrete: este workflow so dispara se a pasta do backend se chamar exatamente quizArenaBackend
 
 on:
   push:
     branches:
+      - development
       - main
-      - back
-    paths:
-      - 'quizArenaBackend/**'
   pull_request:
     branches:
+      - development
       - main
-      - back
-    paths:
-      - 'quizArenaBackend/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-backend-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-analyze:
-    name: Build, Test and SonarQube Analysis
+  backend-ci:
+    name: Backend CI
     runs-on: ubuntu-latest
-    
-    # roda tudo dentro da pasta quizArenaBackend
+    timeout-minutes: 15
+
     defaults:
       run:
         working-directory: quizArenaBackend
-    
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quizarena_test
+          POSTGRES_PASSWORD: test_only_password
+          POSTGRES_DB: quizarena_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U quizarena_test -d quizarena_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgresql://quizarena_test:test_only_password@localhost:5433/quizarena_test?schema=public
+      DIRECT_URL: postgresql://quizarena_test:test_only_password@localhost:5433/quizarena_test?schema=public
+      JWT_SECRET: ci-test-only-jwt-secret-not-for-production
+      FRONTEND_URL: http://localhost:5173
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          # obrigatorio pro sonar ler o historico
-          fetch-depth: 0
-      
-      - name: Setup Node.js
+
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: quizArenaBackend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm ci
 
-      - name: Run Linter
-        run: npm run lint || echo "sem lint"
-        continue-on-error: true
+      - name: Create ephemeral .env.test for CI
+        run: |
+          printf '%s\n' \
+            "DATABASE_URL=$DATABASE_URL" \
+            "DIRECT_URL=$DIRECT_URL" \
+            "JWT_SECRET=$JWT_SECRET" \
+            "FRONTEND_URL=$FRONTEND_URL" > .env.test
 
-      - name: Build Project
-        run: npm run build || echo "sem build"
+      - name: Generate Prisma Client
+        run: ./node_modules/.bin/prisma generate
 
-      # reservado para testes de cobertura no futuro
-      # - name: Run tests
-      #   run: npm run test:coverage
+      - name: Run typecheck
+        run: npm run typecheck
 
-      - name: SonarQube Cloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          projectBaseDir: quizArenaBackend
-          args: >
-            -Dsonar.projectKey=quizarenagt_back
-            -Dsonar.organization=quizarenagt
+      - name: Build project
+        run: npm run build
+
+      - name: Apply test database migrations
+        run: npm run db:test:migrate
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run integration tests
+        run: npm run test:integration

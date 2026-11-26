@@ -20,6 +20,10 @@ describe("RoundAnswerController", () => {
         submitAnswer: ReturnType<typeof vi.fn>;
     };
 
+    let roundService: {
+        tryCloseRoundIfReady: ReturnType<typeof vi.fn>;
+    };
+
     let controller: RoundAnswerController;
 
     type AuthenticatedRequest = Request & {
@@ -54,8 +58,13 @@ describe("RoundAnswerController", () => {
             submitAnswer: vi.fn(),
         };
 
+        roundService = {
+            tryCloseRoundIfReady: vi.fn().mockResolvedValue(null),
+        };
+
         controller = new RoundAnswerController(
             roundAnswerService as unknown as RoundAnswerService,
+            roundService,
         );
 
         req = {
@@ -131,6 +140,9 @@ describe("RoundAnswerController", () => {
                 "33333333-3333-4333-8333-333333333333",
                 roomPlayer.id,
                 "44444444-4444-4444-8444-444444444444",
+            );
+            expect(roundService.tryCloseRoundIfReady).toHaveBeenCalledWith(
+                "33333333-3333-4333-8333-333333333333",
             );
 
             expect(res.status).toHaveBeenCalledWith(201);
